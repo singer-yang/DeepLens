@@ -13,13 +13,14 @@ Welcome to use DeepLens in your research to (1) **build your own pipeline** or (
 
 1. **Outstanding optimization capabilities** (automated lens design from scratch with gradient-based optimization!)
 2. **End-to-End optical design** (design your computational lens with 5 lines of code!)
-3. **Implicit representation for a lens** (train a network to fast calculate the PSFs!)
-4. **Memory-efficient differentiable ray-tracing** (million-level ray-tracing on a desk-machine, easy to scale up to multi-GPUs!)
-5. **Other features** can be obtained via request or collaboration:
-   1. Hybrid refractive-diffractive lens simulation and optimization.
-   2. Non-sequential ray tracing for complex systems.
-   3. Billion-level ray tracing and multi-machine parallelization.
+3. **Memory-efficient differentiable ray-tracing** (million-level ray-tracing on a desk-machine!)
+4. **Implicit representation for camera lenses** (train a network to fast calculate the PSFs!)
+5. **More features** can be obtained via request or collaboration:
+   1. Hybrid ray-tracing-wave-propagation simulation and optimization.
+   2. Non-sequential ray-tracing for complex systems.
+   3. Billion-level ray-tracing and multi-machine parallelization.
    4. Illumination and display simulation and optimization.
+   5. Non-smooth imaging process optimization.
 
 ### Applications
 
@@ -116,4 +117,4 @@ For PSF implicit representation:
 
 #### License
 
-<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a>.
+`<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" />``</a><br />`This work is licensed under a `<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">`Creative Commons Attribution-NonCommercial 4.0 International License`</a>`.
