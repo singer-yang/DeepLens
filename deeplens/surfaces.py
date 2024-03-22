@@ -883,10 +883,10 @@ class Plane(Surface):
         n[...,2] = -1
         return n
 
-    def g(x, y):
+    def g(self, x, y):
         return torch.zeros_like(x)
     
-    def dgd(x, y):
+    def dgd(self, x, y):
         return torch.zeros_like(x), torch.zeros_like(x)
     
     def surface(self, x, y):
