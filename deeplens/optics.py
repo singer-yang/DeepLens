@@ -1787,8 +1787,12 @@ class Lensgroup(DeepObj):
                     sag      = s.surface_with_offset(r, 0.0)
 
                     if zmx_format:
-                        z = torch.stack((sag_prev, sag_prev, sag))
-                        x = torch.Tensor(np.array([[r_prev], [r], [r]])).to(self.device)
+                        if r > r_prev:
+                            z = torch.stack((sag_prev, sag_prev, sag))
+                            x = torch.Tensor(np.array([[r_prev], [r], [r]])).to(self.device)
+                        else:
+                            z = torch.stack((sag_prev, sag, sag))
+                            x = torch.Tensor(np.array([[r_prev], [r_prev], [r]])).to(self.device)
                     else:
                         z = torch.stack((sag_prev, sag))
                         x = torch.Tensor(np.array([[r_prev], [r]])).to(self.device)
@@ -2299,6 +2303,7 @@ class Lensgroup(DeepObj):
         # Preparation
         num_grid = 21
         spp = 512
+        w_reg = 0.02
         sample_rays_per_iter = test_per_iter if not centroid else 5 * test_per_iter
         optimizer = self.get_optimizer(lrs, decay)
         scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=iterations//10, num_training_steps=iterations)
@@ -2372,11 +2377,9 @@ class Lensgroup(DeepObj):
 
             # => Regularization
             loss_reg = self.loss_reg()
-            w_reg = 0.02
+            L_total = loss_rms + w_reg * loss_reg
 
-            L_total = loss_rms + w_reg * loss_reg #+ w_mtf * L_mtf
-
-            # => Back-propagation
+            # => Gradient-based optimization
             optimizer.zero_grad()
             L_total.backward()
             optimizer.step()
@@ -2445,7 +2448,8 @@ class Lensgroup(DeepObj):
                     s = Aperture(r=surf_dict['r'], d=d)
 
                 elif surf_dict['type'] == 'Spheric':
-                    s = Spheric(c=1/surf_dict['roc'], r=surf_dict['r'], d=d, mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                    c = 1/surf_dict['roc'] if surf_dict['roc'] != 0 else 0
+                    s = Spheric(c=c, r=surf_dict['r'], d=d, mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
                     
                 else:
                     raise Exception('Surface type not implemented.')
