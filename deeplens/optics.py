@@ -2075,42 +2075,45 @@ class Lensgroup(DeepObj):
 
     def analysis_rms(self, depth=DEPTH, ref=True):
         """ Compute RMS-based error. Contain both RMS errors and RMS radius.
-
-            Reference: green ray center. In ZEMAX, chief ray is used as reference, so our result is slightly different from ZEMAX.
         """
-        H = 31
+        grid = 10
+        x = torch.linspace(0, 1, grid)
+        y = torch.linspace(0, 1, grid)
+        z = torch.full_like(x, depth)
+        points = torch.stack((x, y, z), dim=-1)
         scale = self.calc_scale_ray(depth)
 
-        # ==> Use green light for reference
-        if ref:
-            ray = self.sample_point_source(M=H, spp=GEO_SPP, depth=depth, R=self.sensor_size[0]/2*scale, pupil=True, wvln=DEFAULT_WAVE)
-            ray, _, _ = self.trace(ray)
-            p_green = ray.project_to(self.d_sensor)
-            p_center_ref = (p_green * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(0.0001).unsqueeze(-1)
-    
-        # ==> Calculate RMS errors
+        # Ray position in the object space by perspective projection, because points are normalized
+        point_obj_x = points[..., 0] * scale * self.sensor_size[1] / 2   # x coordinate
+        point_obj_y = points[..., 1] * scale * self.sensor_size[0] / 2   # y coordinate
+        point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1) 
+        
+        # Point center determined by green light
+        ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=DEFAULT_WAVE)
+        ray = self.trace2sensor(ray)
+        pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(0.0001).unsqueeze(-1)
+
+        # Calculate RMS spot size 
         rms = []
-        rms_on_axis = []
-        rms_off_axis = []
         for wvln in WAVE_RGB:
-            ray = self.sample_point_source(M=H, spp=GEO_SPP, depth=depth, R=self.sensor_size[0]/2*scale, pupil=True, wvln=wvln)
-            ray, _, _ = self.trace(ray)
-            o2 = ray.project_to(self.d_sensor)
-            o2_center = (o2*ray.ra.unsqueeze(-1)).sum(0)/ray.ra.sum(0).add(0.0001).unsqueeze(-1)
+            # Trace rays to sensor plane
+            ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=wvln)
+            ray = self.trace2sensor(ray)
+
+            # Calculate RMS error for different FoVs
+            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
+            rms0 = torch.sqrt((o2_norm**2 * ray.ra.unsqueeze(-1)).sum((0, 2)) / ray.ra.sum(0))
+            rms.append(rms0)
             
-            if ref:
-                o2_norm = (o2 - p_center_ref) * ray.ra.unsqueeze(-1)
-            else:
-                o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)   # normalized to center (0, 0)
+        rms = torch.stack(rms, dim=0)
+        rms = torch.mean(rms, dim=0)
 
-            rms.append(torch.sqrt(torch.sum(o2_norm**2 * ray.ra.unsqueeze(-1)) / torch.sum(ray.ra)))
-            rms_on_axis.append(torch.sqrt(torch.sum(o2_norm[:, H//2+1, H//2+1, :]**2 * ray.ra[:, H//2+1, H//2+1].unsqueeze(-1)) / torch.sum(ray.ra[:, H//2, H//2])))
-            rms_off_axis.append(torch.sqrt(torch.sum(o2_norm[:, 0, 0, :]**2 * ray.ra[:, 0, 0].unsqueeze(-1)) / torch.sum(ray.ra[:, 0, 0])))
+        # Calculate RMS error for on-axis and off-axis
+        rms_avg = rms.mean()
+        rms_radius_on_axis = rms[0]
+        rms_radius_off_axis = rms[-1]
 
-        rms_radius = sum(rms) / len(rms)
-        rms_radius_on_axis = sum(rms_on_axis) / len(rms_on_axis)
-        rms_radius_off_axis = sum(rms_off_axis) / len(rms_off_axis)
-        return rms_radius, rms_radius_on_axis, rms_radius_off_axis
+        return rms_avg, rms_radius_on_axis, rms_radius_off_axis
     
 
     def loss_rms(self, depth=DEPTH, show=False):
