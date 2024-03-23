@@ -904,10 +904,10 @@ class Spheric(Surface):
         self.to(device)
 
     def g(self, x, y):
-        """ Compute surfaces sag z = r**2 * c / (1 - sqrt(1 - r**2 * c**2))
+        """ Compute surfaces sag z = (1 - sqrt(1 - r**2 * c**2)) / c
         """
         r2 = x**2 + y**2
-        sag = self.c * r2 / (1 + torch.sqrt(1 - r2 * self.c**2))
+        sag = (1 - torch.sqrt(1 - r2 * self.c**2)) / self.c
         return sag
 
     def dgd(self, x, y):
@@ -915,7 +915,7 @@ class Spheric(Surface):
         """
         r2 = x**2 + y**2
         sf = torch.sqrt(1 - r2 * self.c**2)
-        dgdr2 = (1 + sf + r2 * self.c**2 / 2 / sf) * self.c / (1 + sf)**2
+        dgdr2 =  self.c / (2*sf)
         return dgdr2*2*x, dgdr2*2*y
 
     def _valid(self, x, y):
