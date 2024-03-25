@@ -2,7 +2,7 @@
 
 DeepLens is a differentiable ray tracer for End-to-End lens design and differentiable rendering. It is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then optimized and maintained by [Xinge Yang](https://singer-yang.github.io/).
 
-Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** For assistance, please contact Xinge Yang (xinge.yang@kaust.edu.sa)
+Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** We can provide free code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Lens manufacturing service is also avaliable!
 
 ### What is DeepLens
 
@@ -39,6 +39,15 @@ No optical prior is needed, End-to-End design with purely image reconstruction l
 <div style="text-align:center;">
     <img src="imgs/end2end.gif" alt="End2End" style="height:400px;"/>
 </div>
+
+##### Implicit representation of a specific lens
+
+A digit-twin network for fast (aberration + defocus) image simulation.
+
+<div style="text-align:center;">
+    <img src="imgs/implicit_net.png" alt="Implicit" style="width:800px;"/>
+</div>
+
 
 ### How to use
 
@@ -90,9 +99,13 @@ deeplens/
 
 ### Cite:
 
-Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** If you find DeepLens helpful, please cite our paper.
+Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** If you find DeepLens helpful, please cite our papers.
 
 For lens design and End-to-End lens design:
+
+<div style="text-align:center;">
+    <img src="imgs/paper_deeplens.png" alt="End2End" style="width:800px;"/>
+</div>
 
 ```
 @article{yang2023curriculum,
@@ -104,6 +117,10 @@ For lens design and End-to-End lens design:
 ```
 
 For PSF implicit representation:
+
+<div style="text-align:center;">
+    <img src="imgs/paper_dff.png" alt="End2End" style="width:800px;"/>
+</div>
 
 ```
 @article{yang2023aberration,
@@ -117,4 +134,4 @@ For PSF implicit representation:
 
 #### License
 
-`<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" />``</a><br />`This work is licensed under a `<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">`Creative Commons Attribution-NonCommercial 4.0 International License`</a>`.
+`<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" />``</a><br />`This work is licensed under a `<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">`Creative Commons Attribution-NonCommercial 4.0 International License `</a>`.
