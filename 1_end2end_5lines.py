@@ -33,12 +33,6 @@ def config():
     with open('configs/end2end_5lines.yml') as f:
         args = yaml.load(f, Loader=yaml.FullLoader)
     
-    # ==> Device
-    num_gpus = torch.cuda.device_count()
-    args['num_gpus'] = num_gpus
-    device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
-    args['device'] = device
-
     # ==> Result folder
     characters = string.ascii_letters + string.digits
     random_string = ''.join(random.choice(characters) for i in range(4))
@@ -46,18 +40,27 @@ def config():
     args['result_dir'] = result_dir
     os.makedirs(result_dir, exist_ok=True)
     print(f'Result folder: {result_dir}')
-    
-    # ==> Logger
-    set_logger(result_dir)
-    logging.info(args)
 
     # ==> Random seed
     set_seed(args['train']['seed'])
     
+    # ==> Logger
+    set_logger(result_dir)
+    # Log to wandb 
     if not args['DEBUG']:
-        # wandb init
         pass
-        
+
+    # ==> Device
+    num_gpus = torch.cuda.device_count()
+    args['num_gpus'] = num_gpus
+    device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    logging.info(f'Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)')
+    args['device'] = device
+
+    # ==> Save config
+    with open(f'{result_dir}/config.yml', 'w') as f:
+        yaml.dump(args, f)
+
     return args
 
 

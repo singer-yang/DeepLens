@@ -124,6 +124,9 @@ class Lensgroup(DeepObj):
         avg_pupilz, avg_pupilx = self.entrance_pupil()
         self.fnum = self.foclen / avg_pupilx / 2
 
+        if self.r_last < 8.0:
+            self.is_cellphone = True
+
 
     def find_aperture(self):
         """ Find aperture by surfaces previous and next materials.
@@ -820,7 +823,8 @@ class Lensgroup(DeepObj):
         irr_img += img[...,idx_i, idx_j+1] * w_i * (1-w_j)
         irr_img += img[...,idx_i+1, idx_j+1] * (1-w_i) * (1-w_j)
 
-        I = (torch.sum(irr_img * ray.ra, -3) + 1e-9) / (torch.sum(ray.ra, -3) + 1e-6)
+        I = (torch.sum(irr_img * ray.ra, -3) + 1e-9) / (torch.sum(ray.ra, -3) + 1e-6)   # w/ vignetting correction 
+        # I = (torch.sum(irr_img * ray.ra, -3) + 1e-9) / ray.ra.shape[-3]   # w/o vignetting correction
 
         # ====> Add sensor noise
         if noise > 0:
@@ -1469,7 +1473,7 @@ class Lensgroup(DeepObj):
         
         self.foclen = self.calc_efl()
         aper_r = self.foclen / fnum / 2
-        self.surfaces[self.aper_idx].r = aper_r
+        self.surfaces[self.aper_idx].r = float(aper_r)
 
 
     # ---------------------------
@@ -2216,11 +2220,10 @@ class Lensgroup(DeepObj):
     def loss_reg(self):
         """ An empirical regularization loss for lens design.
         """
-        # For spherical lens design
-        loss_reg = 0.1 * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.5, thickness_bound=0.5)
-        
-        # For cellphone lens design, use 0.01 * loss_reg
-        # loss_reg = 0.1 * self.loss_infocus() + self.loss_ray_angle() + (self.loss_self_intersec() + self.loss_last_surf()) #+ self.loss_surface()
+        if self.is_cellphone:
+            loss_reg = 0.1 * self.loss_infocus() + self.loss_ray_angle() + (self.loss_self_intersec() + self.loss_last_surf())
+        else:
+            loss_reg = 0.1 * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.5, thickness_bound=0.5)
         
         return loss_reg
     

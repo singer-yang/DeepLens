@@ -23,6 +23,7 @@ setup(
         'transformers',
         'lpips',
         'einops',
+        'timm',
     ],
     license='Creative Commons Attribution-NonCommercial 4.0 International License',
     classifiers=[

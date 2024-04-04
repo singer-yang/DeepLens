@@ -275,13 +275,22 @@ class Surface(DeepObj):
         o2 = torch.stack((x2,y2,z2), 1).to(self.device)
         return o2
     
+    def surface(self, x, y):
+        """ Calculate z coordinate of the surface at (x, y) with offset.
+            
+            This function is used in lens setup plotting.
+        """
+        x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
+        y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
+        return self.sag(x, y)
+    
     def surface_with_offset(self, x, y):
         """ Calculate z coordinate of the surface at (x, y) with offset.
             
             This function is used in lens setup plotting.
         """
-        x = torch.tensor(x).to(self.device) if type(x) is float else x
-        y = torch.tensor(y).to(self.device) if type(y) is float else y
+        x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
+        y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
         return self.sag(x, y) + self.d
     
     def max_height(self):
