@@ -129,12 +129,15 @@ class Lensgroup(DeepObj):
 
 
     def find_aperture(self):
-        """ Find aperture by surfaces previous and next materials.
+        """ Find aperture. If the lens has no aperture, use the surface with the smallest radius.
         """
         self.aper_idx = None
-        for i in range(len(self.surfaces)-1):
+        for i in range(len(self.surfaces)):
             if self.surfaces[i].mat1.A < 1.0003 and self.surfaces[i].mat2.A < 1.0003:
                 self.aper_idx = i
+
+        if self.aper_idx is None:
+            self.aper_idx = np.argmin([s.r for s in self.surfaces])
 
     def find_diff_surf(self):
         """ Get surface indices without aperture.
@@ -604,6 +607,7 @@ class Lensgroup(DeepObj):
                     if v.any():
                         os.append(pp)
         
+        valid = (ray.ra == 1)
         return valid, ray, oss
 
 
