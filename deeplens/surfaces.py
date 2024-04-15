@@ -315,7 +315,7 @@ class Surface(DeepObj):
         surf_dict = {
             'type': self.__class__.__name__,
             'r': self.r,
-            'd': self.d,
+            'd': self.d.item(),
             'is_square': self.is_square,
             'mat1': self.mat1.name,
             'mat2': self.mat2.name,
@@ -438,7 +438,7 @@ class Aspheric(Surface):
                 self.ai2 = torch.Tensor([ai[0]])
                 self.ai4 = torch.Tensor([ai[1]])
                 self.ai6 = torch.Tensor([ai[2]])
-                self.ai8 = torch.Tensor([ai[2]])
+                self.ai8 = torch.Tensor([ai[3]])
             elif self.ai_degree == 5:
                 self.ai2 = torch.Tensor([ai[0]])
                 self.ai4 = torch.Tensor([ai[1]])
@@ -903,6 +903,16 @@ class Plane(Surface):
             return torch.zeros_like(x)
         else:
             return 0
+        
+    def surf_dict(self):
+        surf_dict = {
+            'type': "Plane",
+            'l': self.l,
+            'd': self.d.item(),
+            'is_square': True
+        }
+
+        return surf_dict
 
 class Spheric(Surface):
     """ Spheric surface.
