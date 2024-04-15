@@ -2471,7 +2471,7 @@ class Lensgroup(DeepObj):
 
         self.materials.append(Material(surf_dict['mat2']))
         self.sensor_size = data['sensor_size']
-        self.d_sensor = data['d_sensor']
+        self.d_sensor = d
 
 
     def write_zmx(self, filename='./test.zmx'):
