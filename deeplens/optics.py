@@ -1384,7 +1384,7 @@ class Lensgroup(DeepObj):
         aper_r = self.surfaces[aper_idx].r
         ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(M, 1)
 
-        phi = torch.arange(-0.5, 0.5, 1.0/M)
+        phi = torch.linspace(-0.5, 0.5, M)
         if entrance:
             d = torch.stack((
                 torch.sin(phi),
@@ -1437,6 +1437,12 @@ class Lensgroup(DeepObj):
 
         if shrink_pupil:
             avg_pupilx *= 0.5
+
+        if avg_pupilx < EPSILON:
+            if entrance:
+                return self.surfaces[0].d.item(), self.surfaces[0].r
+            else:
+                return self.surfaces[-1].d.item(), self.surfaces[-1].r
         
         return avg_pupilz, avg_pupilx
     
@@ -1640,7 +1646,7 @@ class Lensgroup(DeepObj):
             R = self.surfaces[0].r
             views = np.linspace(0, np.rad2deg(self.hfov)*0.99, num=7)
             colors_list = 'rgb'
-            fig, axs = plt.subplots(1, 3, figsize=(24, 6))
+            fig, axs = plt.subplots(1, 3, figsize=(24, 5))
             fig.suptitle(lens_title)
 
             for i, wvln in enumerate(WAVE_RGB):
@@ -1679,8 +1685,8 @@ class Lensgroup(DeepObj):
                 ax, fig = self.plot_raytraces(oss, ax=ax, fig=fig, color=colors_list[i], plot_invalid=plot_invalid, ra=ray.ra)
 
             ax.axis('off')
-            ax.set_title(lens_title)
-            fig.savefig(f"{filename}.png", bbox_inches='tight', format='png', dpi=600)
+            ax.set_title(lens_title, fontsize=10)
+            fig.savefig(f"{filename}.png", format='png', dpi=600)
             plt.close()
 
     
@@ -1761,7 +1767,7 @@ class Lensgroup(DeepObj):
 
         # If no ax is given, generate a new one.
         if ax is None and fig is None:
-            fig, ax = plt.subplots(figsize=(5,5))
+            fig, ax = plt.subplots(figsize=(5, 5))
         else:
             show=False
 
