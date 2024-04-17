@@ -1781,7 +1781,7 @@ class Lensgroup(DeepObj):
             for i, s in enumerate(self.surfaces):
 
                 # Draw aperture
-                if self.materials[i].A < 1.0003 and self.materials[i+1].A < 1.0003: # both are AIR
+                if isinstance(s, Aperture):
                     draw_aperture(ax, s, color='orange')
 
                 # Draw lens surface
@@ -1793,7 +1793,7 @@ class Lensgroup(DeepObj):
             # Connect two surfaces
             s_prev = []
             for i, s in enumerate(self.surfaces):
-                if self.materials[i].A < 1.0003: # AIR
+                if s.mat1.A < 1.0003: # AIR
                     s_prev = s
                 else:
                     r_prev = s_prev.r
@@ -2472,11 +2472,8 @@ class Lensgroup(DeepObj):
                     raise Exception('Surface type not implemented.')
                 
                 self.surfaces.append(s)
-                self.materials.append(Material(surf_dict['mat1']))
-
                 d += surf_dict['d_next']
 
-        self.materials.append(Material(surf_dict['mat2']))
         self.sensor_size = data['sensor_size']
         self.d_sensor = d
 
