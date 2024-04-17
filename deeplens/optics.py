@@ -133,8 +133,9 @@ class Lensgroup(DeepObj):
         """
         self.aper_idx = None
         for i in range(len(self.surfaces)):
-            if self.surfaces[i].mat1.A < 1.0003 and self.surfaces[i].mat2.A < 1.0003:
+            if isinstance(self.surfaces[i], Aperture):
                 self.aper_idx = i
+                return
 
         if self.aper_idx is None:
             self.aper_idx = np.argmin([s.r for s in self.surfaces])
