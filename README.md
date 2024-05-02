@@ -1,8 +1,8 @@
 # DeepLens
 
-DeepLens is a differentiable ray tracer for End-to-End lens design and differentiable rendering. It is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then optimized and maintained by [Xinge Yang](https://singer-yang.github.io/).
+DeepLens is a differentiable ray tracer for lens design, imaging simulation, and optics-aware rendering. Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** 
 
-Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** We can provide free code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Lens manufacturing service is also avaliable!
+We can provide free code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Lens manufacturing service is also avaliable!
 
 ### What is DeepLens
 
@@ -19,8 +19,7 @@ Welcome to use DeepLens in your research to (1) **build your own pipeline** or (
    1. Hybrid ray-tracing-wave-propagation simulation and optimization.
    2. Non-sequential ray-tracing for complex systems.
    3. Billion-level ray-tracing and multi-machine parallelization.
-   4. Illumination and display simulation and optimization.
-   5. Non-smooth imaging process optimization.
+   4. Illumination and display system simulation and optimization.
 
 ### Applications
 
@@ -47,7 +46,6 @@ A digit-twin network for fast (aberration + defocus) image simulation.
 <div style="text-align:center;">
     <img src="imgs/implicit_net.png" alt="Implicit" style="width:800px;"/>
 </div>
-
 
 ### How to use
 
@@ -99,14 +97,22 @@ deeplens/
 
 ### Cite:
 
-Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** If you find DeepLens helpful, please cite our papers.
+It is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then optimized and maintained by [Xinge Yang](https://singer-yang.github.io/). Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** If you find DeepLens helpful, please cite our papers.
 
-For lens design and End-to-End lens design:
+Original **dO** paper:
+```
+@article{wang2022differentiable,
+  title={dO: A differentiable engine for deep lens design of computational imaging systems},
+  author={Wang, Congli and Chen, Ni and Heidrich, Wolfgang},
+  journal={IEEE Transactions on Computational Imaging},
+  volume={8},
+  pages={905--916},
+  year={2022},
+  publisher={IEEE}
+}
+```
 
-<div style="text-align:center;">
-    <img src="imgs/paper_deeplens.png" alt="End2End" style="width:800px;"/>
-</div>
-
+**DeepLens** paper (automated lens design and End-to-End lens design):
 ```
 @article{yang2023curriculum,
   title={Curriculum learning for ab initio deep learned refractive optics},
@@ -116,12 +122,7 @@ For lens design and End-to-End lens design:
 }
 ```
 
-For PSF implicit representation:
-
-<div style="text-align:center;">
-    <img src="imgs/paper_dff.png" alt="End2End" style="width:800px;"/>
-</div>
-
+PSF implicit representation:
 ```
 @article{yang2023aberration,
   title={Aberration-aware depth-from-focus},
@@ -131,6 +132,13 @@ For PSF implicit representation:
   publisher={IEEE}
 }
 ```
+
+<!-- <div style="text-align:center;">
+    <img src="imgs/paper_deeplens.png" alt="End2End" style="width:800px;"/>
+</div> -->
+<!-- <div style="text-align:center;">
+    <img src="imgs/paper_dff.png" alt="End2End" style="width:800px;"/>
+</div> -->
 
 #### License
 
