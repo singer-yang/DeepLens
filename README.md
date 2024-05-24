@@ -36,7 +36,7 @@ Can do both spherical and aspherical lens design, here aspherical lens for demon
 No optical prior is needed, End-to-End design with purely image reconstruction loss!
 
 <div style="text-align:center;">
-    <img src="imgs/end2end.gif" alt="End2End" style="height:400px;"/>
+    <img src="imgs/end2end.gif" alt="End2End" style="height:200px;"/>
 </div>
 
 ##### Implicit representation of a specific lens
