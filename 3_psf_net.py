@@ -1,17 +1,11 @@
 """ 
-Implicit representation for a realistic lens (PSFs). 
+Implicit representation for a realistic lens (PSFs). In this code, we will train a neural network to represent the PSF of a lens system. Then we can fast calculate the spatially-varying, focus-dependent PSF of the lens for image simulation.
 
-In this code, we will train a neural network to represent the PSF of a lens system. Then we can fast calculate the spatially-varying, focus-dependent PSF of the lens for image simulation.
-
-Input: (x_normalized, y_normalized, z_unnormalized, focus_distance)
-Output: [ks, ks] PSF
+Input: [x, y, z, focus_distance]
+Output: [3, ks, ks] PSF
 
 Technical Paper:
-Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
-
-Some notes: 
-    (1) It is easy to modify the code to support RGB PSFs.
-    (2) You can also choose other network architectures.
+    Xinge Yang, Qiang Fu, Mohammed Elhoseiny and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
 
 This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
     # The license is only for non-commercial use (commercial licenses can be obtained from authors).
@@ -23,18 +17,21 @@ from datetime import datetime
 from deeplens.psfnet import PSFNet
 from deeplens.utils import set_logger, set_seed
 
-result_dir = f'./results/' + datetime.now().strftime("%m%d-%H%M%S") + '-psfnet'
+result_dir = f'./results/' + datetime.now().strftime("%m%d-%H%M%S") + '-PSFNet'
 os.makedirs(result_dir, exist_ok=True)
 set_logger(result_dir)
 set_seed(0)
 
 if __name__ == "__main__":
+    
+    # Init PSFNet (I changed the network archietecture to mlpconv for better performance on large PSF kernels.)
+    psfnet = PSFNet(filename='./lenses/camera/ef50mm_f1.8.json', model_name='mlpconv', sensor_res=(1000, 1000), kernel_size=128)
+    psfnet.lens.analysis(save_name=f'{result_dir}/lens')
+    psfnet.lens.write_lens_json(f'{result_dir}/lens.json')
 
-    psfnet = PSFNet(filename='./lenses/ef50mm.json', sensor_res=(640, 640), kernel_size=11)
-    psfnet.analysis(save_name=f'{result_dir}/lens')
-    psfnet.write_lens_json(f'{result_dir}/lens.json')
-
-    psfnet.train_psfnet(iters=100000, bs=128, lr=1e-4, spp=4096, evaluate_every=100, result_dir=result_dir)
+    # Train PSFNet
+    psfnet.load_net('./ckpts/psfnet/ef50mm_f1.8_1000x1000_ks128_mlpconv.pth')
+    psfnet.train_psfnet(iters=20000, bs=64, lr=1e-3, spp=100000, evaluate_every=1000, result_dir=result_dir)
     psfnet.evaluate_psf(result_dir=result_dir)
     
     print('Finish PSF net fitting.')
