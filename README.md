@@ -1,6 +1,6 @@
 # DeepLens
 
-DeepLens is a differentiable ray tracer for lens design, imaging simulation, and optics-aware rendering. Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** 
+DeepLens is a differentiable ray tracer for lens design, imaging simulation, and optics-aware rendering. Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.**
 
 We can provide free code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Lens manufacturing service is also avaliable!
 
@@ -14,11 +14,11 @@ We can provide free code assistance if you plan to use DeepLens in your research
 1. **Outstanding optimization capabilities** (automated lens design from scratch with gradient-based optimization!)
 2. **End-to-End optical design** (design your computational lens with 5 lines of code!)
 3. **Memory-efficient differentiable ray-tracing** (million-level ray-tracing on a desk-machine!)
-4. **Implicit representation for camera lenses** (train a network to fast calculate the PSFs!)
+4. **Implicit representation for camera lenses** (train a network to store the PSFs!)
 5. **More features** can be obtained via request or collaboration:
    1. Hybrid ray-tracing-wave-propagation simulation and optimization.
    2. Non-sequential ray-tracing for complex systems.
-   3. Billion-level ray-tracing and multi-machine parallelization.
+   3. Billion-level ray-tracing and multi-GPU parallelization.
    4. Illumination and display system simulation and optimization.
 
 ### Applications
@@ -75,7 +75,7 @@ Then in your code:
 
 ```
 import deeplens
-lens = deeplens.Lensgroup(filename='./lenses/cellphone80deg.json')
+lens = deeplens.GeoLens(filename='./lenses/cellphone80deg.json')
 ```
 
 ##### Directory
@@ -84,8 +84,10 @@ lens = deeplens.Lensgroup(filename='./lenses/cellphone80deg.json')
 deeplens/
 │
 ├── deeplens/
-│   ├── init.py
-│   └── optics.py
+│   ├── optics/ (contain core functions for optical components)
+|   ├── network/ (contain network architectures for image reconstruction and implicit representation)
+|   ├── geolens (lensgroup using ray tracing)
+│   └── diffraclens (lensgroup using wave propagation)
 │
 ├── README.md
 ├── LICENSE
@@ -100,6 +102,7 @@ deeplens/
 It is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then optimized and maintained by [Xinge Yang](https://singer-yang.github.io/). Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** If you find DeepLens helpful, please cite our papers.
 
 Original **dO** paper:
+
 ```
 @article{wang2022differentiable,
   title={dO: A differentiable engine for deep lens design of computational imaging systems},
@@ -113,6 +116,7 @@ Original **dO** paper:
 ```
 
 **DeepLens** paper (automated lens design and End-to-End lens design):
+
 ```
 @article{yang2023curriculum,
   title={Curriculum learning for ab initio deep learned refractive optics},
@@ -123,6 +127,7 @@ Original **dO** paper:
 ```
 
 PSF implicit representation:
+
 ```
 @article{yang2023aberration,
   title={Aberration-aware depth-from-focus},
