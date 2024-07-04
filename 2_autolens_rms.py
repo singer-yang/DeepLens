@@ -16,8 +16,6 @@ import numpy as np
 import yaml
 import random
 import string
-
-
 from datetime import datetime
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
@@ -35,7 +33,7 @@ def config():
     characters = string.ascii_letters + string.digits
     random_string = ''.join(random.choice(characters) for i in range(4))
     current_time = datetime.now().strftime("%m%d-%H%M%S")
-    exp_name = current_time + '-Auto-Lens-Design-' + random_string
+    exp_name = current_time + '-AutoLens-RMS-' + random_string
     result_dir = f'./results/{exp_name}'
     os.makedirs(result_dir, exist_ok=True)
     args['result_dir'] = result_dir

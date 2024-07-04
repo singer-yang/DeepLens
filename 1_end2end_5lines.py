@@ -12,6 +12,7 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
 import os
 import yaml
 import wandb
+import shutil
 import logging
 import random
 import string
@@ -63,9 +64,7 @@ def config():
     with open(f'{result_dir}/config.yml', 'w') as f:
         yaml.dump(args, f)
 
-    with open(f'{result_dir}/1_end2end_5lines.py', 'w') as f:
-        with open('1_end2end_5lines.py', 'r') as code:
-            f.write(code.read())
+    shutil.copy('1_end2end_5lines.py', f'{result_dir}/1_end2end_5lines.py')
         
     return args
 

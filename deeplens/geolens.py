@@ -27,7 +27,7 @@ import torch.nn.functional as nnF
 from torchvision.utils import save_image, make_grid
 from transformers import get_cosine_schedule_with_warmup
 
-from .optics import SELLMEIER_TABLE, Ray, EPSILON, GEO_SPP, DEFAULT_WAVE
+from .optics import SELLMEIER_TABLE, EPSILON, GEO_SPP, DEFAULT_WAVE, Ray
 from .optics.surfaces import *
 from .optics.monte_carlo import *
 from .optics.render_psf import *
@@ -85,6 +85,9 @@ class GeoLens(DeepObj):
         
         elif filename[-5:] == '.json':
             self.read_lens_json(filename)
+
+        elif filename[-4:] == '.zmx':
+            self.read_lens_zmx(filename)
 
         else:
             raise Exception("File format not supported.")
@@ -348,7 +351,7 @@ class GeoLens(DeepObj):
 
 
     @torch.no_grad()
-    def sample_point_source(self, R=None, depth=-10.0, M=11, spp=16, fov=10.0, forward=True, pupil=True, wvln=DEFAULT_WAVE, importance_sampling=False):
+    def sample_point_source(self, R=None, depth=-10.0, M=11, spp=GEO_SPP, fov=10.0, forward=True, pupil=True, wvln=DEFAULT_WAVE, importance_sampling=False):
         """ Sample forward point-grid rays. Rays have shape [spp, M, M, 3]
         
             Rays come from a 2D square array (-R~R, -Rw~Rw, depth), and fall into a cone spercified by fov or pupil. 
@@ -634,8 +637,12 @@ class GeoLens(DeepObj):
         else:
             oss = None
 
+        mat1 = Material('air')
         for i in lens_range:
-            ray = self.surfaces[i].ray_reaction(ray)
+            n1 = mat1.ior(ray.wvln)
+            n2 = self.surfaces[i].mat2.ior(ray.wvln)
+            ray = self.surfaces[i].ray_reaction(ray, n1, n2)
+            mat1 = self.surfaces[i].mat2
 
             valid = (ray.ra == 1)
             if record: 
@@ -661,8 +668,12 @@ class GeoLens(DeepObj):
         else:
             oss = None
 
+        mat1 = Material('air')
         for i in np.flip(lens_range):
-            ray = self.surfaces[i].ray_reaction(ray)
+            n1 = mat1.ior(ray.wvln)
+            n2 = self.surfaces[i-1].mat2.ior(ray.wvln)
+            ray = self.surfaces[i].ray_reaction(ray, n1, n2)
+            mat1 = self.surfaces[i-1].mat2
 
             valid = (ray.ra > 0)
             if record: 
@@ -680,7 +691,7 @@ class GeoLens(DeepObj):
     # Ray-tracing based rendering
     # ====================================================================================
     @torch.no_grad()
-    def render_single_img(self, img_org, depth=DEPTH, spp=64, unwarp=False, save_name=None, return_tensor=False, noise=0, method='raytracing'):
+    def render_single_img(self, img_org, depth=DEPTH, spp=64, unwarp=False, save_name=None, return_tensor=False, noise=0, method='ray_tracing'):
         """ Render a single image for visualization and debugging.
 
             This function is designed non-differentiable. If want to use differentiable rendering, call self.render() function.
@@ -711,7 +722,7 @@ class GeoLens(DeepObj):
 
         img = torch.tensor((img_org/255.).astype(np.float32)).permute(2, 0, 1).unsqueeze(0).to(self.device)
 
-        if method == 'raytracing':
+        if method == 'ray_tracing':
             # ==> Render object image by ray-tracing
             scale = self.calc_scale_ray(depth=depth)
             img = torch.flip(img, [-2, -1])
@@ -770,11 +781,7 @@ class GeoLens(DeepObj):
 
 
     def render(self, img, depth=DEPTH, spp=64, psf_grid=9, psf_ks=101, noise=0.0, method='ray_tracing'):
-        """ This function is defined for End-to-End lens design. 
-        
-            This function simulate the camera-captured image batch. 
-            
-            It is differentiable.
+        """ This function simulate the camera-captured image batch. 
 
             I am planning to support 2 kinds of rendering methods:
                 1. ray tracing based rendering
@@ -796,8 +803,7 @@ class GeoLens(DeepObj):
         Returns:
             img_render (tensor): [N, C, H, W] shape rendered image batch.
         """
-        if img.dim() == 4:
-            self.prepare_sensor(sensor_res=[img.shape[2], img.shape[3]])
+        assert self.sensor_res[0] == img.shape[-2] and self.sensor_res[1] == img.shape[-1], 'Sensor resolution should match image resolution.'
 
         if method == 'ray_tracing':
             img = torch.flip(img, [-2, -1])
@@ -806,7 +812,7 @@ class GeoLens(DeepObj):
             img_render = torch.zeros_like(img)
             for i in range(3):
                 ray = self.render_sample_ray(spp=spp, wvln=WAVE_RGB[i])
-                ray = self.trace2obj(ray) 
+                ray = self.trace2obj(ray)
                 img_render[:,i,:,:] = self.render_compute_image(img[:,i,:,:], depth, scale, ray)
         
         elif method == 'psf':
@@ -818,7 +824,8 @@ class GeoLens(DeepObj):
             raise Exception('Unknown method.')
         
         # Add sensor noise
-        img_render = img_render + torch.randn_like(img_render) * noise
+        if noise > 0:
+            img_render = img_render + torch.randn_like(img_render) * noise
         
         return img_render
     
@@ -870,9 +877,12 @@ class GeoLens(DeepObj):
             img = torch.from_numpy(img).permute(2,0,1).unsqueeze(0).to(self.device)
             img = nnF.pad(img, (1,1,1,1), "replicate")
 
+        else:
+            raise Exception('Input image should be tensor or ndarray.')
+
         # ====> Scale scene image to get 1:1 alignment.
         ray = ray.propagate_to(depth)
-        p = ray.o[...,:2]
+        p = ray.o[..., :2]
         pixel_size = scale * self.pixel_size
         ray.ra = ray.ra * (torch.abs(p[...,0]/pixel_size) < (W/2+1)) * (torch.abs(p[...,1]/pixel_size) < (H/2+1))
         
@@ -892,15 +902,12 @@ class GeoLens(DeepObj):
 
         # ====> Bilinear interpolation
         # img shape [B, N, H', W'], idx_i shape [spp, H, W], w_i shape [spp, H, W], irr_img shape [N, C, spp, H, W]
-        # if not coherent:
-        # diff mode, different rays have different weights, do not consider vignetting
         irr_img =  img[...,idx_i, idx_j] * w_i * w_j
         irr_img += img[...,idx_i+1, idx_j] * (1-w_i) * w_j
         irr_img += img[...,idx_i, idx_j+1] * w_i * (1-w_j)
         irr_img += img[...,idx_i+1, idx_j+1] * (1-w_i) * (1-w_j)
 
-        # I = (torch.sum(irr_img * ray.ra, -3) + 1e-9) / (torch.sum(ray.ra, -3) + 1e-6) # no vignetting
-        I = torch.sum(irr_img * ray.ra, -3) / (torch.sum(ray.ra, -3) + EPSILON) # no vignetting, new implementation    
+        I = torch.sum(irr_img * ray.ra, -3) / (torch.sum(ray.ra, -3) + EPSILON) # no vignetting 
 
         return I
     
@@ -1507,26 +1514,25 @@ class GeoLens(DeepObj):
         """
         M = GEO_GRID
         spp = 512
-        # sample rays [spp, W, H]
-        # sample on a far object plane, but shrink to avoid distortion at the edge
-        ray = self.sample_point_source(M=M, spp=spp, depth=depth, R=-depth*np.tan(self.hfov)*0.5, pupil=True)
         
-        # map r1 from object space to sensor space, ground-truth
+        # Sample rays [spp, W, H] from the object plane
+        ray = self.sample_point_source(M=M, spp=spp, depth=depth, R=-depth*np.tan(self.hfov) * 0.7, pupil=True)
+        
+        # Map r1 from object space to sensor space, ground-truth
         o1 = ray.o.detach()[..., :2]
         o1 = torch.flip(o1, [1, 2])
         
         ray, _, _ = self.trace(ray)
         o2 = ray.project_to(self.d_sensor)
 
-        # use 1/4 part of regions to compute magnification, also to avoid zero values on the axis
+        # Use 1/4 part of regions to compute magnification, also to avoid zero values on the axis
         x1 = o1[0,:,:,0]
         y1 = o1[0,:,:,1]
         x2 = torch.sum(o2[...,0] * ray.ra, axis=0)/ torch.sum(ray.ra, axis=0).add(EPSILON)
         y2 = torch.sum(o2[...,1] * ray.ra, axis=0)/ torch.sum(ray.ra, axis=0).add(EPSILON)
 
         mag_x = x1 / x2
-        # mag = 1 / torch.mean(mag_x[:M//2,:M//2]).item()
-        tmp = mag_x[:M//2,:M//2]
+        tmp = mag_x[:M//2, :M//2]
         mag = 1 / torch.mean(tmp[~tmp.isnan()]).item()
 
         if mag == 0:
@@ -1674,6 +1680,7 @@ class GeoLens(DeepObj):
             avg_pupilx *= 0.5
         
         if avg_pupilx < EPSILON:
+            print('Small pupil is detected, use the first surface as pupil.')
             if entrance:
                 return self.surfaces[0].d.item(), self.surfaces[0].r
             else:
@@ -1835,7 +1842,7 @@ class GeoLens(DeepObj):
                 self.surfaces[i].r = min(self.surfaces[i].r, max_height)
 
         else:
-            outer = 0.2 if outer is None else outer
+            outer = 0.5 if outer is None else outer
 
             # sample maximum fov rays to compute valid surface height
             view = self.hfov if self.hfov is not None else np.arctan(self.r_last/self.d_sensor.item())
@@ -1983,7 +1990,7 @@ class GeoLens(DeepObj):
         if multi_plot:
             R = self.surfaces[0].r
             views = np.linspace(0, np.rad2deg(self.hfov)*0.99, num=7)
-            colors_list = 'rgb'
+            colors_list = ['#CC0000', '#006600', '#0066CC']
             fig, axs = plt.subplots(1, 3, figsize=(20, 5))
             fig.suptitle(lens_title)
 
@@ -2009,7 +2016,7 @@ class GeoLens(DeepObj):
         # ==> Plot RGB in one figure
         else:
             R = self.surfaces[0].r
-            colors_list = 'bgr'
+            colors_list = ['#CC0000', '#006600', '#0066CC']
             views = [0, np.rad2deg(self.hfov)*0.707, np.rad2deg(self.hfov)*0.99]
             ax, fig = self.plot_setup2D(zmx_format=zmx_format, ax=ax, fig=fig)
             
@@ -2137,18 +2144,18 @@ class GeoLens(DeepObj):
             elif isinstance(s, Aperture):
                 draw_aperture(ax, s, color='orange')
 
-            # Draw lens surface
+            # Lens surface
             else:
                 r = torch.linspace(-s.r, s.r, s.APERTURE_SAMPLING, device=self.device) # aperture sampling
                 z = s.surface_with_offset(r, torch.zeros(len(r), device=self.device))   # draw surface
                 plot(ax, z, r, color, linestyle)
             
         # Connect two surfaces
-        s_prev = []
-        for i, s in enumerate(self.surfaces):
-            if s.mat1.n <= 1.0003:
-                s_prev = s
-            else:
+        for i in range(len(self.surfaces)):
+            if self.surfaces[i].mat2.n > 1.1:
+                s_prev = self.surfaces[i]
+                s = self.surfaces[i+1]
+
                 r_prev = s_prev.r
                 r = s.r
                 sag_prev = s_prev.surface_with_offset(r_prev, 0.0)
@@ -2446,6 +2453,32 @@ class GeoLens(DeepObj):
         return loss_avg
 
 
+    @torch.no_grad()
+    def rms_map(self, res=(128, 128), depth=DEPTH):
+        """ Calculate the RMS spot error map as a weight mask for lens design.
+
+        Args:
+            res (tuple, optional): resolution of the RMS map. Defaults to (32, 32).
+            depth (float, optional): depth of the point source. Defaults to DEPTH.
+
+        Returns:
+            rms_map (torch.Tensor): RMS map normalized to [0, 1].
+        """
+        M = 128
+        scale = - depth * np.tan(self.hfov) / self.r_last
+        ray = self.sample_point_source(M=M, depth=depth, R=self.sensor_size[0]/2*scale, pupil=True)
+        ray, _, _ = self.trace(ray)
+        o2 = ray.project_to(self.d_sensor)
+        o2_center = (o2*ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(EPSILON).unsqueeze(-1)    
+        o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)   # normalized to center (0, 0)
+        
+        rms_map = torch.sqrt(((o2_norm**2).sum(-1) * ray.ra).sum(0) / (ray.ra.sum(0) + EPSILON))
+        rms_map = nnF.interpolate(rms_map.unsqueeze(0).unsqueeze(0), res, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
+        rms_map /= rms_map.max()
+
+        return rms_map
+
+
     def analysis_rms(self, depth=DEPTH):
         """ Compute RMS-based error. Contain both RMS errors and RMS radius.
         """
@@ -2584,7 +2617,7 @@ class GeoLens(DeepObj):
             For camera lens: dist_bound=1.0, thickness_bound=1.0
             General: dist_bound=thickness_bound=0.5 * (total_thickness_of_lens / lens_element_number / 2)
         """
-        loss = 0.
+        loss = 0.0
 
         # Calculate distance between surfaces
         diff_surf = self.find_diff_surf()
@@ -2632,13 +2665,13 @@ class GeoLens(DeepObj):
         return - loss
 
 
-    def loss_reg(self):
+    def loss_reg(self, w_focus=2.0):
         """ An empirical regularization loss for lens design.
         """
         if self.is_cellphone:
-            loss_reg = self.loss_infocus() + self.loss_self_intersec(dist_bound=0.2, thickness_bound=0.4) + 0.05 * self.loss_ray_angle()
+            loss_reg = w_focus * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5) + 0.05 * self.loss_ray_angle()
         else:
-            loss_reg = self.loss_infocus() + self.loss_self_intersec(dist_bound=1.0, thickness_bound=4.0)
+            loss_reg = w_focus * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0)
         
         return loss_reg
     
@@ -2819,30 +2852,7 @@ class GeoLens(DeepObj):
     # ====================================================================================
     # Lesn file IO
     # ====================================================================================
-    def write_lens_json(self, filename='./test.json'):
-        """ Write the lens into .json file.
-        """
-        data = {}
-        data['foclen'] = self.foclen
-        data['fnum'] = self.fnum
-        data['r_last'] = self.r_last
-        data['d_sensor'] = self.d_sensor.item()
-        data['sensor_size'] = self.sensor_size
-        data['surfaces'] = []
-        for i, s in enumerate(self.surfaces):
-            surf_dict = {"idx": i+1}
-            surf_dict.update(s.surf_dict())
-            
-            
-            if i < len(self.surfaces) - 1:
-                surf_dict['d_next'] = self.surfaces[i+1].d.item() - self.surfaces[i].d.item()
-            else:
-                surf_dict['d_next'] = self.d_sensor.item() - self.surfaces[i].d.item()
-            
-            data['surfaces'].append(surf_dict)
-
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=4)
+    
 
 
     def read_lens_json(self, filename='./test.json'):
@@ -2860,28 +2870,31 @@ class GeoLens(DeepObj):
                 
                 elif surf_dict['type'] == 'Aspheric':
                     try:
-                        s = Aspheric(c=1/surf_dict['roc'], r=surf_dict['r'], d=d, k=surf_dict['k'], ai=surf_dict['ai'], mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                        s = Aspheric(c=1/surf_dict['roc'], r=surf_dict['r'], d=d, k=surf_dict['k'], ai=surf_dict['ai'], mat2=surf_dict['mat2'])
                     except:
-                        s = Aspheric(c=surf_dict['c'], r=surf_dict['r'], d=d, k=surf_dict['k'], ai=surf_dict['ai'], mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                        s = Aspheric(c=surf_dict['c'], r=surf_dict['r'], d=d, k=surf_dict['k'], ai=surf_dict['ai'], mat2=surf_dict['mat2'])
+
+                # elif surf_dict['type'] == 'AspheCubic':
+                #     s = AspheCubic(c=1/surf_dict['roc'], r=surf_dict['r'], d=d, k=surf_dict['k'], ai=surf_dict['ai'], b=surf_dict['b'], mat2=surf_dict['mat2'])
 
                 elif surf_dict['type'] == 'Cubic':
-                    s = Cubic(r=surf_dict['r'], d=d, b=surf_dict['b'], mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                    s = Cubic(r=surf_dict['r'], d=d, b=surf_dict['b'], mat2=surf_dict['mat2'])
 
                 elif surf_dict['type'] == 'DOE_GEO':
                     s = DOE_GEO(l=surf_dict['l'], d=d, glass=surf_dict['glass'])
 
                 elif surf_dict['type'] == 'Plane':
-                    s = Plane(l=surf_dict['l'], d=d, mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                    s = Plane(l=surf_dict['l'], d=d, mat2=surf_dict['mat2'])
 
                 elif surf_dict['type'] == 'Stop':
                     s = Aperture(r=surf_dict['r'], d=d)
 
                 elif surf_dict['type'] == 'Spheric':
                     try:
-                        c = 1/surf_dict['roc'] if surf_dict['roc'] != 0 else 0
-                        s = Spheric(c=c, r=surf_dict['r'], d=d, mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                        c = 1 / surf_dict['roc'] if surf_dict['roc'] != 0 else 0
+                        s = Spheric(c=c, r=surf_dict['r'], d=d, mat2=surf_dict['mat2'])
                     except:
-                        s = Spheric(c=surf_dict['c'], r=surf_dict['r'], d=d, mat1=surf_dict['mat1'], mat2=surf_dict['mat2'])
+                        s = Spheric(c=surf_dict['c'], r=surf_dict['r'], d=d, mat2=surf_dict['mat2'])
 
                 elif surf_dict['type'] == 'ThinLens':
                     s = ThinLens(f=surf_dict['f'], r=surf_dict['r'], d=d)
@@ -2896,7 +2909,101 @@ class GeoLens(DeepObj):
         self.r_last = data['r_last']
         self.d_sensor = torch.Tensor([d])
 
-    def write_zmx(self, filename='./test.zmx'):
+
+    def write_lens_json(self, filename='./test.json'):
+        """ Write the lens into .json file.
+        """
+        data = {}
+        data['foclen'] = self.foclen
+        data['fnum'] = self.fnum
+        data['r_last'] = self.r_last
+        data['d_sensor'] = self.d_sensor.item()
+        data['sensor_size'] = self.sensor_size
+        data['surfaces'] = []
+        for i, s in enumerate(self.surfaces):
+            surf_dict = {"idx": i+1}
+            surf_dict.update(s.surf_dict())
+            
+            if i < len(self.surfaces) - 1:
+                surf_dict['d_next'] = self.surfaces[i+1].d.item() - self.surfaces[i].d.item()
+            else:
+                surf_dict['d_next'] = self.d_sensor.item() - self.surfaces[i].d.item()
+            
+            data['surfaces'].append(surf_dict)
+
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=4)
+
+
+    def read_lens_zmx(self, filename='./test.zmx'):
+        """ Read the lens from .zmx file.
+        """
+        # Read ZMX file
+        try:
+            with open(filename, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+        except UnicodeDecodeError:
+            with open(filename, 'r', encoding='utf-16') as file:
+                lines = file.readlines()
+
+        # Iterate through the lines and extract SURF data
+        surfs_dict = {}
+        current_surf = None
+        for line in lines:
+            if line.startswith("SURF"):
+                current_surf = int(line.split()[1])
+                surfs_dict[current_surf] = {}
+            elif current_surf is not None and line.strip() != "":
+                if len(line.strip().split(maxsplit=1)) == 1:
+                    continue
+                else:
+                    key, value = line.strip().split(maxsplit=1)
+                    if key == 'PARM':
+                        new_key = 'PARM' + value.split()[0]
+                        new_value = value.split()[1]
+                        surfs_dict[current_surf][new_key] = new_value
+                    else:
+                        surfs_dict[current_surf][key] = value
+        
+        # Print the extracted data for each SURF
+        self.surfaces = []
+        d = 0.0
+        for surf_idx, surf_dict in surfs_dict.items():
+            if surf_idx > 0 and surf_idx < current_surf:
+                mat2 = f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}" if 'GLAS' in surf_dict else 'air'
+                surf_r = float(surf_dict['DIAM'].split()[0]) if 'DIAM' in surf_dict else 0.0
+                surf_c = float(surf_dict['CURV'].split()[0]) if 'CURV' in surf_dict else 0.0
+                surf_d_next = float(surf_dict['DISZ'].split()[0]) if 'DISZ' in surf_dict else 0.0
+                
+                if surf_dict['TYPE'] == 'STANDARD':
+                    # Aperture
+                    if surf_c == 0.0 and mat2 == 'air':
+                        s = Aperture(r=surf_r, d=d)
+
+                    # Spherical surface
+                    else:
+                        s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2)
+
+                # Aspherical surface
+                elif surf_dict['TYPE'] == 'EVENASPH':
+                    raise NotImplementedError()
+                    s = Aspheric()
+
+                else:
+                    print(f"Surface type {surf_dict['TYPE']} not implemented.")
+                    continue
+
+                self.surfaces.append(s)
+                d += surf_d_next
+            
+            elif surf_idx == current_surf:
+                # Image sensor
+                self.r_last = float(surf_dict['DIAM'].split()[0])
+
+        self.d_sensor = torch.Tensor([d])
+
+
+    def write_lens_zmx(self, filename='./test.zmx'):
         """ Write the lens into .zmx file.
         """
         lens_zmx_str = ''
@@ -2998,14 +3105,14 @@ def create_cellphone_lens(hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=No
         k1 = np.random.randn(1).item() * 0.01
         ai1 = np.random.randn(7) * 1e-16
         mat = random.choice(mat_names)
-        surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c1, k = k1, ai = ai1, mat1 = 'air', mat2 = mat))
+        surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c1, k = k1, ai = ai1, mat2 = mat))
         
         # back surface 
         d_total += d_lens[2 * i + 1]
         c2 = np.random.randn(1).item() * 0.001
         k2 = np.random.randn(1).item() * 0.01
         ai2 = np.random.randn(7) * 1e-16
-        surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c2, k = k2, ai = ai2, mat1 = mat, mat2 = 'air'))
+        surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c2, k = k2, ai = ai2, mat2 = 'air'))
 
     # Lens calculation
     lens.d_sensor = torch.Tensor([ttl]).to(lens.device)
@@ -3055,12 +3162,12 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
         d_total += d_lens[2 * i]
         c1 = torch.randn(1).item() * 0.001
         mat = random.choice(mat_names)
-        surfaces.append(Spheric(r = max(imgh/2, aper_r) , d = d_total, c = c1, mat1 = 'air', mat2 = mat))
+        surfaces.append(Spheric(r = max(imgh/2, aper_r) , d = d_total, c = c1, mat2 = mat))
         
         # back surface 
         d_total += d_lens[2 * i + 1]
         c2 = torch.randn(1).item() * 0.001
-        surfaces.append(Spheric(r = max(imgh/2, aper_r), d = d_total, c = c2, mat1 = mat, mat2 = 'air'))
+        surfaces.append(Spheric(r = max(imgh/2, aper_r), d = d_total, c = c2, mat2 = 'air'))
 
         if i == int(lens_num/2) - 1:
             d_total += 2.0
@@ -3079,102 +3186,3 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
     return lens
 
 
-def read_zmx(filename='./test.zmx'):
-        """ Read .zmx file into lens file in our format.
-
-        Args:
-            filename (str, optional): .zmx file. Defaults to './test.zmx'.
-        """
-        assert filename[-4:] == '.zmx'
-        with open(filename, 'r') as f:
-            content = f.read()
-            # content = content.decode("utf-16")
-
-        total_d = 0
-        surfaces = []
-        materials = []
-        surf_mate = 'AIR'
-        mate = Material(name=surf_mate)
-        materials.append(mate)
-        surf_k = 0.0
-        
-        lines = content.split('\n')
-        for line in lines:
-            # print(line)
-            # line = line.decode('utf-16')
-            # words = list(filter(None, line[:-1].split(' ')))    # remove \n and ''
-            words = list(filter(None, line.split(' '))) # remove ' '
-            if len(words) == 0:
-                continue
-            
-            if words[0] == 'SURF':
-                surf_info = True
-                surf_idx = int(words[1])
-
-                # append last surface
-                if surf_idx == 0 or surf_idx == 1:
-                    continue
-                else:
-                    if surf_type == 'STANDARD':
-                        surf = Aspheric(r=surf_r, d=total_d-surf_d)
-                        surfaces.append(surf)
-                        mate = Material(name=surf_mate)
-                        materials.append(mate)
-                    elif surf_type == 'EVENASPH':
-                        surf_ai = [surf_a2, surf_a4, surf_a6, surf_a8, surf_a10, surf_a12, surf_a14, surf_a16]
-                        surf_ai = [ai for ai in surf_ai if ai!=0]
-                        surf = Aspheric(r=surf_r, d=total_d-surf_d, c=surf_c, k=surf_k, ai=surf_ai)
-                        surfaces.append(surf)
-                        mate = Material(name=surf_mate)
-                        materials.append(mate)
-                        surf_mate = 'AIR'
-                    
-                    continue
-
-            elif words[0] == 'STOP':
-                aper = True
-
-            elif words[0] == 'TYPE':
-                surf_type = words[1]
-            
-            elif words[0] == 'CURV':
-                surf_c = float(words[1])
-
-            elif words[0] == 'PARM':
-                if words[1] == '1':
-                    surf_a2 = float(words[2])
-                elif words[1] == '2':
-                    surf_a4 = float(words[2])
-                elif words[1] == '3':
-                    surf_a6 = float(words[2])
-                elif words[1] == '4':
-                    surf_a8 = float(words[2])
-                elif words[1] == '5':
-                    surf_a10 = float(words[2])
-                elif words[1] == '6':
-                    surf_a12 = float(words[2])
-                elif words[1] == '7':
-                    surf_a14 = float(words[2])
-                elif words[1] == '8':
-                    surf_a16 = float(words[2])
-
-            elif words[0] == 'DISZ':
-                surf_d = float(words[1])
-                if surf_d != float('inf'):
-                    total_d += surf_d
-
-            elif words[0] == 'CONI':
-                surf_k = float(words[1])
-
-            elif words[0] == 'DIAM':
-                surf_r = float(words[1])
-
-            elif words[0] == 'GLAS':
-                surf_mate = words[1]
-
-        # Sensor
-        lens = GeoLens()
-        lens.load_external(surfaces, materials, surf_r, total_d)
-        lens.write_lens_json(f'{filename[:-4]}.json')
-
-        return lens

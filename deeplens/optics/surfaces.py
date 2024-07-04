@@ -11,7 +11,7 @@ from .materials import Material
 from ..utils import *
 
 class Surface(DeepObj):
-    def __init__(self, r, d, mat1, mat2, is_square=False, device=DEVICE):
+    def __init__(self, r, d, mat2, is_square=False, device=DEVICE):
         super(Surface, self).__init__()
         self.d = d if torch.is_tensor(d) else torch.Tensor([d])
         self.d_perturb = 0.0
@@ -23,8 +23,6 @@ class Surface(DeepObj):
             self.h = r * math.sqrt(2)
             self.w = r * math.sqrt(2)
         
-
-        self.mat1 = Material(mat1)
         self.mat2 = Material(mat2)        
 
         self.NEWTONS_MAXITER = 10
@@ -38,19 +36,9 @@ class Surface(DeepObj):
     # ==============================
     # Intersection and Refraction
     # ==============================
-    def ray_reaction(self, ray):
+    def ray_reaction(self, ray, n1, n2):
         """ Compute output ray after intersection and refraction with a surface.
         """
-        # Determine ray direction and refractive index
-        wvln = ray.wvln
-        forward = (ray.d * ray.ra.unsqueeze(-1))[...,2].sum() > 0
-        if forward:
-            n1 = self.mat1.ior(wvln)
-            n2 = self.mat2.ior(wvln)
-        else:
-            n1 = self.mat2.ior(wvln)
-            n2 = self.mat1.ior(wvln)
-
         # Intersection
         ray = self.intersect(ray, n1)
 
@@ -331,7 +319,6 @@ class Surface(DeepObj):
             'r': self.r,
             'd': self.d.item(),
             'is_square': self.is_square,
-            'mat1': self.mat1.name,
             'mat2': self.mat2.name,
         }
 
@@ -374,11 +361,11 @@ class Aperture(Surface):
             For geo optics, it works as a binary mask.
             For wave optics, it works as a diffractive plane.
         """
-        Surface.__init__(self, r, d, mat1='air', mat2='air', is_square=False, device=device)
+        Surface.__init__(self, r, d, mat2='air', is_square=False, device=device)
         self.diffraction = diffraction
         self.to(device)
 
-    def ray_reaction(self, ray):
+    def ray_reaction(self, ray, n1=1.0, n2=1.0):
         """ Compute output ray after intersection and refraction.
 
             In each step, first get a guess of new o and d, then compute valid and only update valid rays. 
@@ -445,7 +432,7 @@ class Aspheric(Surface):
             2. spheric: 
             3. aspheric: 
     """
-    def __init__(self, r, d, c=0., k=0., ai=None, mat1=None, mat2=None, device=DEVICE):
+    def __init__(self, r, d, c=0., k=0., ai=None, mat2=None, device=DEVICE):
         """ Initialize aspheric surface.
 
         Args:
@@ -459,7 +446,7 @@ class Aspheric(Surface):
             is_square (bool): whether the surface is square
             device (torch.device): device to store the tensor
         """
-        Surface.__init__(self, r, d, mat1, mat2, is_square=False, device=device)
+        Surface.__init__(self, r, d, mat2, is_square=False, device=device)
         self.c = torch.Tensor([c])
         self.k = torch.Tensor([k])
         if ai is not None:
@@ -707,7 +694,6 @@ class Aspheric(Surface):
             'd': self.d.item(),
             'k': self.k.item(),
             'ai': [],
-            'mat1': self.mat1.name,
             'mat2': self.mat2.name,
             }
         for i in range(1, self.ai_degree+1):
@@ -758,8 +744,8 @@ class Cubic(Surface):
 
         Can also be written as: f(x, y, z) = 0
     """
-    def __init__(self, r, d, ai, mat1, mat2, is_square=False, device=DEVICE):
-        Surface.__init__(self, r, d, mat1, mat2, is_square=is_square, device=device) 
+    def __init__(self, r, d, ai, mat2, is_square=False, device=DEVICE):
+        Surface.__init__(self, r, d, mat2, is_square=is_square, device=device) 
         self.ai = torch.Tensor(ai)
 
         if len(ai) == 1:
@@ -896,7 +882,7 @@ class DOE_GEO(Surface):
         https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
     """
     def __init__(self, l, d, thickness=0.5, glass='test', param_model='binary2', device=DEVICE):
-        Surface.__init__(self, l / np.sqrt(2), d, mat1='air', mat2='air', is_square=True, device=device)
+        Surface.__init__(self, l / np.sqrt(2), d, mat2='air', is_square=True, device=device)
 
         # DOE geometry
         self.w, self.h = l, l
@@ -955,7 +941,7 @@ class DOE_GEO(Surface):
     # ==============================
     # Computation (ray tracing) 
     # ==============================
-    def ray_reaction(self, ray):
+    def ray_reaction(self, ray, n1=1.0, n2=1.0):
         """ Ray reaction on DOE surface. Imagine the DOE as a wrapped positive convex lens for debugging. 
 
             1, The phase φ in radians adds to the optical path length of the ray
@@ -1244,7 +1230,6 @@ class DOE_GEO(Surface):
                 'param_model': self.param_model,
                 'f0': self.f0.item(),
                 'd': self.d.item(),
-                'mat1': self.mat1.name,
                 'mat2': self.mat2.name,
             }
 
@@ -1259,7 +1244,6 @@ class DOE_GEO(Surface):
                 'order6': self.order6.item(),
                 'order8': self.order8.item(),
                 'd': self.d.item(),
-                'mat1': self.mat1.name,
                 'mat2': self.mat2.name,
             }
 
@@ -1276,7 +1260,6 @@ class DOE_GEO(Surface):
                 'order6': self.order6.item(),
                 'order7': self.order7.item(),
                 'd': self.d.item(),
-                'mat1': self.mat1.name,
                 'mat2': self.mat2.name,
             }
 
@@ -1289,7 +1272,6 @@ class DOE_GEO(Surface):
                 'theta': self.theta.item(),
                 'alpha': self.alpha.item(),
                 'd': self.d.item(),
-                'mat1': self.mat1.name,
                 'mat2': self.mat2.name,
             }
 
@@ -1297,10 +1279,10 @@ class DOE_GEO(Surface):
 
 
 class Plane(Surface):
-    def __init__(self, l, d, mat1, mat2, is_square=True, device=DEVICE):
+    def __init__(self, l, d, mat2, is_square=True, device=DEVICE):
         """ Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base.
         """
-        Surface.__init__(self, l / np.sqrt(2), d, mat1=mat1, mat2=mat2, is_square=is_square, device=device)
+        Surface.__init__(self, l / np.sqrt(2), d, mat2=mat2, is_square=is_square, device=device)
         
     def intersect(self, ray, n=1.0):
         """ Solve ray-surface intersection and update ray data.
@@ -1353,8 +1335,8 @@ class Plane(Surface):
 class Spheric(Surface):
     """ Spheric surface.
     """
-    def __init__(self, c, r, d, mat1, mat2, device=DEVICE):
-        super(Spheric, self).__init__(r, d, mat1, mat2, is_square=False, device=device)
+    def __init__(self, c, r, d, mat2, device=DEVICE):
+        super(Spheric, self).__init__(r, d, mat2, is_square=False, device=device)
         self.c = torch.tensor([c])
 
         self.c_perturb = 0.0
@@ -1429,7 +1411,6 @@ class Spheric(Surface):
                 'c': self.c.item(),
                 'roc': roc,
                 'd': self.d.item(),
-                'mat1': self.mat1.name,
                 'mat2': self.mat2.name,
                 }
 
@@ -1458,10 +1439,10 @@ class Spheric(Surface):
 
 
 class ThinLens(Surface):
-    def __init__(self, f, r, d, mat1='air', mat2='air', is_square=False, device=DEVICE):
+    def __init__(self, f, r, d, mat2='air', is_square=False, device=DEVICE):
         """ Thin lens surface. 
         """
-        Surface.__init__(self, r, d, mat1=mat1, mat2=mat2, is_square=is_square, device=device)
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
         self.f = torch.tensor([f])
 
     def intersect(self, ray, n=1.0):
