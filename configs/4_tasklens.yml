@@ -1,0 +1,35 @@
+DEBUG: True
+EXP_NAME: 'TaskLens design - image classification'
+seed: 1
+
+train:
+  seed: 26
+  dataset: 'imagenet'
+  warm_up: 0.3
+  epochs: 3
+  bs: 32
+  img_res: !!python/tuple [224, 224]
+  spp: 1024
+
+  psf_ks: 101
+  psf_grid: 7
+  depth: -10000.
+  noise: 0.001 
+
+lens:
+  path: './lenses/cellphone/3P_blank.json'
+  target_hfov: 0.6
+  target_fnum: 2.8
+  lr: !!python/tuple [1e-4, 1e-4, 1e-1, 1e-3]
+  ai_lr_decay: 0.02
+  sensor_res: !!python/tuple [512, 512]
+  
+
+network:
+  model: 'resnet50'
+  pretrained: './ckpt/f2.8/doublet/classi1_resnet_high.pth'
+  lr: !!float 1e-5
+
+imagenet_train_dir: TODO:
+imagenet_val_dir: TODO:
+imagenet_test_dir: TODO:

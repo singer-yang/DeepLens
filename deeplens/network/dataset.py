@@ -25,12 +25,9 @@ class ImageDataset(Dataset):
             img_res = [img_res, img_res]
 
         self.transform = transforms.Compose([
-            transforms.Resize(img_res, antialias=True),
-            # transforms.RandomResizedCrop((img_res, img_res)),
-            # transforms.AutoAugment(transforms.AutoAugmentPolicy.IMAGENET, transforms.InterpolationMode.BILINEAR),   
+            transforms.AutoAugment(transforms.AutoAugmentPolicy.IMAGENET, transforms.InterpolationMode.BILINEAR),
+            transforms.RandomResizedCrop(img_res),
             transforms.ToTensor(),
-            # AddGaussianNoise(0, 0.01),
-            # AddSineNoise([img_res,img_res]),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
 
