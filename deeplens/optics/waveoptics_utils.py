@@ -225,22 +225,18 @@ class DiffFloat(torch.autograd.Function):
     """ Convert double precision tensor to float precision with gradient calculation.
 
     Args:
-        input (tensor): double precision.
+        input (tensor): Double precision tensor.
     """
     @staticmethod
     def forward(ctx, x):
-        return x.float()
-
-    @staticmethod
-    def setup_context(ctx, inputs, output):
-        x, = inputs
         ctx.save_for_backward(x)
+        return x.float()
 
     @staticmethod
     def backward(ctx, grad_output):
         x, = ctx.saved_tensors
-        grad_input = grad_output.double() if ctx.needs_input_grad[0] else None
+        grad_input = grad_output.double()
         return grad_input
-    
+
 def diff_float(input):
     return DiffFloat.apply(input)
