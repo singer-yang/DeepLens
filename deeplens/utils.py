@@ -1,6 +1,9 @@
 import os
 import random 
 import numpy as np
+import cv2 as cv
+from glob import glob
+from tqdm import tqdm
 import torch
 import lpips
 import logging
@@ -89,6 +92,35 @@ def foc_dist_balanced(d1, d2):
     foc_dist = 2 * d1 * d2 / (d1 + d2)
     return foc_dist
 
+
+# ==================================
+# AutoLens
+# ==================================
+def create_video_from_images(image_folder, output_video_path, fps=30):
+    # Get all .png files in the image_folder
+    images = glob(os.path.join(image_folder, '*.png'))
+    images.sort()  # Sort the images by name
+
+    if not images:
+        print("No PNG images found in the provided directory.")
+        return
+
+    # Read the first image to get the dimensions
+    first_image = cv.imread(images[0])
+    height, width, layers = first_image.shape
+
+    # Define the codec and create VideoWriter object
+    fourcc = cv.VideoWriter_fourcc(*'mp4v')
+    video_writer = cv.VideoWriter(output_video_path, fourcc, fps, (width, height))
+
+    # Iterate through images and write them to the video
+    for image_path in tqdm(images):
+        img = cv.imread(image_path)
+        video_writer.write(img)
+
+    # Release the video writer object
+    video_writer.release()
+    print(f"Video saved as {output_video_path}")
 
 
 # ==================================

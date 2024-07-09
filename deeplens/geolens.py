@@ -227,7 +227,7 @@ class GeoLens(DeepObj):
 
 
     @torch.no_grad()
-    def sample_parallel(self,fov=0.0, R=None, z=None, M=15,  wvln=DEFAULT_WAVE, sampling='grid', forward=True, entrance_pupil=False):
+    def sample_parallel(self, fov=0.0, R=None, z=None, M=15,  wvln=DEFAULT_WAVE, sampling='grid', forward=True, entrance_pupil=False):
         """ Sample parallel rays from plane (-R:R, -R:R, z). Rays have shape [spp, M, M, 3]
         
             Used for (1) in-focus loss, (2) RMS spot radius calculation (but not implemented)
@@ -926,9 +926,7 @@ class GeoLens(DeepObj):
         return img 
 
     # ====================================================================================
-    # PSF and spot diagram
-    #   1. Incoherent functions
-    #   2. Coherent functions 
+    # PSF and spot diagram (incoherent ray tracing)
     # ====================================================================================
     def point_source_grid(self, depth, grid=8, normalized=True, quater=False, center=True):
         """ Compute point grid [-1: 1] * [-1: 1] in the object space to compute PSF grid.
@@ -1176,8 +1174,80 @@ class GeoLens(DeepObj):
             psf_maps.append(psf_map)
         psf_map = torch.stack(psf_maps, dim=0)   # shape [3, grid*ks, grid*ks]
         return psf_map
+    
+
+    @torch.no_grad()
+    def rms_map(self, res=(128, 128), depth=DEPTH):
+        """ Calculate the RMS spot error map as a weight mask for lens design.
+
+        Args:
+            res (tuple, optional): resolution of the RMS map. Defaults to (32, 32).
+            depth (float, optional): depth of the point source. Defaults to DEPTH.
+
+        Returns:
+            rms_map (torch.Tensor): RMS map normalized to [0, 1].
+        """
+        M = 128
+        scale = - depth * np.tan(self.hfov) / self.r_last
+        ray = self.sample_point_source(M=M, depth=depth, R=self.sensor_size[0]/2*scale, pupil=True)
+        ray, _, _ = self.trace(ray)
+        o2 = ray.project_to(self.d_sensor)
+        o2_center = (o2*ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(EPSILON).unsqueeze(-1)    
+        o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)   # normalized to center (0, 0)
+        
+        rms_map = torch.sqrt(((o2_norm**2).sum(-1) * ray.ra).sum(0) / (ray.ra.sum(0) + EPSILON))
+        rms_map = nnF.interpolate(rms_map.unsqueeze(0).unsqueeze(0), res, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
+        rms_map /= rms_map.max()
+
+        return rms_map
 
 
+    def analysis_rms(self, depth=DEPTH):
+        """ Compute RMS-based error. Contain both RMS errors and RMS radius.
+        """
+        grid = 20
+        x = torch.linspace(0, 1, grid)
+        y = torch.linspace(0, 1, grid)
+        z = torch.full_like(x, depth)
+        points = torch.stack((x, y, z), dim=-1)
+        scale = self.calc_scale_ray(depth)
+
+        # Ray position in the object space by perspective projection, because points are normalized
+        point_obj_x = points[..., 0] * scale * self.sensor_size[1] / 2   # x coordinate
+        point_obj_y = points[..., 1] * scale * self.sensor_size[0] / 2   # y coordinate
+        point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
+        
+        # Point center determined by green light
+        ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=DEFAULT_WAVE)
+        ray = self.trace2sensor(ray)
+        pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(EPSILON).unsqueeze(-1)
+
+        # Calculate RMS spot size 
+        rms = []
+        for wvln in WAVE_RGB:
+            # Trace rays to sensor plane
+            ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=wvln)
+            ray = self.trace2sensor(ray)
+
+            # Calculate RMS error for different FoVs
+            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
+            rms0 = torch.sqrt((o2_norm**2 * ray.ra.unsqueeze(-1)).sum((0, 2)) / (ray.ra.sum(0) + EPSILON))
+            rms.append(rms0)
+            
+        rms = torch.stack(rms, dim=0)
+        rms = torch.mean(rms, dim=0)
+
+        # Calculate RMS error for on-axis and off-axis
+        rms_avg = rms.mean()
+        rms_radius_on_axis = rms[0]
+        rms_radius_off_axis = rms[-1]
+
+        return rms_avg, rms_radius_on_axis, rms_radius_off_axis
+
+
+    # ====================================================================================
+    # Coherent ray tracing
+    # ====================================================================================
     def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=COHERENT_SPP):
         """ Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing. 
             
@@ -1919,7 +1989,7 @@ class GeoLens(DeepObj):
         self.plot_setup2D_with_trace(filename=save_name, multi_plot=multi_plot, entrance_pupil=True, plot_invalid=plot_invalid, zmx_format=zmx_format, lens_title=lens_title, depth=depth)
 
         # Draw spot diagram and PSF map
-        self.draw_psf_map(save_name=save_name, ks=101, depth=depth)
+        # self.draw_psf_map(save_name=save_name, ks=101, depth=depth)
 
         # Calculate RMS error
         rms_avg, rms_radius_on_axis, rms_radius_off_axis = self.analysis_rms(depth=depth)
@@ -2453,75 +2523,6 @@ class GeoLens(DeepObj):
         return loss_avg
 
 
-    @torch.no_grad()
-    def rms_map(self, res=(128, 128), depth=DEPTH):
-        """ Calculate the RMS spot error map as a weight mask for lens design.
-
-        Args:
-            res (tuple, optional): resolution of the RMS map. Defaults to (32, 32).
-            depth (float, optional): depth of the point source. Defaults to DEPTH.
-
-        Returns:
-            rms_map (torch.Tensor): RMS map normalized to [0, 1].
-        """
-        M = 128
-        scale = - depth * np.tan(self.hfov) / self.r_last
-        ray = self.sample_point_source(M=M, depth=depth, R=self.sensor_size[0]/2*scale, pupil=True)
-        ray, _, _ = self.trace(ray)
-        o2 = ray.project_to(self.d_sensor)
-        o2_center = (o2*ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(EPSILON).unsqueeze(-1)    
-        o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)   # normalized to center (0, 0)
-        
-        rms_map = torch.sqrt(((o2_norm**2).sum(-1) * ray.ra).sum(0) / (ray.ra.sum(0) + EPSILON))
-        rms_map = nnF.interpolate(rms_map.unsqueeze(0).unsqueeze(0), res, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
-        rms_map /= rms_map.max()
-
-        return rms_map
-
-
-    def analysis_rms(self, depth=DEPTH):
-        """ Compute RMS-based error. Contain both RMS errors and RMS radius.
-        """
-        grid = 20
-        x = torch.linspace(0, 1, grid)
-        y = torch.linspace(0, 1, grid)
-        z = torch.full_like(x, depth)
-        points = torch.stack((x, y, z), dim=-1)
-        scale = self.calc_scale_ray(depth)
-
-        # Ray position in the object space by perspective projection, because points are normalized
-        point_obj_x = points[..., 0] * scale * self.sensor_size[1] / 2   # x coordinate
-        point_obj_y = points[..., 1] * scale * self.sensor_size[0] / 2   # y coordinate
-        point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
-        
-        # Point center determined by green light
-        ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=DEFAULT_WAVE)
-        ray = self.trace2sensor(ray)
-        pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(EPSILON).unsqueeze(-1)
-
-        # Calculate RMS spot size 
-        rms = []
-        for wvln in WAVE_RGB:
-            # Trace rays to sensor plane
-            ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=wvln)
-            ray = self.trace2sensor(ray)
-
-            # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
-            rms0 = torch.sqrt((o2_norm**2 * ray.ra.unsqueeze(-1)).sum((0, 2)) / (ray.ra.sum(0) + EPSILON))
-            rms.append(rms0)
-            
-        rms = torch.stack(rms, dim=0)
-        rms = torch.mean(rms, dim=0)
-
-        # Calculate RMS error for on-axis and off-axis
-        rms_avg = rms.mean()
-        rms_radius_on_axis = rms[0]
-        rms_radius_off_axis = rms[-1]
-
-        return rms_avg, rms_radius_on_axis, rms_radius_off_axis
-
-    
     def loss_rms(self, depth=DEPTH):
         """ Compute RGB RMS error per pixel, forward rms error.
 
@@ -2589,7 +2590,7 @@ class GeoLens(DeepObj):
         """
         ray = self.sample_point_source_2D(depth=depth, view=self.hfov * 57.3, M=7, entrance_pupil=True)
         ray = self.trace2sensor(ray)
-        loss = ((ray.o[:, 0] - self.r_last) * ray.ra).abs().sum() / (ray.ra.sum() + EPSILON)
+        loss = ((ray.o[:, 0] * ray.ra).sum() / (ray.ra.sum() + EPSILON) - self.r_last).abs()
         return loss
 
 
@@ -2620,8 +2621,7 @@ class GeoLens(DeepObj):
         loss = 0.0
 
         # Calculate distance between surfaces
-        diff_surf = self.find_diff_surf()
-        for i in diff_surf[:-1]:
+        for i in range(len(self.surfaces) - 1):
             current_surf = self.surfaces[i]
             next_surf = self.surfaces[i+1]
 
@@ -3083,7 +3083,7 @@ def create_cellphone_lens(hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=No
     foclen = imgh / 2 / np.tan(hfov)
     aper_r = foclen / fnum / 2
     aper_d = 0.1
-    ttl = imgh / 2 / math.tan(hfov) * 1.5 if thickness is None else thickness
+    ttl = imgh / 2 / math.tan(hfov) * 1.4 if thickness is None else thickness
     
     d_opt = ttl - flange - aper_d
     d_lens = np.random.rand(lens_num * 2 - 1) + 1
@@ -3120,9 +3120,9 @@ def create_cellphone_lens(hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=No
     lens.prepare_sensor(sensor_res=lens.sensor_res, sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)])
     lens.diff_surf_range = lens.find_diff_surf()
     lens.post_computation()
+    lens.set_target_fov_fnum(hfov=hfov, fnum=fnum)
     
     # Save lens
-    lens.analysis(save_name=f'{save_dir}/starting_point_hfov{hfov}_imgh{imgh}_fnum{fnum}')
     lens.write_lens_json(f'{save_dir}/starting_point_hfov{hfov}_imgh{imgh}_fnum{fnum}.json')
     return lens
 
@@ -3181,7 +3181,6 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
     lens.post_computation()
     
     # Save lens
-    lens.analysis(save_name=f'{save_dir}/starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}')
     lens.write_lens_json(f'{save_dir}/starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json')
     return lens
 
