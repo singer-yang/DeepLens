@@ -19,7 +19,7 @@ import string
 from datetime import datetime
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
-from deeplens import DEPTH, WAVE_RGB, DEFAULT_WAVE, EPSILON, set_logger, set_seed, create_cellphone_lens, create_camera_lens, GeoLens
+from deeplens import GeoLens, DEPTH, WAVE_RGB, DEFAULT_WAVE, EPSILON, set_logger, set_seed, create_cellphone_lens, create_camera_lens, create_video_from_images
 
 
 def config():
@@ -69,7 +69,7 @@ def curriculum_design(self, lrs=[5e-4, 1e-4, 0.1, 1e-4], decay=0.02, iterations=
         """
         # Preparation
         depth = DEPTH
-        num_grid = 41
+        num_grid = 21
         spp = 512
         
         shape_control = True
@@ -78,8 +78,6 @@ def curriculum_design(self, lrs=[5e-4, 1e-4, 0.1, 1e-4], decay=0.02, iterations=
         aper_start = self.surfaces[self.aper_idx].r * 0.5
         aper_final = self.surfaces[self.aper_idx].r
         
-        result_dir = result_dir + '/' + datetime.now().strftime("%m%d-%H%M%S")+ '-DesignLens'
-        os.makedirs(result_dir, exist_ok=True)
         if not logging.getLogger().hasHandlers():
             set_logger(result_dir)
         logging.info(f'lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}.')
@@ -174,10 +172,8 @@ if __name__=='__main__':
     # lens.set_target_fov_fnum(hfov=float(np.arctan(args['DIAG'] / args['FOCLEN'] / 2)), fnum=args['FNUM'], imgh=args['DIAG'])
     # logging.info(f'==> Design target: FOCLEN {round(args["FOCLEN"], 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}')
     
-    # lens.analysis(save_name=f'{result_dir}/lens_starting_point')
-
     # =====> 2. Curriculum learning with RMS errors
-    lens.curriculum_design(lrs=[5e-4, 1e-4, 0.1, 1e-2], decay=0.01, iterations=8000, test_per_iter=100, importance_sampling=True, result_dir=args['result_dir'])
+    lens.curriculum_design(lrs=[5e-4, 1e-4, 0.1, 1e-2], decay=0.01, iterations=5000, test_per_iter=50, result_dir=args['result_dir'])
 
     # Need to train more for the best optical performance
 
@@ -188,3 +184,6 @@ if __name__=='__main__':
     logging.info(f'Actual: FOV {lens.hfov}, IMGH {lens.r_last}, F/{lens.fnum}.')
     lens.write_lens_json(f'{result_dir}/final_lens.json')
     lens.analysis(save_name=f'{result_dir}/final_lens', zmx_format=True)
+
+    # =====> 4. Create video
+    create_video_from_images(f'{result_dir}', f'{result_dir}/autolens.mp4', fps=10)
