@@ -99,7 +99,8 @@ def foc_dist_balanced(d1, d2):
 def create_video_from_images(image_folder, output_video_path, fps=30):
     # Get all .png files in the image_folder
     images = glob(os.path.join(image_folder, '*.png'))
-    images.sort()  # Sort the images by name
+    # images.sort()  # Sort the images by name
+    images.sort(key=lambda x: os.path.getctime(x))  # Sort the images by creation time
 
     if not images:
         print("No PNG images found in the provided directory.")
