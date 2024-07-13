@@ -35,9 +35,9 @@ Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the bas
 
 #### 1. Automated lens design
 
-Fully automated lens design from scratch. Try it at [AutoLens](https://github.com/singer-yang/AutoLens)!
+Fully automated lens design from scratch. Try it at [AutoLens](https://github.com/vccimaging/AutoLens)!
 
-[![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/zju3dv/Mirrored-Human)
+[![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/AutoLens)
 
 <div style="text-align:center;">
     <img src="imgs/autolens1.gif" alt="AutoLens" height="270px"/>
