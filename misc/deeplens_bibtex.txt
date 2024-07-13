@@ -1,0 +1,6 @@
+@article{yang2023curriculum,
+  title={Curriculum learning for ab initio deep learned refractive optics},
+  author={Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang},
+  journal={arXiv preprint arXiv:2302.01089},
+  year={2023}
+}

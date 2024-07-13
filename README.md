@@ -1,57 +1,84 @@
-# DeepLens
-
-DeepLens is a differentiable ray tracer for lens design, imaging simulation, and optics-aware rendering. Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.**
-
-We can provide free code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Lens manufacturing service is also avaliable!
-
-### What is DeepLens
-
-1. Deep learning **aided** lens design (gradient-based lens design)
-2. Deep learning **defined** lens design (End-to-End lens design)
-
-### Key features
-
-1. **Outstanding optimization capabilities** (automated lens design from scratch with gradient-based optimization!)
-2. **End-to-End optical design** (design your computational lens with 5 lines of code!)
-3. **Memory-efficient differentiable ray-tracing** (million-level ray-tracing on a desk-machine!)
-4. **Implicit representation for camera lenses** (train a network to store the PSFs!)
-5. **More features** can be obtained via request or collaboration:
-   1. Hybrid ray-tracing-wave-propagation simulation and optimization.
-   2. Non-sequential ray-tracing for complex systems.
-   3. Billion-level ray-tracing and multi-GPU parallelization.
-   4. Illumination and display system simulation and optimization.
-
-### Applications
-
-##### Automated lens design
-
-Can do both spherical and aspherical lens design, here aspherical lens for demonstration. Try it at [AutoLens](https://github.com/singer-yang/AutoLens)!
-
 <div style="text-align:center;">
-    <img src="imgs/lens_design.gif" alt="AutoLens" style="height:400px;"/>
+    <img src="imgs/logo.png"/>
 </div>
 
-##### End-to-End lens design in 5 lines of code
+**DeepLens** is an open-source differentiable ray tracer for optical design, optics-network co-design, and optics-aware rendering.
 
-No optical prior is needed, End-to-End design with purely image reconstruction loss!
+Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the baseline. We can provide code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Manufacturing service for both refractive and diffractive elements is also avaliable via collaboration!
+
+## News
+
+* We now have a WeChat group. Please contact Xinge Yang (singeryang1999) to join the discussion!
+
+## What is DeepLens
+
+**Deep learning + lens design**
+
+1. More powerful **lens design software** with deep learning.
+2. Next-generation **computational cameras** (optical encoding + deep learning post processing).
+
+**Key features**
+
+1. **Open-source** ray tracer with similar accuracy as Zemax.
+2. **Optimization** power. Automated lens design from scratch!
+3. **Render** camera captured image and start optics-network co-design with 5 lines of code!
+4. **Memory-efficient** ray-tracing, millions of rays on a desk-machine.
+5. **Neural representation**, represent a camera lens as a network.
+6. More features can be obtained via request or collaboration:
+   1. Hybrid ray-tracing-wave-propagation imaging model.
+   2. Non-sequential ray-tracing.
+   3. Polarization ray-tracing.
+   4. Multi-GPU parallelization for billion-level ray-tracing.
+   5. Illumination and display system optimization.
+
+## Applications
+
+#### 1. Automated lens design
+
+Fully automated lens design from scratch. Try it at [AutoLens](https://github.com/singer-yang/AutoLens)!
+
+[![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/zju3dv/Mirrored-Human)
 
 <div style="text-align:center;">
-    <img src="imgs/end2end.gif" alt="End2End" style="height:200px;"/>
+    <img src="imgs/autolens1.gif" alt="AutoLens" height="270px"/>
+    <img src="imgs/autolens2.gif" alt="AutoLens" height="270px"/>
 </div>
 
-##### Implicit representation of a specific lens
+#### 2. End-to-End lens design
 
-A digit-twin network for fast (aberration + defocus) image simulation.
+Lens-network co-design from scratch using final images (or classification/detection/segmentation) as objective.
+
+[![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089)
 
 <div style="text-align:center;">
-    <img src="imgs/implicit_net.png" alt="Implicit" style="width:800px;"/>
+    <img src="imgs/end2end.gif" alt="End2End" height="150px"/>
 </div>
 
-### How to use
+#### 3. Implicit Lens Representation
+
+A surrogate network for fast (aberration + defocus) image simulation.
+
+[![paper](https://img.shields.io/badge/TPAMI-2023-orange)](https://ieeexplore.ieee.org/document/10209238) [![link](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/Aberration-Aware-Depth-from-Focus)
+
+<div style="text-align:center;">
+    <img src="imgs/implicit_net.png" alt="Implicit" height="150px"/>
+</div>
+
+#### 4. Hybrid Refractive-Difractive Lens Model
+
+Design hybrid refractive-diffractive lenses with a new ray-wave model.
+
+[![report](https://img.shields.io/badge/Arxiv-2024-orange)](https://arxiv.org/abs/2406.00834)
+
+<div style="text-align:center;">
+    <img src="imgs/hybridlens.png" alt="Implicit" height="200px"/>
+</div>
+
+## How to use
 
 Here are two methods to use deeplens in your research:
 
-##### Method 1
+#### Method 1
 
 Clone this repo and write your code inside it.
 
@@ -62,7 +89,7 @@ python 0_hello_deeplens.py
 python your_code.py
 ```
 
-##### Method 2
+#### Method 2
 
 Clone the repo and install deeplens as a python package.
 
@@ -78,7 +105,7 @@ import deeplens
 lens = deeplens.GeoLens(filename='./lenses/cellphone80deg.json')
 ```
 
-##### Directory
+#### Directory
 
 ```
 deeplens/
@@ -93,58 +120,25 @@ deeplens/
 ├── LICENSE
 ├── setup.py
 ├── requirements.txt
-└── 0_hello_deeplens.py
+└── 0_hello_deeplens.py (main scripts)
 
 ```
 
-### Cite:
+## Reference
 
-It is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then optimized and maintained by [Xinge Yang](https://singer-yang.github.io/). Welcome to use DeepLens in your research to (1) **build your own pipeline** or (2) **compare it as the baseline.** If you find DeepLens helpful, please cite our papers.
+#### Citations
 
-Original **dO** paper:
+DeepLens is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then developed and maintained by [Xinge Yang](https://singer-yang.github.io/).
 
-```
-@article{wang2022differentiable,
-  title={dO: A differentiable engine for deep lens design of computational imaging systems},
-  author={Wang, Congli and Chen, Ni and Heidrich, Wolfgang},
-  journal={IEEE Transactions on Computational Imaging},
-  volume={8},
-  pages={905--916},
-  year={2022},
-  publisher={IEEE}
-}
-```
+If you use DeeoLens in your research, please cite the corresponding papers:
 
-**DeepLens** paper (automated lens design and End-to-End lens design):
+- [TCI 2022] dO: A differentiable engine for deep lens design of computational imaging systems. [Paper](https://ieeexplore.ieee.org/document/9919421), [BibTex](./misc/do_bibtex.txt)
+- [Arxiv 2023] Curriculum Learning for ab initio Deep Learned Refractive Optics. [Paper](https://arxiv.org/abs/2302.01089), [BibTex](./misc/deeplens_bibtex.txt)
+- [Arxiv 2024] End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model. [Paper](https://arxiv.org/abs/2406.00834), [BibTex](./misc/hybridlens_bibtex.txt)
 
-```
-@article{yang2023curriculum,
-  title={Curriculum learning for ab initio deep learned refractive optics},
-  author={Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang},
-  journal={arXiv preprint arXiv:2302.01089},
-  year={2023}
-}
-```
+#### Projects built on top of DeepLens/dO
 
-PSF implicit representation:
+(If you donot want to list your paper here, we can remove it.)
 
-```
-@article{yang2023aberration,
-  title={Aberration-aware depth-from-focus},
-  author={Yang, Xinge and Fu, Qiang and Elhoseiny, Mohamed and Heidrich, Wolfgang},
-  journal={IEEE Transactions on Pattern Analysis and Machine Intelligence},
-  year={2023},
-  publisher={IEEE}
-}
-```
-
-<!-- <div style="text-align:center;">
-    <img src="imgs/paper_deeplens.png" alt="End2End" style="width:800px;"/>
-</div> -->
-<!-- <div style="text-align:center;">
-    <img src="imgs/paper_dff.png" alt="End2End" style="width:800px;"/>
-</div> -->
-
-#### License
-
-`<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" />``</a><br />`This work is licensed under a `<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">`Creative Commons Attribution-NonCommercial 4.0 International License `</a>`.
+- [TPAMI 2023] Aberration-Aware Depth-From-Focus. [Paper](https://ieeexplore.ieee.org/document/10209238), [BibTex](./misc/aatdff_bibtex.txt)
+- [Arxiv 2024] Centimeter-Scale Achromatic Hybrid Metalens Design: A New Paradigm Based on Differentiable Ray Tracing in the Visible Spectrum. [Paper](https://arxiv.org/abs/2404.03173)

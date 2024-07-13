@@ -1,0 +1,11 @@
+@article{wang2022dO,
+  title={{dO: A differentiable engine for Deep Lens design of computational imaging systems}},
+  author={Wang, Congli and Chen, Ni and Heidrich, Wolfgang},
+  journal={IEEE Transactions on Computational Imaging},
+  year={2022},
+  volume={8},
+  number={},
+  pages={905-916},
+  doi={10.1109/TCI.2022.3212837},
+  publisher={IEEE}
+}
