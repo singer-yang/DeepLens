@@ -1,0 +1,10 @@
+@ARTICLE{10209238,
+  author={Yang, Xinge and Fu, Qiang and Elhoseiny, Mohamed and Heidrich, Wolfgang},
+  journal={IEEE Transactions on Pattern Analysis and Machine Intelligence}, 
+  title={Aberration-Aware Depth-From-Focus}, 
+  year={2023},
+  volume={},
+  number={},
+  pages={1-11},
+  keywords={Lenses;Optical imaging;Training;Estimation;Computational modeling;Optical sensors;Integrated optics;Depth from focus;optical aberration;point spread function;ray tracing},
+  doi={10.1109/TPAMI.2023.3301931}}

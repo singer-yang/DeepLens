@@ -1,0 +1,6 @@
+@article{yang2024end,
+  title={End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model},
+  author={Yang, Xinge and Souza, Matheus and Wang, Kunyi and Chakravarthula, Praneeth and Fu, Qiang and Heidrich, Wolfgang},
+  journal={arXiv preprint arXiv:2406.00834},
+  year={2024}
+}
