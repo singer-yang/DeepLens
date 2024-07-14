@@ -39,7 +39,7 @@ Fully automated lens design from scratch. Try it at [AutoLens](https://github.co
 
 [![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/AutoLens)
 
-<div style="text-align:center;">
+<div align="center">
     <img src="imgs/autolens1.gif" alt="AutoLens" height="270px"/>
     <img src="imgs/autolens2.gif" alt="AutoLens" height="270px"/>
 </div>
@@ -50,7 +50,7 @@ Lens-network co-design from scratch using final images (or classification/detect
 
 [![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089)
 
-<div style="text-align:center;">
+<div align="center">
     <img src="imgs/end2end.gif" alt="End2End" height="150px"/>
 </div>
 
@@ -60,7 +60,7 @@ A surrogate network for fast (aberration + defocus) image simulation.
 
 [![paper](https://img.shields.io/badge/TPAMI-2023-orange)](https://ieeexplore.ieee.org/document/10209238) [![link](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/Aberration-Aware-Depth-from-Focus)
 
-<div style="text-align:center;">
+<div align="center">
     <img src="imgs/implicit_net.png" alt="Implicit" height="150px"/>
 </div>
 
@@ -70,7 +70,7 @@ Design hybrid refractive-diffractive lenses with a new ray-wave model.
 
 [![report](https://img.shields.io/badge/Arxiv-2024-orange)](https://arxiv.org/abs/2406.00834)
 
-<div style="text-align:center;">
+<div align="center">
     <img src="imgs/hybridlens.png" alt="Implicit" height="200px"/>
 </div>
 
