@@ -182,7 +182,8 @@ class DoeThinLens(DeepObj):
     
 
     def point_source_grid(self, depth, grid=9, normalized=True, quater=False, center=False):
-        """ This function is a re-implementation of Lensgroup.point_source_grid().
+        """ 
+        Generate point source grid for PSF calculation.
         """
         # ==> Use center of each patch
         if grid == 1:
@@ -222,7 +223,8 @@ class DoeThinLens(DeepObj):
 
 
     def point_source_radial(self, depth, grid=9, normalized=True, center=False):
-        """ This function is a re-implementation of Lensgroup.point_source_radial().
+        """ 
+        Generate radial point source grid for PSF calculation.
         """
         if grid == 1:
             x = torch.tensor([0.])
