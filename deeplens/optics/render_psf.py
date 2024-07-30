@@ -108,7 +108,8 @@ def local_psf_render(input, psf, kernel_size=11, noise=None):
     inp_pad = nnF.pad(input, pad=(pad, pad, pad, pad), mode='replicate')
     # 2. Create a Tensor of varying Gaussian Kernel
     kernels = psf.reshape(-1, kernel_size, kernel_size)
-    kernels_rgb = torch.stack(C * [kernels], 1)
+    kernels_flip = torch.flip(kernels, [-2, -1])
+    kernels_rgb = torch.stack(C*[kernels_flip], 1)
     # 3. Unfold input
     inp_unf = nnF.unfold(inp_pad, (kernel_size, kernel_size))   
     # 4. Multiply kernel with unfolded
