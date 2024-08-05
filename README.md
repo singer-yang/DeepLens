@@ -8,6 +8,7 @@ Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the bas
 
 ## News
 
+* DeepLens is finall published on Nature Communications, check it [here](https://www.nature.com/articles/s41467-024-50835-7)!
 * We now have a WeChat group. Please contact Xinge Yang (singeryang1999) to join the discussion!
 
 ## What is DeepLens
@@ -15,7 +16,7 @@ Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the bas
 **Deep learning + lens design**
 
 1. More powerful **lens design software** with deep learning.
-2. Next-generation **computational cameras** (optical encoding + deep learning post processing).
+2. Next-generation **computational cameras** (optical encoding + deep learning decoding).
 
 **Key features**
 
@@ -37,7 +38,7 @@ Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the bas
 
 Fully automated lens design from scratch. Try it at [AutoLens](https://github.com/vccimaging/AutoLens)!
 
-[![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/AutoLens)
+[![paper](https://img.shields.io/badge/NatComm-2024-orange)](https://www.nature.com/articles/s41467-024-50835-7) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/AutoLens)
 
 <div align="center">
     <img src="imgs/autolens1.gif" alt="AutoLens" height="270px"/>
@@ -48,7 +49,7 @@ Fully automated lens design from scratch. Try it at [AutoLens](https://github.co
 
 Lens-network co-design from scratch using final images (or classification/detection/segmentation) as objective.
 
-[![paper](https://img.shields.io/badge/Arxiv-2023-orange)](https://arxiv.org/abs/2302.01089)
+[![paper](https://img.shields.io/badge/NatComm-2024-orange)](https://www.nature.com/articles/s41467-024-50835-7)
 
 <div align="center">
     <img src="imgs/end2end.gif" alt="End2End" height="150px"/>
@@ -133,7 +134,7 @@ DeepLens is first developed by [Dr. Congli Wang](https://congliwang.github.io/) 
 If you use DeeoLens in your research, please cite the corresponding papers:
 
 - [TCI 2022] dO: A differentiable engine for deep lens design of computational imaging systems. [Paper](https://ieeexplore.ieee.org/document/9919421), [BibTex](./misc/do_bibtex.txt)
-- [Arxiv 2023] Curriculum Learning for ab initio Deep Learned Refractive Optics. [Paper](https://arxiv.org/abs/2302.01089), [BibTex](./misc/deeplens_bibtex.txt)
+- [NatComm 2024] Curriculum Learning for ab initio Deep Learned Refractive Optics. [Paper](https://www.nature.com/articles/s41467-024-50835-7), [BibTex](./misc/deeplens_bibtex.txt)
 - [Arxiv 2024] End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model. [Paper](https://arxiv.org/abs/2406.00834), [BibTex](./misc/hybridlens_bibtex.txt)
 
 #### Projects built on top of DeepLens/dO
