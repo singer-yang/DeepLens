@@ -1,6 +1,18 @@
-@article{yang2023curriculum,
-  title={Curriculum learning for ab initio deep learned refractive optics},
-  author={Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang},
-  journal={arXiv preprint arXiv:2302.01089},
-  year={2023}
+@article{yang2024curriculum,
+	abstract = {Deep optical optimization has recently emerged as a new paradigm for designing computational imaging systems using only the output image as the objective. However, it has been limited to either simple optical systems consisting of a single element such as a diffractive optical element or metalens, or the fine-tuning of compound lenses from good initial designs. Here we present a DeepLens design method based on curriculum learning, which is able to learn optical designs of compound lenses ab initio from randomly initialized surfaces without human intervention, therefore overcoming the need for a good initial design. We demonstrate the effectiveness of our approach by fully automatically designing both classical imaging lenses and a large field-of-view extended depth-of-field computational lens in a cellphone-style form factor, with highly aspheric surfaces and a short back focal length.},
+	author = {Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang},
+	date = {2024/08/03},
+	date-added = {2024-08-05 07:44:03 -0700},
+	date-modified = {2024-08-05 07:44:03 -0700},
+	doi = {10.1038/s41467-024-50835-7},
+	id = {Yang2024},
+	isbn = {2041-1723},
+	journal = {Nature Communications},
+	number = {1},
+	pages = {6572},
+	title = {Curriculum learning for ab initio deep learned refractive optics},
+	url = {https://doi.org/10.1038/s41467-024-50835-7},
+	volume = {15},
+	year = {2024},
+	bdsk-url-1 = {https://doi.org/10.1038/s41467-024-50835-7}
 }
