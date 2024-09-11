@@ -107,11 +107,39 @@ def point_source_field(point=[0, 0, -1000.], phy_size=[2, 2], res=[1024, 1024], 
     return field
 
 
+def sphere_wave(source, x_range=[-1, 1], y_range=[-1, 1], z_pos=0.0, wvln=0.589, res=[1000, 1000], converge=True):
+    """ Generate a sphere wave field.
+
+    Args:
+        source (list): Source position. [mm].
+        x_range (list): x range. [mm].
+        y_range (list): y range. [mm].
+        res (list): Resolution.
+
+    Returns:
+        field (ComplexWave): Complex field.
+    """
+    x, y = torch.meshgrid(
+        torch.linspace(x_range[0], x_range[1], res[1], dtype=torch.float64),
+        torch.linspace(y_range[1], y_range[0], res[0], dtype=torch.float64),
+        indexing='xy'
+    )
+    z = torch.full_like(x, z_pos)
+    r = torch.sqrt((x - source[0])**2 + (y - source[1])**2 + (z - source[2])**2)
+    if converge:
+        u = torch.exp(- 1j * 2 * np.pi / (wvln * 1e-3) * r) * r.max() / r
+    else:
+        u = torch.exp(1j * 2 * np.pi / (wvln * 1e-3) * r) * r.max() / r
+    
+    xc, yc = (x_range[0] + x_range[1]) / 2, (y_range[0] + y_range[1]) / 2
+    mask = ((x - xc)**2 + (y - yc)**2) > (0.5 * (x_range[1] - x_range[0]))**2
+    u[mask] = 0 + 0j
+    return ComplexWave(u=u, phy_size=[x_range[1] - x_range[0], y_range[1] - y_range[0]], z=z_pos, res=res, wvln=wvln)
+
 
 # ==================================
 # Image batch to wave field
 # ==================================
-
 def img2field(img=None, wvln=0.589, phy_size=[1,1], padding=False, device='cuda'):
     """ Convert a monochrome image to a complex field.
 
@@ -200,11 +228,6 @@ def batch2field(img, phy_size, z=0, wvln=0.589, padding=False, phase='zero', dev
     field.z += z
 
     return field
-
-
-def field2img(field):
-    return
-
 
 def field2img(amp, phase):
     """ Convert a complex field to a RGB image.

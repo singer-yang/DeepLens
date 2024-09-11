@@ -18,28 +18,14 @@ from .basics import *
 class ComplexWave(DeepObj):
     def __init__(self, u=None, wvln=0.550, z=0., phy_size=[4., 4.], valid_phy_size=None, res=[1024,1024], device=DEVICE):
         """ Complex wave field class.
-
-        Args:
-            amp (_type_, optional): _description_. Defaults to None.
-            phi (_type_, optional): _description_. Defaults to None.
-            wvln (int, optional): wvln. Defaults to 550.
-            size (list, optional): physical size of a field, in [mm].
-            res (list, optional): discrete resolution of a field. Defaults to [128,128].
-
-            res
-            phy_size
-            wvln: [um]
-            k
-            
-            u: can be either [B, 1, H, W] or [H, W]
-            x: [H, W]
-            y: [H, W]
-            z: [H, W]
         """
         super(ComplexWave, self).__init__()
 
         # Wave field has shape of [N, 1, H, W] for batch processing
         if u is not None:
+            if not u.dtype == torch.complex128:
+                print("In the future, we want to always use double precision when creating a complex wave field.")
+
             self.u = u if torch.is_tensor(u) else torch.from_numpy(u)
             if not self.u.is_complex():
                 self.u = self.u.to(torch.complex64)
@@ -71,7 +57,6 @@ class ComplexWave(DeepObj):
         self.z = torch.full_like(self.x, z)
 
         self.to(device)
-        
 
     def load_img(self, img):
         """ Use the pixel value of an image/batch as the amplitute.
@@ -92,7 +77,6 @@ class ComplexWave(DeepObj):
         self.u = u.to(self.device)
         self.res = self.u.shape
 
-
     def load_pkl(self, data_path):
         with open(data_path, "rb") as tf:
             wave_data = pickle.load(tf)
@@ -109,7 +93,6 @@ class ComplexWave(DeepObj):
         self.res = self.x.shape
 
         self.to(self.device)
-
 
     def save_data(self, save_path='./test.pkl'):
         data = {
@@ -132,17 +115,14 @@ class ComplexWave(DeepObj):
         save_image(torch.abs(self.u.cpu()), f'{save_path[:-4]}_amp.jpg', normalize=True)
         save_image(torch.angle(self.u.cpu()), f'{save_path[:-4]}_phase.jpg', normalize=True)
 
-
     # =============================================
     # Operation
     # =============================================
-    
     def flip(self):
         self.u = torch.flip(self.u, [-1,-2])
         self.x = torch.flip(self.x, [-1,-2])
         self.y = torch.flip(self.y, [-1,-2])
         self.z = torch.flip(self.z, [-1,-2])
-
         return self
 
     def prop(self, prop_dist, n = 1.):
@@ -190,12 +170,11 @@ class ComplexWave(DeepObj):
             # Super short distance: Angular Spectrum Method
             prop_dist_min = self.Nyquist_zmin()
             if np.abs(prop_dist) < prop_dist_min:
-                print("Propagation distance is too short.")
+                print("Propagation distance is too short, but propagation is still performed with ASM.")
             self.u = AngularSpectrumMethod(self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n)
         
         self.z += prop_dist
         return self
-
 
     def prop_to(self, z, n=1):
         """ Propagate the field to plane z.
@@ -222,25 +201,14 @@ class ComplexWave(DeepObj):
             indexing='xy')
         return x, y
 
-
     def gen_freq_grid(self):
         x, y = self.gen_xy_grid()
         fx = x / (self.ps * self.phy_size[0])
         fy = y / (self.ps * self.phy_size[1])
         return fx, fy
 
-
     def show(self, data='irr', save_name=None):
         """ Show the field.
-        
-        TODO: use x, y coordinates
-
-        Args:
-            data (str, optional): _description_. Defaults to 'irr'.
-
-        Raises:
-            Exception: _description_
-            Exception: _description_
         """
         if data == 'irr':
             value = self.u.detach().abs()**2
@@ -286,23 +254,16 @@ class ComplexWave(DeepObj):
                     fig.show()
         else:
             raise Exception('Unsupported complex field shape.')
-            
+
     def Nyquist_zmin(self):
         """ Compute Nyquist zmin, suppose the second plane has the same side length with the original plane.
         """
         wvln = self.wvln * 1e-3 # [um] to [mm]
-        zmin = np.sqrt((4 * self.ps**2 / wvln**2 - 1) * (self.phy_size[0]/2 + self.phy_size[0]/2)**2)
+        zmin = np.sqrt((max(4 * self.ps**2 / wvln**2 - 1, 0)) * (self.phy_size[0]/2 + self.phy_size[0]/2)**2)
         return zmin
 
     def pad(self, Hpad, Wpad):
-        """ Pad the input field by (Hpad, Hpad, Wpad, Wpad). 
-            This step will also expand the field.
-
-            NOTE: Can only pad plane field.
-
-        Args:
-            Hpad (_type_): _description_
-            Wpad (_type_): _description_
+        """ Pad the input field by (Hpad, Hpad, Wpad, Wpad). This step will also expand physical size of the field.
         """
         device = self.device
 
@@ -397,7 +358,6 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1., padding=True, TF=True):
         
         H = fft2(fftshift(h)) * ps**2
     
-
     # Fourier transformation
     # https://pytorch.org/docs/stable/generated/torch.fft.fftshift.html#torch.fft.fftshift
     u = ifftshift(ifft2(fft2(fftshift(u)) * H))
@@ -409,7 +369,6 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1., padding=True, TF=True):
     del x, y, fx, fy
     return u
 
-
 def FresnelDiffraction(u, z, wvln, ps, n=1., padding=True, TF=None):
     """ Fresnel propagation with FFT.
 
@@ -417,15 +376,13 @@ def FresnelDiffraction(u, z, wvln, ps, n=1., padding=True, TF=None):
          https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
 
     Args:
-        u (_type_): _description_
-        wvln (_type_): _description_
-        ps (_type_): _description_
-        z (_type_): _description_
-        n (_type_, optional): _description_. Defaults to 1..
-        padding (bool, optional): _description_. Defaults to True.
-
-    Returns:
-        _type_: _description_
+        u: complex field, shape [H, W] or [B, C, H, W]
+        z (float): propagation distance
+        wvln (float): wavelength in [um]
+        ps (float): pixel size
+        n (float): refractive index
+        padding (bool): padding or not
+        TF (bool): transfer function or impulse response
     """
     # padding 
     if padding:
@@ -514,7 +471,6 @@ def FraunhoferDiffraction(u, z, wvln, ps, n=1., padding=True):
 
     # Computational fourier optics. Chapter 5, section 5.5.
     # Shorter propagation will not affect final results.
-    
     k = 2 * np.pi / wvln
     if n == 1:
         c = 1 / (1j * wvln * z) * torch.exp(1j * k / (2 * z) * (x2 ** 2 + y2 ** 2))
@@ -530,3 +486,78 @@ def FraunhoferDiffraction(u, z, wvln, ps, n=1., padding=True):
     return u
 
 
+def RayleighSommerfeldIntegral(u1, x1, y1, z, wvln, x2=None, y2=None, n=1., memory_saving=False):
+    """ Brute-force discrete Rayleigh-Sommerfeld-diffraction integration. This function should not be removed as it sometimes serves as the baseline and groud-truth to compare with. Ref: https://diffractio.readthedocs.io/en/latest/source/tutorial/algorithms/RS.html, "Goodman: Introduction to Fourier Optics, 2rd edition, page 50, Eq.(3.43)". Planar wave propogates to a near plane with same size.
+
+    There are two cases we should consider:
+        1): Input field has a very high resoultion, then the memory can be not enough.
+        2): Propagation z is below the minimum distance z0 required by Nyquist sampling criterion.
+
+    Args:
+        u1: input field, shape [H1, W1]
+        x1, y1: coordinate of input field, shape [H1, W1]
+        z: propagation distance, unit [mm]
+        wvln: wavelength, unit [um]
+        x2, y2: coordinate of output field, shape [H2, W2]
+        n: refractive index
+        memory_saving: memory saving
+    """
+    # Parameters
+    assert wvln > 0.1 and wvln < 1, 'wvln unit should be [um].'
+    k = n * 2 * np.pi / (wvln * 1e-3) # distance unit [mm]
+    if x2 is None:
+        x2 = x1.clone()
+    if y2 is None:
+        y2 = y1.clone()
+
+    # Nyquist sampling criterion
+    max_dist = (x1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, x2.shape[0], x2.shape[1]) - x2).abs().max()
+    ps = (x1.max() - x1.min()) / x1.shape[-1]
+    zmin = Nyquist_zmin(wvln=wvln, ps=ps.item(), max_dist=max_dist.item(), n=n)
+    assert zmin < z, 'Propagation distance is too short.'
+    
+    # Rayleigh Sommerfeld diffraction integral
+    if memory_saving:
+        u2 = torch.zeros_like(u1) + 0j
+        step_size = 4
+        x1 = x1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, step_size, step_size)    # [H1, W1, step_size, step_size]
+        y1 = y1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, step_size, step_size)    # [H1, W1, step_size, step_size]
+        u1 = u1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, step_size, step_size)    # [H1, W1, step_size, step_size]
+        for i in range(0, x2.shape[0], step_size):
+            for j in range(0, x2.shape[1], step_size):
+                # Patch
+                x2_patch = x2[i:i+step_size, j:j+step_size]
+                y2_patch = y2[i:i+step_size, j:j+step_size]
+                r2 = (x2_patch - x1)**2 + (y2_patch - y1)**2 + z**2 # shape of [H1, W1, step_size, step_size]
+                r = torch.sqrt(r2)
+                obliq = np.abs(z) / r
+                u2_patch =  torch.sum(u1 * (z / r) * (1 / r - 1j * k) / (2 * np.pi * r) * torch.exp(1j * torch.fmod(k * r, 2 * np.pi)), (0, 1))
+                
+                # Assign
+                u2[i:i+step_size, j:j+step_size] = u2_patch
+    else:
+        # Broadcast
+        x1 = x1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, x2.shape[0], x2.shape[1])    # shape of [H1, W1, H2, W2]
+        y1 = y1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, y2.shape[0], y2.shape[1])    # shape of [H1, W1, H2, W2] 
+        u1 = u1.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, x2.shape[0], x2.shape[1])    # shape of [H1, W1, H2, W2]
+
+        # Rayleigh-Sommerfeld diffraction integral
+        r2 = (x2 - x1)**2 + (y2 - y1)**2 + z**2 # shape of [H1, W1, H2, W2]
+        r = torch.sqrt(r2)
+        obliq = np.abs(z) / r
+        u2 =  torch.sum(u1 * (z / r) * (1 / r - 1j * k) / (2 * np.pi * r) * torch.exp(1j * torch.fmod(k * r, 2 * np.pi)), (0, 1))
+
+    return u2
+
+def Nyquist_zmin(wvln, ps, max_dist, n=1.):
+    """ Nyquist sampling condition for Rayleigh Sommerfeld diffraction.
+
+    Args:
+        wvln: wvln in [um]
+        ps: pixel size in [mm]
+        max_len: maximum side distance between input and output field in [mm]
+        n: refractive index
+    """
+    wvln = wvln * 1e-3  # [um] to [mm]
+    zmin = np.sqrt((4 * ps**2 * n**2 / wvln**2 - 1)) * max_dist
+    return zmin
