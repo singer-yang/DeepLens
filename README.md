@@ -69,7 +69,7 @@ A surrogate network for fast (aberration + defocus) image simulation.
 
 Design hybrid refractive-diffractive lenses with a new ray-wave model.
 
-[![report](https://img.shields.io/badge/Arxiv-2024-orange)](https://arxiv.org/abs/2406.00834)
+[![report](https://img.shields.io/badge/SiggraphAsia-2024-orange)](https://arxiv.org/abs/2406.00834)
 
 <div align="center">
     <img src="imgs/hybridlens.png" alt="Implicit" height="200px"/>
