@@ -50,7 +50,6 @@ class DoeThinLens(DeepObj):
 
         self.surfaces = [self.thinlens, self.doe, self.sensor]
 
-
     def forward(self, field):
         """ Propagate a wavefront through the lens group.
 
@@ -65,11 +64,9 @@ class DoeThinLens(DeepObj):
 
         return field
 
-
     # =============================================
     # PSF related functions
-    # =============================================   
-
+    # =============================================
     def psf(self, point=[0, 0, -10000.], ks=101, wvln=0.589):
         """ Calculate monochromatic point PSF by wave propagation approach.
 
@@ -109,7 +106,6 @@ class DoeThinLens(DeepObj):
         psf_out = torch.flip(psf_out, [0, 1])
 
         return psf_out
-
 
     def psf_rgb(self, point=[0, 0, -DEPTH], ks=101):
         """ Calculate RGB point PSF of DOEThinLens.
@@ -180,7 +176,6 @@ class DoeThinLens(DeepObj):
 
         return psf_map
     
-
     def point_source_grid(self, depth, grid=9, normalized=True, quater=False, center=False):
         """ 
         Generate point source grid for PSF calculation.
@@ -221,7 +216,6 @@ class DoeThinLens(DeepObj):
 
         return point_source
 
-
     def point_source_radial(self, depth, grid=9, normalized=True, center=False):
         """ 
         Generate radial point source grid for PSF calculation.
@@ -240,8 +234,6 @@ class DoeThinLens(DeepObj):
         point_source = torch.stack([x, x, z], dim=-1)
         return point_source
 
-
-
     def draw_psf(self, depth=DEPTH, ks=101, save_name='./psf_doethinlens.png'):
         """ Draw RGB on-axis PSF.
         """
@@ -252,7 +244,6 @@ class DoeThinLens(DeepObj):
 
         psfs = torch.stack(psfs, dim=0) # shape [3, ks, ks]
         save_image(psfs.unsqueeze(0), save_name, normalize=True)
-
 
     def draw_psf_map(self, grid=8, depth=DEPTH, ks=101, log_scale=False, save_name='./psf_map_doethinlens.png'):
         """ Draw RGB PSF map of the DOE thin lens.
@@ -275,11 +266,9 @@ class DoeThinLens(DeepObj):
     def get_optimizer(self, lr):
         return self.doe.get_optimizer(lr=lr)
 
-
     # =============================================
     # Utils
     # =============================================   
-
     def draw_layout(self, save_name='./doethinlens.png'):
         """ Draw lens setup.
         """
@@ -311,4 +300,3 @@ class DoeThinLens(DeepObj):
         ax.axis('off')
         fig.savefig(save_name, dpi=600, bbox_inches='tight')
         plt.close(fig)
-

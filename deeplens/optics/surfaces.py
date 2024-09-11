@@ -10,6 +10,7 @@ from .basics import *
 from .materials import Material
 from ..utils import *
 
+
 class Surface(DeepObj):
     def __init__(self, r, d, mat2, is_square=False, device=DEVICE):
         super(Surface, self).__init__()
@@ -122,7 +123,6 @@ class Surface(DeepObj):
         
         return t, valid
 
-
     def refract(self, ray, eta):
         """ Calculate refractive ray according to Snell's law.
         
@@ -162,7 +162,6 @@ class Surface(DeepObj):
         ray.ra = ray.ra * valid
 
         return ray
-
 
     def normal(self, ray):
         """ Calculate normal vector of the surface.
@@ -337,24 +336,6 @@ class Surface(DeepObj):
         self.d_perturb = float(torch.randn() * d_precision)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class Aperture(Surface):
     def __init__(self, r, d, diffraction=False, device=DEVICE):
         """ Aperture, can be circle or rectangle. 
@@ -422,6 +403,7 @@ class Aperture(Surface):
 """
         return zmx_str
 
+
 class Aspheric(Surface):
     """ This class can represent plane, spheric and aspheric surfaces.
 
@@ -475,7 +457,6 @@ class Aspheric(Surface):
         
         self.to(device)
 
-
     def init(self, ai_degree=6):
         """ Initialize all parameters.
         """
@@ -483,7 +464,6 @@ class Aspheric(Surface):
         self.init_k()
         self.init_ai(ai_degree=ai_degree)
         self.init_d()
-
 
     def init_c(self, c_bound=0.0002):
         """ Initialize lens surface c parameters by small values between [-0.05, 0.05], 
@@ -518,7 +498,6 @@ class Aspheric(Surface):
             for i in range(old_ai_degree + 1, self.ai_degree + 1):
                 exec(f'self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * bound * 0.1 ** {i - 2}')
 
-    
     def init_k(self, bound=1):
         """ When k is 0, set to a random value.
         """
@@ -526,11 +505,9 @@ class Aspheric(Surface):
             k = torch.rand(1) * bound
             self.k = k.to(self.device) 
 
-
     def init_d(self, bound = 0.1):
         return
 
-    
     def g(self, x, y):
         """ Compute surface height.
         """
@@ -553,7 +530,6 @@ class Aspheric(Surface):
                     exec(f'total_surface += self.ai{2*i} * r2 ** {i}')
 
         return total_surface
-
 
     def dgd(self, x, y):
         """ Compute surface height derivatives to x and y.
@@ -619,6 +595,7 @@ class Aspheric(Surface):
             params.append({'params': [self.d], 'lr': lr[1]})
         
         if lr[2] > 0 and self.k != 0:
+            self.k.requires_grad_(True)
             params.append({'params': [self.k], 'lr': lr[2]})
         
         if lr[3] > 0:
@@ -662,7 +639,6 @@ class Aspheric(Surface):
 
         return params
 
-
     @torch.no_grad()
     def perturb(self, ratio=0.001, thickness_precision=0.0005, diameter_precision=0.001):
         """ Randomly perturb surface parameters to simulate manufacturing errors. This function should only be called in the final image simulation stage. 
@@ -681,7 +657,6 @@ class Aspheric(Surface):
             self.k *= 1 + np.random.randn() * ratio
         for i in range(1, self.ai_degree+1):
             exec(f'self.ai{2*i} *= 1 + np.random.randn() * ratio')
-
 
     def surf_dict(self):
         """ Return a dict of surface.
@@ -744,21 +719,21 @@ class Cubic(Surface):
 
         Can also be written as: f(x, y, z) = 0
     """
-    def __init__(self, r, d, ai, mat2, is_square=False, device=DEVICE):
+    def __init__(self, r, d, b, mat2, is_square=False, device=DEVICE):
         Surface.__init__(self, r, d, mat2, is_square=is_square, device=device) 
-        self.ai = torch.Tensor(ai)
+        self.b = torch.Tensor(b)
 
-        if len(ai) == 1:
-            self.b3 = torch.Tensor([ai[0]]).to(device)
+        if len(b) == 1:
+            self.b3 = torch.Tensor([b[0]]).to(device)
             self.b_degree = 1
-        elif len(ai) == 2:
-            self.b3 = torch.Tensor([ai[0]]).to(device)
-            self.b5 = torch.Tensor([ai[1]]).to(device)
+        elif len(b) == 2:
+            self.b3 = torch.Tensor([b[0]]).to(device)
+            self.b5 = torch.Tensor([b[1]]).to(device)
             self.b_degree = 2
-        elif len(ai) == 3:
-            self.b3 = torch.Tensor([ai[0]]).to(device)
-            self.b5 = torch.Tensor([ai[1]]).to(device)
-            self.b7 = torch.Tensor([ai[2]]).to(device)
+        elif len(b) == 3:
+            self.b3 = torch.Tensor([b[0]]).to(device)
+            self.b5 = torch.Tensor([b[1]]).to(device)
+            self.b7 = torch.Tensor([b[2]]).to(device)
             self.b_degree = 3
         else:
             raise Exception('Unsupported cubic degree!!')
@@ -867,12 +842,11 @@ class Cubic(Surface):
         """
         return {
             'type': 'cubic',
-            'b3': self.b3,
-            'b5': self.b5,
-            'b7': self.b7,
+            'b3': self.b3.item(),
+            'b5': self.b5.item(),
+            'b7': self.b7.item(),
             'r': self.r,
-            'd': self.d,
-            'rotate_angle': self.rotate_angle
+            'd': self.d.item()
         }
 
 
@@ -894,11 +868,10 @@ class DOE_GEO(Surface):
         # Use ray tracing to simulate diffraction, the same as Zemax
         self.diffraction = False
         self.diffraction_order = 1
-        print('DOE_GEO initialization: diffraction is not activated.')
+        print('A DOE_GEO is created, but ray-tracing diffraction is not activated.')
         
         self.to(device)
         self.init_param_model(param_model)
-
 
     def init_param_model(self, param_model='binary2'):
         self.param_model = param_model
@@ -931,7 +904,6 @@ class DOE_GEO(Surface):
             raise Exception('Unsupported parameter model!')
 
         self.to(self.device)
-
 
     def activate_diffraction(self, diffraction_order=1):
         self.diffraction = True
@@ -1079,19 +1051,12 @@ class DOE_GEO(Surface):
         x, y = torch.meshgrid(torch.linspace(-self.l/2, self.l/2, 2000), torch.linspace(self.l/2, -self.l/2, 2000), indexing='xy')
         x, y = x.to(self.device), y.to(self.device)
         pmap = self.phi(x, y)
-        # pmap_q = self.pmap_quantize()
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
         ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * np.pi)
         ax[0].set_title(f'Phase map 0.55um', fontsize=10)
         ax[0].grid(False)
         fig.colorbar(ax[0].get_images()[0])
-        
-        # ax[1].imshow(pmap_q.cpu().numpy(), vmin=0, vmax=2 * np.pi)
-        # ax[1].set_title(f'Quantized phase map ({self.wvln0}um)', fontsize=10)
-        # ax[1].grid(False)
-        # fig.colorbar(ax[1].get_images()[0])
-
         fig.savefig(save_name, dpi=600, bbox_inches='tight')
         plt.close(fig)
 
@@ -1434,7 +1399,6 @@ class Spheric(Surface):
     GLAS {self.mat2.name.upper()} 0 0 {self.mat2.n} {self.mat2.V}
     DIAM {self.r*2}
 """
-
         return zmx_str
 
 

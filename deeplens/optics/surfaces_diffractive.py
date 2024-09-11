@@ -9,6 +9,7 @@ from .waveoptics_utils import *
 from ..utils import *
 from .ray import Ray
 
+
 class DOE(DeepObj):
     def __init__(self, l, d, res=None, fab_ps=0.001, param_model='pixel2d', device=DEVICE):
         """ DOE class.
@@ -27,12 +28,12 @@ class DOE(DeepObj):
         self.w = self.l
         self.h = self.l
         
+        # DOE phase map
         self.res = [res, res] if isinstance(res, int) else res
         self.ps = self.l / self.res[0]  # DOE sampling pixel size (need to be small to meet Nyquist sampling condition)
         self.fab_ps = fab_ps  # default 1 [um], DOE fabrication feature size
-        self.fab_res = [int(self.l / self.fab_ps), int(self.l / self.fab_ps)]  # fabrication resolution
+        self.fab_res = [int(round(self.l / self.fab_ps)), int(round(self.l / self.fab_ps))]  # fabrication resolution
         assert self.res[0] % self.fab_res[0] == 0, 'DOE sampling resolution (to meet Nyquist criterion) should be integer times of fabrication resolution.'
-
         self.x, self.y = torch.meshgrid(
             torch.linspace(- self.w/2 + self.fab_ps / 2, self.w/2 - self.fab_ps / 2, self.fab_res[0]),
             torch.linspace(self.h/2 - self.fab_ps / 2, - self.h/2 + self.fab_ps / 2, self.fab_res[1]),
@@ -41,9 +42,9 @@ class DOE(DeepObj):
 
         self.to(device)
         self.init_param_model(param_model)
-        
+
     def init_param_model(self, param_model='none', **kwargs):
-        """ Manually initialize DOE height map.
+        """ Initialize DOE phase map.
 
         Args:
             parameterization (str, optional): DOE parameterization method. Defaults to 'fourier'.
@@ -92,10 +93,9 @@ class DOE(DeepObj):
             raise Exception('Unknown parameterization.')
         
         self.to(self.device)
-        
 
     def save_ckpt(self, save_path='./doe.pth'):
-        """ Save DOE height map.
+        """ Save DOE phase map.
         """
         if self.param_model == 'fresnel':
             torch.save({
@@ -150,9 +150,8 @@ class DOE(DeepObj):
         else:
             raise Exception('Unknown parameterization.')
 
-
     def load_ckpt(self, load_path='./doe.pth'):
-        """ Load DOE height map.
+        """ Load DOE phase map.
         """
         ckpt = torch.load(load_path)
         param_model = ckpt['param_model']
@@ -187,7 +186,6 @@ class DOE(DeepObj):
         
         else:
             raise Exception('Unknown parameterization.')
-
 
     # =======================================
     # Computation
@@ -242,7 +240,6 @@ class DOE(DeepObj):
         pmap = torch.remainder(pmap, 2 * np.pi)
         return pmap
 
-
     def refractive_index(self, wvln=0.55):
         """ Calculate refractive index of DOE. Used for phase map calculation.
         """
@@ -282,7 +279,7 @@ class DOE(DeepObj):
         pmap = self.get_pmap()
         pmap_q = torch.round(pmap / (2 * np.pi / bits)) * (2 * np.pi / bits)
         return pmap_q
-    
+
     def pmap_fab(self, bits=16, save_path=None):
         """ Convert to fabricate phase map and save it. This function is used to output DOE_fab file, and it will not change the DOE object itself.
         """
@@ -309,12 +306,11 @@ class DOE(DeepObj):
         loss = torch.mean(torch.abs(pmap - pmap_q))
         return loss
 
-
     # =======================================
     # Optimization
     # =======================================
     def activate_grad(self, activate=True):
-        """ Activate gradient for all parameters.
+        """ Activate gradient for phase map parameters.
         """
         if self.param_model == 'fresnel':
             self.c.requires_grad = activate
@@ -388,7 +384,6 @@ class DOE(DeepObj):
         
         return params
 
-
     def get_optimizer(self, lr=None):
         """ Generate optimizer for DOE.
 
@@ -399,7 +394,6 @@ class DOE(DeepObj):
         optimizer = torch.optim.Adam(params)
         
         return optimizer
-
 
     def forward(self, field):
         """ 1, Propagate to DOE.
@@ -419,37 +413,34 @@ class DOE(DeepObj):
 
         # ==> 2. Compute and resize phase map
         phase_map = self.get_phase_map(field.wvln)  # recommanded to have [1, H, W] shape
-
         assert self.h == field.phy_size[0], 'Wave field and DOE physical should have the same physical size.'
-        if not field.u.shape[-2:] == phase_map.shape[-2:]: #, 'field and phase map resolution should be the same.'
+        if not field.u.shape[-2:] == phase_map.shape[-2:]:
             raise Exception('Field and phase map resolution should be the same. Interpolation can be done but not a desired way.')
-            phase_map = nnF.interpolate(phase_map.unsqueeze(0).unsqueeze(0), field.u.shape[-2:], mode='nearest').squeeze(0).squeeze(0)
         
         field.u = field.u * torch.exp(1j * phase_map)
-
         return field
 
     # =======================================
     # Visualization
     # =======================================
     def show(self, save_name='./DOE_phase_map.png'):
-        """ Visualize height map.
+        """ Visualize phase map.
         """
         self.draw_phase_map(save_name)
 
     def save_pmap(self, save_path='./DOE_phase_map.png'):
-        """ Save height map.
+        """ Save phase map.
         """
         self.draw_phase_map(save_path)
 
     def draw_phase_map(self, save_name='./DOE_phase_map.png'):
-        """ Draw height map. Range from [0, max_height].
+        """ Draw phase map. Range from [0, 2pi].
         """
         pmap = self.get_pmap()
         save_image(pmap, save_name, normalize=True)
-    
+
     def draw_phase_map_fab(self, save_name='./DOE_phase_map.png'):
-        """ Draw height map. Range from [0, max_height].
+        """ Draw phase map. Range from [0, 2pi].
         """
         pmap = self.get_pmap()
         pmap_q = self.pmap_quantize()
@@ -469,7 +460,7 @@ class DOE(DeepObj):
         plt.close(fig)
 
     def draw_phase_map3d(self, save_name='./DOE_phase_map3d.png'):
-        """ Draw 3D height map.
+        """ Draw 3D phase map.
         """
         pmap = self.get_pmap() / 20.
         x = np.linspace(-self.w/2, self.w/2, self.res[0])
@@ -485,7 +476,7 @@ class DOE(DeepObj):
         plt.close(fig)
 
     def draw_cross_section(self, save_name='./DOE_corss_sec.png'):
-        """ Draw cross section of the height map.
+        """ Draw cross section of the phase map.
         """
         pmap = self.get_pmap()
         pmap = torch.diag(pmap).cpu().numpy()
@@ -516,7 +507,6 @@ class ThinLens(DeepObj):
         self.ref_wvlns = wvlns
         self.ref_foclens = foclens
 
-
     def interp_foclen(self, wvln):
         """ Interpolate focus length for different wvln.
         """
@@ -533,7 +523,6 @@ class ThinLens(DeepObj):
         # Interpolate focus length
         foclen = ref_foclens[idx1] + (ref_foclens[idx2] - ref_foclens[idx1]) / (ref_wvlns[idx2] - ref_wvlns[idx1]) * (wvln - ref_wvlns[idx1])
         return foclen
-
 
     def forward(self, field):
         """ Thin lens propagation.
@@ -597,7 +586,6 @@ class Sensor(DeepObj):
 
         self.to(device)
 
-
     def forward(self, field):
         """ Propagate a field to the sensor. Output the sensor intensity response to the field.
 
@@ -618,14 +606,18 @@ class Sensor(DeepObj):
         return response
 
 
-
-
-def Zernike(z_coeff, r, alpha):
-    """ Calculate the first 37 Zernike polynomials.
+def Zernike(z_coeff, grid=256):
+    """ Calculate phase map produced by the first 37 Zernike polynomials. The output zernike phase map is in real value, to use it in the future we need to convert it to complex value.
     """
+    # Generate meshgrid
+    x, y = torch.meshgrid(torch.linspace(-1, 1, grid), torch.linspace(1, -1, grid), indexing='xy')
+    r = torch.sqrt(x**2 + y**2)
+    alpha = torch.atan2(y, x)
+
+    # Calculate Zernike polynomials
     Z1  =  z_coeff[0]  * 1 
-    Z2  =  z_coeff[1]  * 2 * r * torch.cos(alpha)
-    Z3  =  z_coeff[2]  * 2 * r * torch.sin(alpha)
+    Z2  =  z_coeff[1]  * 2 * r * torch.sin(alpha)
+    Z3  =  z_coeff[2]  * 2 * r * torch.cos(alpha)
     Z4  =  z_coeff[3]  * math.sqrt(3) * (2 * r**2 - 1)
     Z5  =  z_coeff[4]  * math.sqrt(6) * r**2 * torch.sin(2 * alpha)
     Z6  =  z_coeff[5]  * math.sqrt(6) * r**2 * torch.cos(2 * alpha)
@@ -662,5 +654,9 @@ def Zernike(z_coeff, r, alpha):
     Z37 =  z_coeff[36] * 3 * (70 * r**8 - 140 * r**6 + 90 * r**4 - 20 * r**2 + 1)
     
     ZW = Z1 + Z2 + Z3+ Z4 + Z5 + Z6 + Z7 + Z8 + Z9 + Z10 + Z11 + Z12 + Z13 + Z14 + Z15 + Z16 + Z17 + Z18 + Z19 + Z20 + Z21 + Z22 + Z23 + Z24 + Z25 + Z26 + Z27 + Z28 + Z29 + Z30 + Z31 + Z32 + Z33 + Z34 + Z35 + Z36 + Z37
+
+    # Mask out
+    mask = (x**2 + y**2) > 1
+    ZW[mask] = 0.0
     
     return ZW

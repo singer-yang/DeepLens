@@ -370,7 +370,6 @@ class GeoLens(DeepObj):
             pupil (bool, optional): whether to use pupil. Defaults to False.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
         """
-        # ========>
         if R is None:
             R = self.surfaces[0].r
         Rw = R * self.sensor_res[1] / self.sensor_res[0] # half height
@@ -388,22 +387,22 @@ class GeoLens(DeepObj):
         x = x * Rw
         y = y * R
 
-        # x, y = torch.t(x), torch.t(y)
         z = torch.full_like(x, depth)
         o = torch.stack((x,y,z), -1).to(self.device)
         o = o.unsqueeze(0).repeat(spp, 1, 1, 1)
         
-
         # sample d
         if pupil:
-            o2 = self.sample_pupil(res=(M,M), spp=spp)
+            if depth < 0:
+                pupilz, pupilr = self.entrance_pupil()
+            else:
+                pupilz, pupilr = self.exit_pupil()
+            o2 = self.sample_pupil(res=(M,M), spp=spp, pupilr=pupilr, pupilz=pupilz)
             d = o2 - o
             d = d / torch.linalg.vector_norm(d, ord=2, dim=-1, keepdim=True)
-
         else:
             raise Exception('Cone sampling specified by fov has been abandoned. Use pupil sampling instead.')
 
-        # generate ray
         ray = Ray(o, d, wvln, device=self.device)
         return ray
 
@@ -684,8 +683,6 @@ class GeoLens(DeepObj):
 
         valid = (ray.ra == 1)
         return valid, ray, oss
-
-
         
     # ====================================================================================
     # Ray-tracing based rendering
@@ -1933,6 +1930,12 @@ class GeoLens(DeepObj):
                 except:
                     continue
 
+    @torch.no_grad()
+    def match_materials(self, mat_table='CDGM'):
+        """ Match material
+        """
+        for surf in self.surfaces:
+            surf.mat2.match_material(mat_table=mat_table)
 
     @torch.no_grad()
     def correct_shape(self):
@@ -2035,12 +2038,12 @@ class GeoLens(DeepObj):
             rec_psnr = round(compare_psnr(img_org, img_rec, data_range=255), 4)
             rec_ssim = round(compare_ssim(img_org, img_rec, channel_axis=2, data_range=255), 4)
             print(f'Rec image: PSNR={rec_psnr}, SSIM={rec_ssim}')
-        
-        
+
 
     @torch.no_grad()
     def draw_layout(self, save_name):
         return self.plot_setup2D_with_trace(filename=save_name)
+
 
     @torch.no_grad()      
     def plot_setup2D_with_trace(self, filename, depth=None, entrance_pupil=True, zmx_format=False, plot_invalid=True, multi_plot=False, lens_title=None, ax=None, fig=None):
@@ -2051,7 +2054,8 @@ class GeoLens(DeepObj):
         # ==> Title
         if lens_title is None:
             if self.aper_idx is not None:
-                lens_title = f'FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_F/{round(self.fnum,2)}_DIAG{round(self.r_last*2, 2)}mm_FocLen{round(self.foclen,2)}mm'
+                fnum = self.foclen / self.entrance_pupil()[1] / 2
+                lens_title = f'FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_F/{round(fnum,2)}_DIAG{round(self.r_last*2, 2)}mm_FocLen{round(self.foclen,2)}mm'
             else:
                 lens_title = f'FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_DIAG{round(self.r_last*2, 2)}mm_FocLen{round(self.foclen,2)}mm'
         
@@ -2478,7 +2482,7 @@ class GeoLens(DeepObj):
     # Distortion
     # ====================================================================================
     @torch.no_grad()
-    def unwarp(self, img, depth, grid=256, spp=256, crop=True):
+    def unwarp(self, img, depth=DEPTH, grid=256, spp=256, crop=True):
         """ Unwarp rendered images.
         """
         # Ray tracing to calculate distortion map
@@ -2594,14 +2598,15 @@ class GeoLens(DeepObj):
         return loss
 
 
-    def loss_surface(self, grad_bound=0.5):
-        """ Surface should be smooth, aggressive shape change should be pealized. 
+    def loss_surface(self, sag_bound=1.0):
+        """ Penalize large sag values
         """
-        loss = 0.
+        loss = 0.0
         for i in self.find_diff_surf():
-            r = self.surfaces[i].r
-            x_grad, y_grad, _ = self.surfaces[i].dfdxyz(torch.tensor([r]).to(self.device), torch.tensor([0]).to(self.device))
-            loss += max(x_grad.abs() + y_grad.abs(), grad_bound)
+            x_ls = torch.linspace(0.0, 1.0, 9).to(self.device) * self.surfaces[i].r
+            y_ls = torch.zeros_like(x_ls)
+            sag_ls = self.surfaces[i].sag(x_ls, y_ls)
+            loss += max(sag_ls.abs().max(), sag_bound)
 
         return loss
 
@@ -2644,7 +2649,7 @@ class GeoLens(DeepObj):
         return - loss
  
 
-    def loss_ray_angle(self, target=0.6, depth=DEPTH):
+    def loss_ray_angle(self, target=0.5, depth=DEPTH):
         """ Loss function designed to penalize large incident angle rays.
 
             Reference value: > 0.7
@@ -2659,19 +2664,23 @@ class GeoLens(DeepObj):
         ray, _, _ = self.trace(ray)
 
         # Loss (we want to maximize ray angle term)
-        loss = torch.sum(ray.obliq * ray.ra) / (torch.sum(ray.ra) + EPSILON)
+        loss = ray.obliq.min()
         loss = min(loss, target)
 
         return - loss
 
 
-    def loss_reg(self, w_focus=2.0):
-        """ An empirical regularization loss for lens design.
+    def loss_reg(self, w_focus=None):
+        """ An empirical regularization loss for lens design. 
+        
+            By default we should use weight 0.1 * self.loss_reg()
         """
         if self.is_cellphone:
-            loss_reg = w_focus * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5) + 0.05 * self.loss_ray_angle()
+            w_focus = 2.0 if w_focus is None else w_focus
+            loss_reg = w_focus * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5) +  self.loss_surface(sag_bound=0.8) + 0.05 * self.loss_ray_angle()
         else:
-            loss_reg = w_focus * self.loss_infocus() + self.loss_self_intersec(dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0)
+            w_focus = 10.0 if w_focus is None else w_focus
+            loss_reg = w_focus * self.loss_infocus() + 0.1 * self.loss_self_intersec(dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0) + 0.1 * self.loss_surface(sag_bound=7.0) + 0.05 * self.loss_ray_angle()
         
         return loss_reg
     
@@ -2680,7 +2689,6 @@ class GeoLens(DeepObj):
     # ====================================================================================
     # Optimization
     # ====================================================================================
-
     def activate_surf(self, activate=True, diff_surf_range=None):
         """ Activate gradient for each surface.
         """
@@ -2693,7 +2701,7 @@ class GeoLens(DeepObj):
             self.surfaces[i].activate_grad(activate)
 
 
-    def get_optimizer_params(self, lr=[1e-4, 1e-4, 1e-1, 1e-4], decay=0.01, diff_surf_range=None):
+    def get_optimizer_params(self, lr=[1e-4, 1e-4, 1e-1, 1e-3], decay=0.01, diff_surf_range=None):
         """ Get optimizer parameters for different lens surface.
 
             For cellphone lens: [c, d, k, a], [1e-4, 1e-4, 1e-1, 1e-4]
@@ -2745,7 +2753,7 @@ class GeoLens(DeepObj):
         return optimizer
 
 
-    def optimize(self, lrs=[5e-4, 1e-4, 0.1, 1e-2], decay=0.02, iterations=2000, test_per_iter=100, refine=True, centroid=False, dropout=False, importance_sampling=False, result_dir='./results'):
+    def optimize(self, lrs=[5e-4, 1e-4, 0.1, 1e-3], decay=0.01, iterations=2000, test_per_iter=100, refine=True, centroid=False, dropout=False, importance_sampling=False, optim_mat=False, result_dir='./results'):
         """ Optimize the lens by minimizing rms errors.
 
         Debug hints:
@@ -2774,10 +2782,10 @@ class GeoLens(DeepObj):
         logging.info(f'lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}.')
 
         optimizer = self.get_optimizer(lrs, decay)
-        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=iterations//20, num_training_steps=iterations)
+        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=200, num_training_steps=iterations)
 
         # Training
-        pbar = tqdm(total=iterations+1, desc='Progress', postfix={'rms': 0})
+        pbar = tqdm(total=iterations+1, desc='Progress', postfix={'loss': 0})
         for i in range(iterations+1):
 
             # ===> Evaluate the lens
@@ -2785,6 +2793,8 @@ class GeoLens(DeepObj):
                 with torch.no_grad():
                     if i > 0 and shape_control:   
                         self.correct_shape()
+                        if optim_mat:
+                            self.match_materials()
                     
                     self.write_lens_json(f'{result_dir}/iter{i}.json')
                     self.analysis(f'{result_dir}/iter{i}', zmx_format=True, plot_invalid=True, multi_plot=False)
@@ -2843,7 +2853,7 @@ class GeoLens(DeepObj):
             optimizer.step()
             scheduler.step()
 
-            pbar.set_postfix(rms=loss_rms.item())
+            pbar.set_postfix(loss=loss_rms.item())
             pbar.update(1)
 
         pbar.close()
@@ -2852,9 +2862,6 @@ class GeoLens(DeepObj):
     # ====================================================================================
     # Lesn file IO
     # ====================================================================================
-    
-
-
     def read_lens_json(self, filename='./test.json'):
         """ Read the lens from .json file.
         """
