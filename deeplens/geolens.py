@@ -427,7 +427,7 @@ class GeoLens(DeepObj):
         if normalized:
             raise NotImplementedError("This feature has not been implemented yet.")
         else:
-            o = torch.Tensor(o) if not torch.is_tensor(o) else o
+            o = torch.tensor(o) if not torch.is_tensor(o) else o
         
         # Sample pupil and compute d
         pupilz, pupilr = self.entrance_pupil(shrink_pupil=shrink_pupil)
@@ -2131,7 +2131,7 @@ class GeoLens(DeepObj):
             show = False
 
         for i, os in enumerate(oss):
-            o = torch.Tensor(np.array(os)).to(self.device)
+            o = torch.tensor(np.array(os)).to(self.device)
             x = o[..., 0]
             z = o[..., 2]
 
@@ -2165,7 +2165,7 @@ class GeoLens(DeepObj):
         """ Draw lens layout in 2D.
         """
         def plot(ax, z, x, color, linestyle='-'):
-            p = torch.stack((x, torch.zeros_like(x, device=self.device), z), axis=-1)
+            p = torch.stack((x, torch.zeros_like(x), z), axis=-1)
             p = p.cpu().detach().numpy()
             ax.plot(p[..., 2], p[..., 0], color=color, linestyle=linestyle, linewidth=0.8)
 
@@ -2206,8 +2206,8 @@ class GeoLens(DeepObj):
                 plot(ax, z, r, color)
 
                 # Draw DOE base
-                z_bound = torch.stack((z[0], z[0]-max_offset, z[0]-max_offset, z[-1]), dim=-1).unsqueeze(-1)
-                x = torch.Tensor(np.array([[-s.r], [-s.r], [s.r], [s.r]])).to(self.device)
+                z_bound = torch.tensor([z[0], z[0]-max_offset, z[0]-max_offset, z[-1]])
+                x = torch.tensor([-s.r, -s.r, s.r, s.r])
                 plot(ax, z_bound, x, color)
 
             # Thin lens
@@ -2238,14 +2238,14 @@ class GeoLens(DeepObj):
                 if zmx_format:
                     if r > r_prev:
                         z = torch.stack((sag_prev, sag_prev, sag))
-                        x = torch.Tensor(np.array([[r_prev], [r], [r]])).to(self.device)
+                        x = torch.tensor([r_prev, r, r]).to(self.device)
                     else:
                         z = torch.stack((sag_prev, sag, sag))
-                        x = torch.Tensor(np.array([[r_prev], [r_prev], [r]])).to(self.device)
+                        x = torch.tensor([r_prev, r_prev, r]).to(self.device)
                 
                 else:
                     z = torch.stack((sag_prev, sag))
-                    x = torch.Tensor(np.array([[r_prev], [r]])).to(self.device)
+                    x = torch.tensor([r_prev, r]).to(self.device)
 
                 plot(ax, z, x, color)
                 plot(ax, z,-x, color)
@@ -2311,8 +2311,6 @@ class GeoLens(DeepObj):
         """
         x = torch.linspace(0, 1, M)
         y = torch.linspace(0, 1, M)
-        # x = torch.Tensor([0.0, 0.8, 0.99])
-        # y = torch.Tensor([0.0, 0.8, 0.99])
         z = torch.full_like(x, depth)
         points = torch.stack((x, y, z), dim=-1)
         
@@ -2428,7 +2426,7 @@ class GeoLens(DeepObj):
         plt.figure(figsize=(6,6))
         for wvln_idx, wvln in enumerate(wvlns):
             for fov_idx, fov in enumerate(relative_fov):
-                point = torch.Tensor([fov, fov, depth])
+                point = torch.tensor([fov, fov, depth])
                 psf = self.psf(points=point, wvln=wvln, ks=256)
                 freq, mtf_tan, mtf_sag = self.psf2mtf(psf)
 
@@ -2556,7 +2554,7 @@ class GeoLens(DeepObj):
         loss = 0.0
         for fov in relative_fov:
             # ==> Calculate PSF
-            point = torch.Tensor([fov, fov, depth])
+            point = torch.tensor([fov, fov, depth])
             psf = self.psf(points=point, wvln=wvln, ks=256)
             
             # ==> Calculate MTF
@@ -2914,7 +2912,7 @@ class GeoLens(DeepObj):
 
         # self.sensor_size = data['sensor_size']
         self.r_last = data['r_last']
-        self.d_sensor = torch.Tensor([d])
+        self.d_sensor = torch.tensor(d)
 
 
     def write_lens_json(self, filename='./test.json'):
@@ -3007,7 +3005,7 @@ class GeoLens(DeepObj):
                 # Image sensor
                 self.r_last = float(surf_dict['DIAM'].split()[0])
 
-        self.d_sensor = torch.Tensor([d])
+        self.d_sensor = torch.tensor(d)
 
 
     def write_lens_zmx(self, filename='./test.zmx'):
@@ -3122,7 +3120,7 @@ def create_cellphone_lens(hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=No
         surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c2, k = k2, ai = ai2, mat2 = 'air'))
 
     # Lens calculation
-    lens.d_sensor = torch.Tensor([ttl]).to(lens.device)
+    lens.d_sensor = torch.tensor(ttl).to(lens.device)
     lens.find_aperture()
     lens.prepare_sensor(sensor_res=lens.sensor_res, sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)])
     lens.diff_surf_range = lens.find_diff_surf()
@@ -3181,7 +3179,7 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
             surfaces.append(Aperture(r = aper_r, d = d_total))
 
     # Lens calculation
-    lens.d_sensor = torch.Tensor([ttl]).to(lens.device)
+    lens.d_sensor = torch.tensor(ttl).to(lens.device)
     lens.find_aperture()
     lens.prepare_sensor(sensor_res=lens.sensor_res, sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)])
     lens.diff_surf_range = lens.find_diff_surf()

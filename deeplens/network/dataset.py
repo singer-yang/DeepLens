@@ -5,6 +5,8 @@ import torch
 import math
 import glob
 import os
+import requests  
+import zipfile  
 import cv2 as cv
 import numpy as np
 from PIL import Image
@@ -38,6 +40,43 @@ class ImageDataset(Dataset):
         img = Image.open(self.img_paths[idx]) 
         img = self.transform(img)
         return img
+    
+
+# ======================================
+# Online dataset
+# ======================================
+def download_and_unzip_div2k(destination_folder):  
+    urls = {  
+        'DIV2K_train_HR.zip': 'http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip',  
+        'DIV2K_valid_HR.zip': 'http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_valid_HR.zip'
+    }  
+
+    # Create destination folder if it doesn't exist  
+    if not os.path.exists(destination_folder):  
+        os.makedirs(destination_folder)  
+
+    for filename, url in urls.items():  
+        zip_path = os.path.join(destination_folder, filename)  
+
+        # Download the dataset  
+        print(f'Downloading {filename}...')  
+        response = requests.get(url, stream=True)  
+        total_size = int(response.headers.get('content-length', 0))  
+        block_size = 1024 * 1024  # 1 MB  
+
+        with open(zip_path, 'wb') as f:  
+            for data in response.iter_content(block_size):  
+                f.write(data)  
+        print(f'Download of {filename} complete.')  
+
+        # Unzip the dataset  
+        print(f'Unzipping {filename}...')  
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:  
+            zip_ref.extractall(destination_folder)  
+        print(f'Unzipping of {filename} complete.')  
+
+        # Remove the zip file  
+        os.remove(zip_path)
 
 
 # ======================================

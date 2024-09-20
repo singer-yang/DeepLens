@@ -14,7 +14,7 @@ from ..utils import *
 class Surface(DeepObj):
     def __init__(self, r, d, mat2, is_square=False, device=DEVICE):
         super(Surface, self).__init__()
-        self.d = d if torch.is_tensor(d) else torch.Tensor([d])
+        self.d = d if torch.is_tensor(d) else torch.tensor(d)
         self.d_perturb = 0.0
 
         self.r = float(r)   # r is not differentiable
@@ -429,28 +429,28 @@ class Aspheric(Surface):
             device (torch.device): device to store the tensor
         """
         Surface.__init__(self, r, d, mat2, is_square=False, device=device)
-        self.c = torch.Tensor([c])
-        self.k = torch.Tensor([k])
+        self.c = torch.tensor(c)
+        self.k = torch.tensor(k)
         if ai is not None:
-            self.ai = torch.Tensor(np.array(ai))
+            self.ai = torch.tensor(np.array(ai))
             self.ai_degree = len(ai)
             if self.ai_degree == 4:
-                self.ai2 = torch.Tensor([ai[0]])
-                self.ai4 = torch.Tensor([ai[1]])
-                self.ai6 = torch.Tensor([ai[2]])
-                self.ai8 = torch.Tensor([ai[3]])
+                self.ai2 = torch.tensor(ai[0])
+                self.ai4 = torch.tensor(ai[1])
+                self.ai6 = torch.tensor(ai[2])
+                self.ai8 = torch.tensor(ai[3])
             elif self.ai_degree == 5:
-                self.ai2 = torch.Tensor([ai[0]])
-                self.ai4 = torch.Tensor([ai[1]])
-                self.ai6 = torch.Tensor([ai[2]])
-                self.ai8 = torch.Tensor([ai[3]])
-                self.ai10 = torch.Tensor([ai[4]])
+                self.ai2 = torch.tensor(ai[0])
+                self.ai4 = torch.tensor(ai[1])
+                self.ai6 = torch.tensor(ai[2])
+                self.ai8 = torch.tensor(ai[3])
+                self.ai10 = torch.tensor(ai[4])
             elif self.ai_degree == 6:
                 for i, a in enumerate(ai):
-                    exec(f'self.ai{2*i+2} = torch.Tensor([{a}])')
+                    exec(f'self.ai{2*i+2} = torch.tensor({a})')
             else:
                 for i, a in enumerate(ai):
-                    exec(f'self.ai{2*i+2} = torch.Tensor([{a}])')
+                    exec(f'self.ai{2*i+2} = torch.tensor({a})')
         else:
             self.ai = None
             self.ai_degree = 0
@@ -721,19 +721,19 @@ class Cubic(Surface):
     """
     def __init__(self, r, d, b, mat2, is_square=False, device=DEVICE):
         Surface.__init__(self, r, d, mat2, is_square=is_square, device=device) 
-        self.b = torch.Tensor(b)
+        self.b = torch.tensor(b)
 
         if len(b) == 1:
-            self.b3 = torch.Tensor([b[0]]).to(device)
+            self.b3 = torch.tensor(b[0]).to(device)
             self.b_degree = 1
         elif len(b) == 2:
-            self.b3 = torch.Tensor([b[0]]).to(device)
-            self.b5 = torch.Tensor([b[1]]).to(device)
+            self.b3 = torch.tensor(b[0]).to(device)
+            self.b5 = torch.tensor(b[1]).to(device)
             self.b_degree = 2
         elif len(b) == 3:
-            self.b3 = torch.Tensor([b[0]]).to(device)
-            self.b5 = torch.Tensor([b[1]]).to(device)
-            self.b7 = torch.Tensor([b[2]]).to(device)
+            self.b3 = torch.tensor(b[0]).to(device)
+            self.b5 = torch.tensor(b[1]).to(device)
+            self.b7 = torch.tensor(b[2]).to(device)
             self.b_degree = 3
         else:
             raise Exception('Unsupported cubic degree!!')
@@ -757,7 +757,7 @@ class Cubic(Surface):
             raise Exception('Unsupported cubic degre!')
         
         if len(z.size()) == 0:
-            z = torch.Tensor([z]).to(self.device)
+            z = torch.tensor(z).to(self.device)
 
         if self.rotate_angle != 0:
             x = x * np.cos(self.rotate_angle) + y * np.sin(self.rotate_angle)
@@ -877,14 +877,14 @@ class DOE_GEO(Surface):
         self.param_model = param_model
         if self.param_model == 'fresnel':
             # Focal length at 550nm
-            self.f0 = torch.tensor([100.0])
+            self.f0 = torch.tensor(100.0)
         
         elif self.param_model == 'binary2':
             # Zemax binary2 surface type
-            self.order2 = torch.tensor([0.0])
-            self.order4 = torch.tensor([0.0])
-            self.order6 = torch.tensor([0.0])
-            self.order8 = torch.tensor([0.0])
+            self.order2 = torch.tensor(0.0)
+            self.order4 = torch.tensor(0.0)
+            self.order6 = torch.tensor(0.0)
+            self.order8 = torch.tensor(0.0)
         
         elif self.param_model == 'poly1d':
             rand_value = np.random.rand(6) * 0.001
@@ -897,8 +897,8 @@ class DOE_GEO(Surface):
         
         elif self.param_model == 'grating':
             # A grating surface
-            self.theta = torch.tensor([0.0])    # angle from x-axis to grating vector
-            self.alpha = torch.tensor([0.0])    # slope of the grating
+            self.theta = torch.tensor(0.0)    # angle from x-axis to grating vector
+            self.alpha = torch.tensor(0.0)    # slope of the grating
         
         else: 
             raise Exception('Unsupported parameter model!')
@@ -1302,7 +1302,7 @@ class Spheric(Surface):
     """
     def __init__(self, c, r, d, mat2, device=DEVICE):
         super(Spheric, self).__init__(r, d, mat2, is_square=False, device=device)
-        self.c = torch.tensor([c])
+        self.c = torch.tensor(c)
 
         self.c_perturb = 0.0
         self.d_perturb = 0.0
@@ -1407,7 +1407,7 @@ class ThinLens(Surface):
         """ Thin lens surface. 
         """
         Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
-        self.f = torch.tensor([f])
+        self.f = torch.tensor(f)
 
     def intersect(self, ray, n=1.0):
         """ Solve ray-surface intersection and update rays.
