@@ -6,7 +6,7 @@ For image simulation:
     2. PSF + patch convolution
 
 Technical Paper:
-    Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang, "Curriculum learning for ab initio deep learned refractive optics," ArXiv preprint (2023)
+    Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
 
 This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
     # The license is only for non-commercial use (commercial licenses can be obtained from authors).
