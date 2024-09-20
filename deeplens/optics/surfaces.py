@@ -432,7 +432,7 @@ class Aspheric(Surface):
         self.c = torch.tensor(c)
         self.k = torch.tensor(k)
         if ai is not None:
-            self.ai = torch.tensor(np.array(ai))
+            self.ai = torch.tensor(ai)
             self.ai_degree = len(ai)
             if self.ai_degree == 4:
                 self.ai2 = torch.tensor(ai[0])
