@@ -79,6 +79,10 @@ def end2end_train(lens, net, args):
     result_dir = args['result_dir']
 
     # ==> Dataset
+    if args['train']['train_dir'] == './datasets/DIV2K_train_HR' and not os.path.exists('./datasets/DIV2K_train_HR'):
+        from deeplens.network.dataset import download_and_unzip_div2k
+        download_and_unzip_div2k('./datasets')
+
     train_set = ImageDataset(args['train']['train_dir'], lens.sensor_res)
     train_loader = DataLoader(train_set, batch_size=args['train']['bs'])
 

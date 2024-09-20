@@ -102,8 +102,8 @@ class Material():
     def get_optimizer_params(self, lr=1e-3):
         """ Optimize the material parameters (n, V).
         """
-        self.n = torch.Tensor([self.n]).to(self.device)
-        self.V = torch.Tensor([self.V]).to(self.device)
+        self.n = torch.tensor(self.n).to(self.device)
+        self.V = torch.tensor(self.V).to(self.device)
 
         self.n.requires_grad = True
         self.V.requires_grad = True
