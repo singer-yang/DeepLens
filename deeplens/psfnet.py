@@ -294,7 +294,7 @@ class PSFNet(DeepObj):
 
         # Evalution settings
         ks = self.kernel_size
-        ps = self.sensor_size[0] / self.sensor_res[0]
+        ps = lens.sensor_size[0] / lens.sensor_res[0]
         psfnet = self.psfnet
         psfnet.eval()
 
@@ -305,7 +305,8 @@ class PSFNet(DeepObj):
         test_foc_z = self.depth2z(test_foc_dists)
         test_z = self.depth2z(test_dists)
 
-        # Gaussian PSF parameters
+        # Thin lens and Gaussian PSF parameters
+        thinlens = ThinLens(lens.foclen, lens.fnum, ks, lens.sensor_size, lens.sensor_res)
         x_gaussi, y_gaussi = torch.meshgrid(
             torch.linspace(-ks/2+1/2, ks/2-1/2, ks),
             torch.linspace(-ks/2+1/2, ks/2-1/2, ks),
@@ -334,9 +335,7 @@ class PSFNet(DeepObj):
 
                 # Thin lens Gaussian model
                 # "Focus on defocus: bridging the synthetic to real domain gap for depth estimation" Eq.(1)
-                coc = torch.abs(depth - foc_dist) * self.foclen**2 / (depth * self.fnum *(foc_dist - self.foclen))
-                coc_pixel = torch.clamp(coc / ps, min=0.2)
-                coc_pixel_radius = coc_pixel / 2
+                coc_pixel_radius = thinlens.coc(depth, foc_dist)/2
                 psf_thin = torch.exp(- (x_gaussi**2 + y_gaussi**2) / (2 * coc_pixel_radius**2)) # We ignore constant term because PSF will be normalized later
                 psf_mask = (x_gaussi**2 + y_gaussi**2 < coc_pixel_radius**2)
                 psf_thin = psf_thin * psf_mask # Un-clipped Gaussian PSF
@@ -345,14 +344,16 @@ class PSFNet(DeepObj):
 
                 # Weighted interpolation of query PSFs
                 # Our PSF has small kernel size, so we donot use low-rank SVD decomposition. Instead, we use the original PSF for interpolation.
-                psf_interp = []
-                for i in range(x.shape[0]):
-                    psf_temp = self.interp_psf(x[i], y[i], z)
-                    psf_interp.append(psf_temp)
-                
-                psf_interp = torch.stack(psf_interp, dim=0)
-                self.vis_psf_map(psf_interp, filename=f'{result_dir}/foc{-foc_dist}_depth{-depth}_interp.png')
-
+                try:
+                    psf_interp = []
+                    for i in range(x.shape[0]):
+                        psf_temp = self.interp_psf(x[i], y[i], z)
+                        psf_interp.append(psf_temp)
+                    
+                    psf_interp = torch.stack(psf_interp, dim=0)
+                    self.vis_psf_map(psf_interp, filename=f'{result_dir}/foc{-foc_dist}_depth{-depth}_interp.png')
+                except:
+                    print("Function interp_psf is missed during release. ")
 
     # ==================================================
     # Use network after image simulation
@@ -503,7 +504,8 @@ class ThinLens(DeepObj):
 
         depth = torch.clamp(depth, self.d_min, self.d_max)
         coc = self.foc_len / self.fnum * torch.abs(depth - foc_dist) / depth * self.foc_len / (foc_dist - self.foc_len)
-        coc_pixel = torch.clamp(coc / self.ps, min=0.2) # 0.2 is only a random constant avoiding getting coc_pixe = 0
+        clamp_min = 2 if self.kernel_size%2 ==0 else 0.2 # clamp_min is only a random constant avoiding getting coc_pixel = 0
+        coc_pixel = torch.clamp(coc / self.ps, min=clamp_min) 
         return coc_pixel
 
 
