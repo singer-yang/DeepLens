@@ -2223,7 +2223,7 @@ class GeoLens(DeepObj):
                 r = torch.linspace(-s.r, s.r, s.APERTURE_SAMPLING, device=self.device) # aperture sampling
                 z = s.surface_with_offset(r, torch.zeros(len(r), device=self.device))   # draw surface
                 plot(ax, z, r, color, linestyle)
-            
+
         # Connect two surfaces
         for i in range(len(self.surfaces)):
             if self.surfaces[i].mat2.n > 1.1:
@@ -2237,15 +2237,15 @@ class GeoLens(DeepObj):
 
                 if zmx_format:
                     if r > r_prev:
-                        z = torch.stack((sag_prev, sag_prev, sag))
-                        x = torch.tensor([r_prev, r, r]).to(self.device)
+                        z = torch.tensor((sag_prev, sag_prev, sag))
+                        x = torch.tensor([r_prev, r, r])
                     else:
-                        z = torch.stack((sag_prev, sag, sag))
-                        x = torch.tensor([r_prev, r_prev, r]).to(self.device)
+                        z = torch.tensor((sag_prev, sag, sag))
+                        x = torch.tensor([r_prev, r_prev, r])
                 
                 else:
-                    z = torch.stack((sag_prev, sag))
-                    x = torch.tensor([r_prev, r]).to(self.device)
+                    z = torch.tensor([sag_prev, sag])
+                    x = torch.tensor([r_prev, r])
 
                 plot(ax, z, x, color)
                 plot(ax, z,-x, color)
@@ -3091,7 +3091,7 @@ def create_cellphone_lens(hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=No
     ttl = imgh / 2 / math.tan(hfov) * 1.4 if thickness is None else thickness
     
     d_opt = ttl - flange - aper_d
-    d_lens = np.random.rand(lens_num * 2 - 1) + 1
+    d_lens = np.random.rand(lens_num * 2 - 1).astype(np.float32) + 1
     d_lens = d_lens / np.sum(d_lens) * d_opt
     d_lens = np.insert(d_lens, 0, aper_d)
 
@@ -3106,21 +3106,21 @@ def create_cellphone_lens(hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=No
         
         # front surface
         d_total += d_lens[2 * i]
-        c1 = np.random.randn(1).item() * 0.001
-        k1 = np.random.randn(1).item() * 0.01
-        ai1 = np.random.randn(7) * 1e-16
+        c1 = np.random.randn(1).astype(np.float32) * 0.001
+        k1 = np.random.randn(1).astype(np.float32) * 0.01
+        ai1 = np.random.randn(7).astype(np.float32) * 1e-16
         mat = random.choice(mat_names)
         surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c1, k = k1, ai = ai1, mat2 = mat))
         
         # back surface 
         d_total += d_lens[2 * i + 1]
-        c2 = np.random.randn(1).item() * 0.001
-        k2 = np.random.randn(1).item() * 0.01
-        ai2 = np.random.randn(7) * 1e-16
+        c2 = np.random.randn(1).astype(np.float32) * 0.001
+        k2 = np.random.randn(1).astype(np.float32) * 0.01
+        ai2 = np.random.randn(7).astype(np.float32) * 1e-16
         surfaces.append(Aspheric(r = imgh / 2, d = d_total, c = c2, k = k2, ai = ai2, mat2 = 'air'))
 
     # Lens calculation
-    lens.d_sensor = torch.tensor(ttl).to(lens.device)
+    lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
     lens.find_aperture()
     lens.prepare_sensor(sensor_res=lens.sensor_res, sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)])
     lens.diff_surf_range = lens.find_diff_surf()
@@ -3148,8 +3148,8 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
     ttl = foclen + flange if thickness is None else thickness
     
     d_opt = ttl - flange
-    d_lens = torch.rand(lens_num * 2) + 1
-    d_lens = d_lens / torch.sum(d_lens) * d_opt
+    d_lens = np.random.rand(lens_num * 2).astype(np.float32) + 1
+    d_lens = d_lens / np.sum(d_lens) * d_opt
     
     mat_names = list(SELLMEIER_TABLE.keys())
     mat_names.remove('air')
@@ -3165,13 +3165,13 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
         
         # front surface
         d_total += d_lens[2 * i]
-        c1 = torch.randn(1).item() * 0.001
-        mat = random.choice(mat_names)
+        c1 = np.random.randn(1).astype(np.float32) * 0.001
+        mat = np.random.choice(mat_names)
         surfaces.append(Spheric(r = max(imgh/2, aper_r) , d = d_total, c = c1, mat2 = mat))
         
         # back surface 
         d_total += d_lens[2 * i + 1]
-        c2 = torch.randn(1).item() * 0.001
+        c2 = np.random.randn(1).astype(np.float32) * 0.001
         surfaces.append(Spheric(r = max(imgh/2, aper_r), d = d_total, c = c2, mat2 = 'air'))
 
         if i == int(lens_num/2) - 1:
@@ -3179,7 +3179,7 @@ def create_camera_lens(foclen=50.0, imgh=20.0, fnum=4.0, lens_num=4, flange=18.0
             surfaces.append(Aperture(r = aper_r, d = d_total))
 
     # Lens calculation
-    lens.d_sensor = torch.tensor(ttl).to(lens.device)
+    lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
     lens.find_aperture()
     lens.prepare_sensor(sensor_res=lens.sensor_res, sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)])
     lens.diff_surf_range = lens.find_diff_surf()
