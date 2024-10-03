@@ -465,7 +465,7 @@ class GeoLens(DeepObj):
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
         """
         # ===> sample o1 on sensor plane
-        # In 'render_compute_img' func, we use top-left point as reference in rendering, so here we should sample bottom-right point
+        # We use top-left point as reference in rendering, so here we should sample bottom-right point
         x1, y1 = torch.meshgrid(
             torch.linspace(-self.sensor_size[1]/2, self.sensor_size[1]/2, self.sensor_res[1]+1, device=self.device)[1:],
             torch.linspace(self.sensor_size[0]/2, -self.sensor_size[0]/2, self.sensor_res[0]+1, device=self.device)[1:],
@@ -1989,7 +1989,7 @@ class GeoLens(DeepObj):
         """ Analyze the optical lens.
         """
         # Draw lens geometry and ray path
-        self.plot_setup2D_with_trace(filename=save_name, multi_plot=multi_plot, entrance_pupil=True, plot_invalid=plot_invalid, zmx_format=zmx_format, lens_title=lens_title, depth=depth)
+        self.draw_layout(filename=save_name, multi_plot=multi_plot, entrance_pupil=True, plot_invalid=plot_invalid, zmx_format=zmx_format, lens_title=lens_title, depth=depth)
 
         # Draw spot diagram and PSF map
         # self.draw_psf_map(save_name=save_name, ks=101, depth=depth)
@@ -2040,13 +2040,8 @@ class GeoLens(DeepObj):
             print(f'Rec image: PSNR={rec_psnr}, SSIM={rec_ssim}')
 
 
-    @torch.no_grad()
-    def draw_layout(self, save_name):
-        return self.plot_setup2D_with_trace(filename=save_name)
-
-
     @torch.no_grad()      
-    def plot_setup2D_with_trace(self, filename, depth=None, entrance_pupil=True, zmx_format=False, plot_invalid=True, multi_plot=False, lens_title=None, ax=None, fig=None):
+    def draw_layout(self, filename, depth=None, entrance_pupil=True, zmx_format=False, plot_invalid=True, multi_plot=False, lens_title=None, ax=None, fig=None):
         """ Plot lens layout with ray tracing.
         """
         num_rays = 11
@@ -2107,18 +2102,6 @@ class GeoLens(DeepObj):
             ax.set_title(lens_title, fontsize=10)
             fig.savefig(f"{filename}.png", format='png', dpi=600)
             plt.close()
-
-    
-    def plot_back_ray_trace(self, filename='debug_backward_rays', spp=5, vpp=5, pupil=True):
-        ax, fig = self.plot_setup2D()
-
-        ray = self.sample_sensor_2D(pupil=pupil, spp=spp, vpp=vpp)
-        _, _, oss = self.trace(ray=ray, record=True)
-        ax, fig = self.plot_raytraces(oss, ax=ax, fig=fig, color='b')
-
-        ax.axis('off')
-        # ax.set_title(lens_title)
-        fig.savefig(f"{filename}.png", bbox_inches='tight')
 
 
     def plot_raytraces(self, oss, ax=None, fig=None, color='b-', show=True, p=None, valid_p=None, plot_invalid=True, ra=None):
@@ -2682,7 +2665,6 @@ class GeoLens(DeepObj):
         
         return loss_reg
     
-
 
     # ====================================================================================
     # Optimization
