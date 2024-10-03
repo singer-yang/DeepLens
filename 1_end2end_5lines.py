@@ -162,7 +162,7 @@ def end2end_train(lens, net, args):
                 torch.save(net.state_dict(), f'{result_dir}/net_epoch{epoch}.pth')
                 
                 # => Qualitative evaluation
-                img1 = cv.cvtColor(cv.imread(f'./datasets/cat.png'), cv.COLOR_BGR2RGB)
+                img1 = cv.cvtColor(cv.imread(f'./datasets/bird.png'), cv.COLOR_BGR2RGB)
                 img1 = cv.resize(img1, args['train']['img_res']).astype(np.float32)
                 img1 = torch.from_numpy(img1/255.).permute(2, 0, 1).unsqueeze(0).to(device)
                 img1 = normalize_ImageNet(img1)
@@ -191,7 +191,7 @@ if __name__=='__main__':
     # Line 1: load a lens
     # ========================================
     lens = GeoLens(filename=args['lens']['path'], sensor_res=args['train']['img_res'])
-    net = ImageRestorationNet()
+    net = UNet()
     net = net.to(lens.device)
     if args['network']['pretrained']:
         net.load_state_dict(torch.load(args['network']['pretrained']))

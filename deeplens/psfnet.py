@@ -17,7 +17,7 @@ import torchvision.transforms.functional as F
 
 from .geolens import *
 from .optics.render_psf import *
-from .network.implicit import *
+from .network import *
 
 DMIN = 200     # [mm]
 DMAX = 20000   # [mm]
@@ -90,8 +90,7 @@ class PSFNet(DeepObj):
         
         else:
             raise Exception('Unsupported PSF network architecture.')
-        
-        self.psfnet.apply(initialize_weights)
+
         self.psfnet.to(self.device)
 
     
