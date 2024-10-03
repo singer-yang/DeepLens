@@ -2000,7 +2000,7 @@ class GeoLens(DeepObj):
 
         # Render an image, compute PSNR and SSIM
         if render:
-            img_org = cv.cvtColor(cv.imread(f'./datasets/resolution_chart1.png'), cv.COLOR_BGR2RGB)
+            img_org = cv.cvtColor(cv.imread(f'./datasets/IQ/img1.png'), cv.COLOR_BGR2RGB)
             img_render = self.render_single_img(img_org, depth=depth, spp=128, unwarp=render_unwarp, save_name=f'{save_name}_render', noise=0.01)
 
             render_psnr = round(compare_psnr(img_org, img_render, data_range=255), 4)
