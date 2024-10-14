@@ -3,7 +3,7 @@
 import cv2 as cv
 import numpy as np
 import torch
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 
 
 # ================================================
@@ -22,10 +22,10 @@ def render_psf(img, psf, noise=None):
     # Convolution
     _, ks, ks = psf.shape
     padding = int(ks / 2)
-    psf = torch.flip(psf, [1, 2])  # flip the PSF because nnF.conv2d use cross-correlation
+    psf = torch.flip(psf, [1, 2])  # flip the PSF because F.conv2d use cross-correlation
     psf = psf.unsqueeze(1)  # shape [C, 1, ks, ks]
-    img_pad = nnF.pad(img, (padding, padding, padding, padding), mode='reflect')
-    img_render = nnF.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
+    img_pad = F.pad(img, (padding, padding, padding, padding), mode='reflect')
+    img_render = F.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
 
     # Sensor noise
     if noise is not None:
@@ -61,7 +61,7 @@ def render_psf_map(img, psf_map, grid, noise=None):
     
     pad = int((ks-1)/2)
     patch_size = int(H/grid)
-    img_pad = nnF.pad(img, (pad, pad, pad, pad), mode='reflect')
+    img_pad = F.pad(img, (pad, pad, pad, pad), mode='reflect')
     
     render_img = torch.zeros_like(img)
     for i in range(grid):
@@ -74,7 +74,7 @@ def render_psf_map(img, psf_map, grid, noise=None):
             
             # Consider overlap to avoid boundary artifacts
             img_pad_patch = img_pad[:, :, h_low:h_high+2*pad, w_low:w_high+2*pad]
-            render_patch = nnF.conv2d(img_pad_patch, psf, groups=img.shape[1], padding='valid', bias=None)
+            render_patch = F.conv2d(img_pad_patch, psf, groups=img.shape[1], padding='valid', bias=None)
             render_img[:, :, h_low:h_high, w_low:w_high] = render_patch
 
     # Sensor noise
@@ -105,19 +105,19 @@ def local_psf_render(input, psf, kernel_size=11, noise=None):
     pad = int((kernel_size - 1) / 2)
 
     # 1. Pad the input with replicated values
-    inp_pad = nnF.pad(input, pad=(pad, pad, pad, pad), mode='replicate')
+    inp_pad = F.pad(input, pad=(pad, pad, pad, pad), mode='replicate')
     # 2. Create a Tensor of varying Gaussian Kernel
     kernels = psf.reshape(-1, kernel_size, kernel_size)
     kernels_flip = torch.flip(kernels, [-2, -1])
     kernels_rgb = torch.stack(C*[kernels_flip], 1)
     # 3. Unfold input
-    inp_unf = nnF.unfold(inp_pad, (kernel_size, kernel_size))   
+    inp_unf = F.unfold(inp_pad, (kernel_size, kernel_size))   
     # 4. Multiply kernel with unfolded
     x1 = inp_unf.view(B, C, -1, H * W)
     x2 = kernels_rgb.view(B, H * W, C, -1).permute(0, 2, 3, 1)
     y = (x1 * x2).sum(2)
     # 5. Fold and return
-    img = nnF.fold(y, (H, W), (1, 1))
+    img = F.fold(y, (H, W), (1, 1))
 
     # Sensor noise
     if noise is not None:
@@ -206,7 +206,7 @@ def interp_psf_map(psf_map, grid_old, grid_new):
     psf_map_interp = psf_map_interp.permute(3, 4, 2, 0, 1).reshape(ks*ks, C, grid_old, grid_old)
 
     # Interpolate from [ks*ks, C, grid_old, grid_old] to [ks*ks, C, grid_new, grid_new]
-    psf_map_interp = nnF.interpolate(psf_map_interp, size=(grid_new, grid_new), mode='bilinear', align_corners=True)
+    psf_map_interp = F.interpolate(psf_map_interp, size=(grid_new, grid_new), mode='bilinear', align_corners=True)
 
     # Reshape from [ks*ks, C, grid_new, grid_new] to [C, grid_new*ks, grid_new*ks]
     psf_map_interp = psf_map_interp.reshape(ks, ks, C, grid_new, grid_new).permute(2, 3, 0, 4, 1).reshape(C, grid_new*ks, grid_new*ks)

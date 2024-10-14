@@ -11,9 +11,8 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
     # The material is provided as-is, with no warranties whatsoever.
     # If you publish any code, data, or scientific work based on this, please cite our work.
 """
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 from torchvision.utils import make_grid
-import torchvision.transforms.functional as F
 
 from .geolens import *
 from .optics.render_psf import *
@@ -245,7 +244,7 @@ class PSFNet(DeepObj):
         psf_map_batch = torch.stack(psf_map_batch, dim=0)   # [B, 3, psf_grid*ks, psf_grid*ks]
         
         # Resize to meet the network requirement
-        psf_map_batch = F.resize(psf_map_batch, psf_map_size)   # [B, 3, size, size]
+        psf_map_batch = F.interpolate(psf_map_batch, size=psf_map_size, mode='bilinear', align_corners=False) # [B, 3, size, size]
 
         return inp, psf_map_batch
 

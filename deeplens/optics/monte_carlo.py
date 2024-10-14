@@ -2,7 +2,7 @@
 """
 import torch
 import numpy as np
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 
 from .basics import EPSILON
 
@@ -32,7 +32,7 @@ def backward_integral(ray, img, ps, H, W, interpolate=True, pad=True, energy_cor
     p = ray.o[...,:2]
 
     if pad:
-        img = nnF.pad(img, (1,1,1,1), "replicate")
+        img = F.pad(img, (1,1,1,1), "replicate")
 
         # Convert ray positions to uv coordinates
         u = torch.clamp(W/2 + p[..., 0] / ps, min=-0.99, max=W-0.01)

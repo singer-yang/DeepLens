@@ -5,8 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch.fft import *
-import torch.nn.functional as nnf
-import torchvision.transforms.functional as F
+import torch.nn.functional as F
 import pickle
 from torchvision.utils import save_image
 
@@ -268,14 +267,14 @@ class ComplexWave(DeepObj):
         device = self.device
 
         # Pad directly
-        self.u = nnf.pad(self.u, (Hpad,Hpad,Wpad,Wpad), mode='constant', value=0)
+        self.u = F.pad(self.u, (Hpad,Hpad,Wpad,Wpad), mode='constant', value=0)
         
         Horg, Worg = self.res
         self.res = [Horg + 2 * Hpad, Worg + 2 * Wpad]
         self.phy_size = [self.phy_size[0] * self.res[0] / Horg, self.phy_size[1] * self.res[1] / Worg]
         self.x, self.y = self.gen_xy_grid()
         z = self.z[0, 0]
-        self.z = nnf.pad(self.z, (Hpad,Hpad,Wpad,Wpad), mode='constant', value=z)
+        self.z = F.pad(self.z, (Hpad,Hpad,Wpad,Wpad), mode='constant', value=z)
 
 
 # ===================================

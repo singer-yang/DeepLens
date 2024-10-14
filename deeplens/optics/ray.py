@@ -1,7 +1,7 @@
 """ Optical ray class. 
 """
 from .basics import *
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 
 class Ray(DeepObj):
     def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device=DEVICE):
@@ -36,7 +36,7 @@ class Ray(DeepObj):
         self.obliq = torch.ones(o.shape[:-1])  
                 
         self.to(device)
-        self.d = nnF.normalize(self.d, p=2, dim=-1)
+        self.d = F.normalize(self.d, p=2, dim=-1)
 
 
     def prop_to(self, z, n=1):

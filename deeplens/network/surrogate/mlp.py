@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn  
-import torch.nn.functional as nnF  
+import torch.nn.functional as F  
 
 class MLP(nn.Module):  
     """ All-linear layer. This network suits for low-k intensity/amplitude PSF function prediction. """  
@@ -30,7 +30,7 @@ class MLP(nn.Module):
 
     def forward(self, x):  
         x = self.net(x)  
-        x = nnF.normalize(x, p=1, dim=-1)  
+        x = F.normalize(x, p=1, dim=-1)  
         return x  
 
 

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 import math
 import numpy as np
 from einops import rearrange
@@ -134,11 +134,8 @@ class Siren(nn.Module):
         w_std = (1 / dim) if self.is_first else (math.sqrt(c / dim) / w0)
         weight.uniform_(-w_std, w_std)
 
-        # if exists(bias):
-        #     bias.uniform_(-w_std, w_std)
-
     def forward(self, x):
-        out = nnF.linear(x, self.weight, self.bias)
+        out = F.linear(x, self.weight, self.bias)
         out = self.activation(out)
         return out
 
