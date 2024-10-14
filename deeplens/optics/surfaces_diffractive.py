@@ -199,7 +199,7 @@ class DOE(DeepObj):
         n = self.refractive_index(wvln)
         phase_map = phase_map0 * (self.wvln0 / wvln) * (n - 1) / (self.n0 - 1)
 
-        phase_map = nnF.interpolate(phase_map.unsqueeze(0).unsqueeze(0), size=self.res, mode='nearest').squeeze(0).squeeze(0)
+        phase_map = F.interpolate(phase_map.unsqueeze(0).unsqueeze(0), size=self.res, mode='nearest').squeeze(0).squeeze(0)
         return phase_map
     
     def get_pmap(self):
@@ -286,7 +286,7 @@ class DOE(DeepObj):
         # Fab resolution quantized pmap
         pmap = self.get_pmap()
         fab_res = int(self.ps / self.fab_ps * self.res[0])
-        pmap = nnF.interpolate(pmap.unsqueeze(0).unsqueeze(0), scale_factor=self.ps/self.fab_ps, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
+        pmap = F.interpolate(pmap.unsqueeze(0).unsqueeze(0), scale_factor=self.ps/self.fab_ps, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
         pmap_q = torch.round(pmap / (2 * np.pi / bits)) * (2 * np.pi / bits)
 
         # Save phase map
@@ -601,7 +601,7 @@ class Sensor(DeepObj):
         
         # If resolutions are different, we resize the response
         if response.shape[-1] != self.res[-1]:
-            response = nnF.interpolate(response, self.res, mode='bilinear', align_corners=False)
+            response = F.interpolate(response, self.res, mode='bilinear', align_corners=False)
         
         return response
 

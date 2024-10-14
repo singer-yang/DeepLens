@@ -23,7 +23,7 @@ from tqdm import tqdm
 from scipy import stats
 from datetime import datetime
 import matplotlib.pyplot as plt
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 from torchvision.utils import save_image, make_grid
 from transformers import get_cosine_schedule_with_warmup
 
@@ -858,10 +858,10 @@ class GeoLens(DeepObj):
         if torch.is_tensor(img):    # if img is [N, C, H, W] or [N, H, W] tensor, what situation will [N, H, W] occur?
             H, W = img.shape[-2:]
             if len(img.shape) == 4:
-                img = nnF.pad(img, (1,1,1,1), "replicate")    # we MUST use replicate padding.
+                img = F.pad(img, (1,1,1,1), "replicate")    # we MUST use replicate padding.
             else:
-                img = nnF.pad(img.unsqueeze(1), (1,1,1,1), 'replicate').squeeze(1)
-            # img = nnF.pad(img, (1,1,1,1), "constant")    #constant padding can work for arbitary dmensions
+                img = F.pad(img.unsqueeze(1), (1,1,1,1), 'replicate').squeeze(1)
+            # img = F.pad(img, (1,1,1,1), "constant")    #constant padding can work for arbitary dmensions
 
         elif isinstance(img, np.ndarray):   # if img is [H, W, C] ndarray
             if img.dtype == np.uint8:
@@ -872,7 +872,7 @@ class GeoLens(DeepObj):
 
             H, W = img.shape[:2]
             img = torch.from_numpy(img).permute(2,0,1).unsqueeze(0).to(self.device)
-            img = nnF.pad(img, (1,1,1,1), "replicate")
+            img = F.pad(img, (1,1,1,1), "replicate")
 
         else:
             raise Exception('Input image should be tensor or ndarray.')
@@ -1193,7 +1193,7 @@ class GeoLens(DeepObj):
         o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)   # normalized to center (0, 0)
         
         rms_map = torch.sqrt(((o2_norm**2).sum(-1) * ray.ra).sum(0) / (ray.ra.sum(0) + EPSILON))
-        rms_map = nnF.interpolate(rms_map.unsqueeze(0).unsqueeze(0), res, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
+        rms_map = F.interpolate(rms_map.unsqueeze(0).unsqueeze(0), res, mode='bilinear', align_corners=True).squeeze(0).squeeze(0)
         rms_map /= rms_map.max()
 
         return rms_map
@@ -1315,7 +1315,7 @@ class GeoLens(DeepObj):
         # Propagate to sensor and get intensity. (Manually pad wave field)
         pupilz, pupilr = self.exit_pupil()
         h, w = wavefront.shape
-        wavefront = nnF.pad(wavefront.unsqueeze(0).unsqueeze(0), [h//2, h//2, w//2, w//2], mode='constant', value=0)
+        wavefront = F.pad(wavefront.unsqueeze(0).unsqueeze(0), [h//2, h//2, w//2, w//2], mode='constant', value=0)
         sensor_field = AngularSpectrumMethod(wavefront, z=self.d_sensor - pupilz, wvln=wvln, ps=self.pixel_size, padding=False)
 
         psf_inten = sensor_field.abs()**2
@@ -1327,7 +1327,7 @@ class GeoLens(DeepObj):
 
         # Crop valid PSF region and normalize
         if ks is not None:
-            psf_inten_pad = nnF.pad(psf_inten, [ks//2, ks//2, ks//2, ks//2], mode='constant', value=0).squeeze(0).squeeze(0)
+            psf_inten_pad = F.pad(psf_inten, [ks//2, ks//2, ks//2, ks//2], mode='constant', value=0).squeeze(0).squeeze(0)
             psf = psf_inten_pad[psfc_idx_i:psfc_idx_i+ks, psfc_idx_j:psfc_idx_j+ks]
         else:
             psf = psf_inten
@@ -2474,12 +2474,12 @@ class GeoLens(DeepObj):
         o_dist = (o2*ray.ra.unsqueeze(-1)).sum(0)/ray.ra.sum(0).add(EPSILON).unsqueeze(-1)   # shape (H, W, 2)
 
         # Reshape to [N, C, H, W], normalize to [-1, 1], then resize to img resolution [N, C, H, W]
-        x_dist = nnF.interpolate(-o_dist.unsqueeze(0).unsqueeze(0)[..., 0] / self.sensor_size[1] * 2, img.shape[-2:], mode='bilinear', align_corners=True)
-        y_dist = nnF.interpolate(o_dist.unsqueeze(0).unsqueeze(0)[..., 1] / self.sensor_size[0] * 2, img.shape[-2:], mode='bilinear', align_corners=True)
+        x_dist = F.interpolate(-o_dist.unsqueeze(0).unsqueeze(0)[..., 0] / self.sensor_size[1] * 2, img.shape[-2:], mode='bilinear', align_corners=True)
+        y_dist = F.interpolate(o_dist.unsqueeze(0).unsqueeze(0)[..., 1] / self.sensor_size[0] * 2, img.shape[-2:], mode='bilinear', align_corners=True)
         grid_dist = torch.stack((x_dist.squeeze(0), y_dist.squeeze(0)), dim=-1)
         
         # Unwarp using grid_sample function
-        img_unwarpped = nnF.grid_sample(img, grid_dist, align_corners=True)
+        img_unwarpped = F.grid_sample(img, grid_dist, align_corners=True)
         
         return img_unwarpped
 

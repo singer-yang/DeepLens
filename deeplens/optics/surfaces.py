@@ -3,7 +3,7 @@
 import torch
 import math
 import numpy as np
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 from .basics import *
@@ -171,7 +171,7 @@ class Surface(DeepObj):
         x, y, z = ray.o[...,0], ray.o[...,1], ray.o[...,2]
         nx, ny, nz = self.dfdxyz(x, y)
         n = torch.stack((nx, ny, nz), axis = -1)
-        n = nnF.normalize(n, p = 2, dim = -1)
+        n = F.normalize(n, p = 2, dim = -1)
 
         return n
     
@@ -958,7 +958,7 @@ class DOE_GEO(Surface):
                 new_d_y = ray.d[..., 1] - (ray.wvln * 1e-3) / (2 * np.pi) * dphidy * self.diffraction_order
 
             new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
-            new_d = nnF.normalize(new_d, p=2, dim=-1)
+            new_d = F.normalize(new_d, p=2, dim=-1)
             
             new_d[~valid] = ray.d[~valid]
             ray.d = new_d
@@ -1454,7 +1454,7 @@ class ThinLens(Surface):
 
         # New ray direction
         new_d = o_final - ray.o
-        new_d = nnF.normalize(new_d, p=2, dim=-1)
+        new_d = F.normalize(new_d, p=2, dim=-1)
         ray.d = new_d
 
         # OPL change

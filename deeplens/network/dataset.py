@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 
 from ..optics.basics import DEVICE
 
@@ -82,20 +82,6 @@ def download_and_unzip_div2k(destination_folder):
 # ======================================
 # Data augmentation
 # ======================================
-def WaveletNoise(res=[512, 512], device=DEVICE):
-    WN = torch.zeros((1, 1, res[0], res[1]), device=device)
-    level = int(math.log(res[0], 2))
-    for s in range(1, level+1):
-        H, W = 2**s, 2**s
-        N = 0.1 * (torch.rand((1, 1, H, W), device=device) - 0.5)
-        LP = nnF.interpolate(nnF.avg_pool2d(N, kernel_size=(2,2)), size=(H,W))
-        BP = nnF.interpolate(N - LP, (res[0], res[1]))
-        WN += BP
-    WN = WN.squeeze(0)
-
-    return WN
-
-
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
         self.std = std
@@ -120,53 +106,6 @@ class AddSineNoise(object):
     def __call__(self, tensor):
         theta = torch.rand(1) * 2*np.pi
         return tensor + self.amplitude * torch.sin(2*np.pi/self.period*(self.X*torch.cos(theta)+self.Y*torch.sin(theta)))
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-
-class AddWaveletNoise(object):
-    def __init__(self, im_size=(2048, 2048)):
-        self.level = int(math.log(im_size[0], 2))
-        self.size = im_size
-        self.amplitude = 0.1
-
-
-    def __call__(self, tensor):
-        WN = torch.zeros_like(tensor, device=tensor.device).unsqueeze(0)
-
-        for s in range(1, self.level+1):
-            H, W = 2**s, 2**s
-            N = self.amplitude * (torch.rand((1, 1, H, W), device=tensor.device) - 0.5)
-            LP = nnF.interpolate(nnF.avg_pool2d(N, kernel_size=(2,2)), size=(H,W))
-            BP = nnF.interpolate(N - LP, self.size)
-            WN += BP
-
-        return WN.squeeze(0) + tensor
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-
-class AddWaveletNoise(object):
-    def __init__(self, im_size=(2048, 2048)):
-        self.level = int(math.log(im_size[0], 2))
-        self.size = im_size
-        self.amplitude = 0.1
-
-        WN = torch.zeros(im_size).unsqueeze(0).unsqueeze(0)
-        for s in range(1, self.level+1):
-            H, W = 2**s, 2**s
-            N = self.amplitude * (torch.rand((1, 1, H, W)) - 0.5)
-            LP = nnF.interpolate(nnF.avg_pool2d(N, kernel_size=(2,2)), size=(H,W))
-            BP = nnF.interpolate(N - LP, self.size)
-            WN += BP
-
-        self.WN = WN.squeeze(0)
-
-
-    def __call__(self, tensor):
-        return self.WN + tensor
 
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)

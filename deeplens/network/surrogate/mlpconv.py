@@ -1,6 +1,6 @@
 import math
 import torch.nn as nn
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 
 class MLPConv(nn.Module):
     """ MLP encoder + convolutional decoder proposed in "Differentiable Compound Optics and Processing Pipeline Optimization for End-To-end Camera Design". This network suits for high-k intensity/amplitude PSF function prediction.
@@ -68,6 +68,6 @@ class MLPConv(nn.Module):
         # decoded = self.activation(decoded)
         
         # This normalization only works for PSF network
-        decoded = nnF.normalize(decoded, p=1, dim=[-1,-2])
+        decoded = F.normalize(decoded, p=1, dim=[-1,-2])
         
         return decoded

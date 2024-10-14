@@ -5,7 +5,7 @@ import torch.nn as nn
 from torchvision.utils import save_image
 
 import matplotlib.pyplot as plt
-import torch.nn.functional as nnF
+import torch.nn.functional as F
 
 from .wave import ComplexWave
 from .basics import DEFAULT_WAVE
@@ -170,7 +170,7 @@ def img2field(img=None, wvln=0.589, phy_size=[1,1], padding=False, device='cuda'
     u = amp + 1j * phi
     
     if padding:
-        u = nnF.pad(u, (H//4,H//4,W//4,W//4), mode='constant', value=0)
+        u = F.pad(u, (H//4,H//4,W//4,W//4), mode='constant', value=0)
 
     res = u.shape
     field = ComplexWave(u=u, phy_size=phy_size, res=res, wvln=wvln, device=device)
@@ -219,8 +219,8 @@ def batch2field(img, phy_size, z=0, wvln=0.589, padding=False, phase='zero', dev
         _, _, Worg, Horg = u.shape
         Wpad, Hpad = int(Worg*2), int(Horg*2)
         Wimg, Himg = Worg + 2 * Wpad, Horg + 2 * Hpad
-        u = nnF.pad(u, (Wpad, Wpad, Hpad, Hpad))
-        # u = nnF.pad(u, (H//2,H//2,W//2,W//2), mode='constant', value=0.)
+        u = F.pad(u, (Wpad, Wpad, Hpad, Hpad))
+        # u = F.pad(u, (H//2,H//2,W//2,W//2), mode='constant', value=0.)
         phy_size = [Wimg / Worg * phy_size[0], Himg / Horg * phy_size[0]]
 
     res = u.shape
