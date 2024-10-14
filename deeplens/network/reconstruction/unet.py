@@ -3,7 +3,6 @@ import torch.nn as nn
 
 
 class UNet(nn.Module):
-
     def __init__(self, in_channels=3, out_channels=3):
         super().__init__()
         self.pre = self.pre = nn.Sequential(
@@ -48,7 +47,7 @@ class UNet(nn.Module):
         x0 = self.conv01(x0)
         x = self.post(x0)
         return x
-    
+
 
 class BasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -80,7 +79,6 @@ class BasicBlock(nn.Module):
         x = torch.concat(out, axis=1)
         x = self.post(x)
         return x
-
 
 
 if __name__ == "__main__":
