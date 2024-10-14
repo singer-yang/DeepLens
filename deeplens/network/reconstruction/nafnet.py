@@ -15,7 +15,7 @@ class NAFNet(nn.Module):
         self,
         in_chan=3,
         out_chan=3,
-        width=32, #64
+        width=32,  # 64
         middle_blk_num=1,
         enc_blk_nums=[1, 1, 1, 28],
         dec_blk_nums=[1, 1, 1, 1],
@@ -102,7 +102,6 @@ class NAFNet(nn.Module):
 
 
 class LayerNormFunction(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, x, weight, bias, eps):
         ctx.eps = eps
@@ -134,7 +133,6 @@ class LayerNormFunction(torch.autograd.Function):
 
 
 class LayerNorm2d(nn.Module):
-
     def __init__(self, channels, eps=1e-6):
         super(LayerNorm2d, self).__init__()
         self.register_parameter("weight", nn.Parameter(torch.ones(channels)))
@@ -199,8 +197,9 @@ class AvgPool2d(nn.Module):
                 r2 = min(self.max_r2, r2)
                 s = x[:, :, ::r1, ::r2].cumsum(dim=-1).cumsum(dim=-2)
                 n, c, h, w = s.shape
-                k1, k2 = min(h - 1, self.kernel_size[0] // r1), min(
-                    w - 1, self.kernel_size[1] // r2
+                k1, k2 = (
+                    min(h - 1, self.kernel_size[0] // r1),
+                    min(w - 1, self.kernel_size[1] // r2),
                 )
                 out = (
                     s[:, :, :-k1, :-k2]

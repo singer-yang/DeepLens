@@ -1,24 +1,19 @@
-import numpy as np
-import random
-from collections import deque
-from math import exp
-import torch
-import torch.autograd as autograd
-import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as transforms
-from torch.autograd import Variable
-import torch.nn.functional as F
+import math
 
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision.models as models
 
 
 # ======================================================
 # PSNR, SSIM, and VGG loss functions
 # ======================================================
 class PSNRLoss(nn.Module):
-    def __init__(self, loss_weight=1.0, reduction='mean', toY=False):
+    def __init__(self, loss_weight=1.0, reduction="mean", toY=False):
         super(PSNRLoss, self).__init__()
-        assert reduction == 'mean'
+        assert reduction == "mean"
         self.loss_weight = loss_weight
         self.scale = 10 / np.log(10)
         self.toY = toY
@@ -32,14 +27,18 @@ class PSNRLoss(nn.Module):
                 self.coef = self.coef.to(pred.device)
                 self.first = False
 
-            pred = (pred * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.
-            target = (target * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.
+            pred = (pred * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.0
+            target = (target * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.0
 
-            pred, target = pred / 255., target / 255.
+            pred, target = pred / 255.0, target / 255.0
             pass
         assert len(pred.size()) == 4
 
-        return self.loss_weight * self.scale * torch.log(((pred - target) ** 2).mean(dim=(1, 2, 3)) + 1e-8).mean()
+        return (
+            self.loss_weight
+            * self.scale
+            * torch.log(((pred - target) ** 2).mean(dim=(1, 2, 3)) + 1e-8).mean()
+        )
 
 
 class SSIMLoss(nn.Module):
@@ -51,8 +50,13 @@ class SSIMLoss(nn.Module):
 
 
 def gaussian(window_size, sigma):
-    gauss = torch.Tensor([exp(-(x - window_size//2)**2/float(2*sigma**2)) for x in range(window_size)])
-    return gauss/gauss.sum()
+    gauss = torch.Tensor(
+        [
+            math.exp(-((x - window_size // 2) ** 2) / float(2 * sigma**2))
+            for x in range(window_size)
+        ]
+    )
+    return gauss / gauss.sum()
 
 
 def create_window(window_size, channel=1):
@@ -62,7 +66,15 @@ def create_window(window_size, channel=1):
     return window
 
 
-def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False, val_range=None):
+def ssim(
+    img1,
+    img2,
+    window_size=11,
+    window=None,
+    size_average=True,
+    full=False,
+    val_range=None,
+):
     # Value range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
     if val_range is None:
         if torch.max(img1) > 128:
@@ -116,14 +128,23 @@ def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False,
     return ret
 
 
-def msssim(img1, img2, window_size=11, size_average=True, val_range=None, normalize=None):
+def msssim(
+    img1, img2, window_size=11, size_average=True, val_range=None, normalize=None
+):
     device = img1.device
     weights = torch.FloatTensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333]).to(device)
     levels = weights.size()[0]
     ssims = []
     mcs = []
     for _ in range(levels):
-        sim, cs = ssim(img1, img2, window_size=window_size, size_average=size_average, full=True, val_range=val_range)
+        sim, cs = ssim(
+            img1,
+            img2,
+            window_size=window_size,
+            size_average=size_average,
+            full=True,
+            val_range=val_range,
+        )
 
         # Relu normalize (not compliant with original definition)
         if normalize == "relu":
@@ -144,8 +165,8 @@ def msssim(img1, img2, window_size=11, size_average=True, val_range=None, normal
         ssims = (ssims + 1) / 2
         mcs = (mcs + 1) / 2
 
-    pow1 = mcs ** weights
-    pow2 = ssims ** weights
+    pow1 = mcs**weights
+    pow2 = ssims**weights
 
     # From Matlab implementation https://ece.uwaterloo.ca/~z70wang/research/iwssim/
     output = torch.prod(pow1[:-1]) * pow2[-1]
@@ -157,7 +178,9 @@ class VGGLoss(nn.Module):
         super(VGGLoss, self).__init__()
         vgg = models.vgg19(pretrained=True).features
         vgg = vgg.to(device).eval()
-        self.vgg_layers = nn.Sequential(*list(vgg.children())[:35])  # Extract features from VGG
+        self.vgg_layers = nn.Sequential(
+            *list(vgg.children())[:35]
+        )  # Extract features from VGG
 
     def forward(self, x, y):
         x_features = self.vgg_layers(x)
@@ -166,26 +189,22 @@ class VGGLoss(nn.Module):
         return loss
 
 
-
-
-
-
 # ======================================================
 # Other loss functions
 # ======================================================
 class FourierLoss(nn.Module):
     """
-    # For an image reconstruction task: 
-    # Blur typically manifests as a low-frequency error in an image. 
-    # Noise usually consists of high-frequency fluctuations. 
+    # For an image reconstruction task:
+    # Blur typically manifests as a low-frequency error in an image.
+    # Noise usually consists of high-frequency fluctuations.
     # The loss function should be able to penalize low-frequency errors more than high-frequency ones.
     """
+
     def __init__(self):
         super(FourierLoss, self).__init__()
 
     def forward(self, pred, target):
-        """ Not tested. Written by GPT.
-        """
+        """Not tested. Written by GPT."""
         pred_fft = torch.fft(pred, 2)
         target_fft = torch.fft(target, 2)
         return torch.mean((pred_fft - target_fft) ** 2)
@@ -196,32 +215,39 @@ class AchromatLoss(nn.Module):
         super(AchromatLoss, self).__init__()
 
     def forward(self, img):
-        """ Reference: High-Quality Computational Imaging Through Simple Lenses. Eq. 8.
-        """
-        grad_x = img[:,:,:-1,1:] - img[:,:,:-1,:-1]
-        grad_y = img[:,:,1:,:-1] - img[:,:,:-1,:-1]
+        """Reference: High-Quality Computational Imaging Through Simple Lenses. Eq. 8."""
+        grad_x = img[:, :, :-1, 1:] - img[:, :, :-1, :-1]
+        grad_y = img[:, :, 1:, :-1] - img[:, :, :-1, :-1]
         grad_img = grad_x + grad_y
-        img = img[:,:,:-1,:-1]
+        img = img[:, :, :-1, :-1]
 
-        loss_rg = torch.mean(torch.abs(grad_img[:,0,:,:] * img[:,1,:,:] - grad_img[:,1,:,:] * img[:,0,:,:]))
-        loss_gb = torch.mean(torch.abs(grad_img[:,1,:,:] * img[:,2,:,:] - grad_img[:,2,:,:] * img[:,1,:,:]))
+        loss_rg = torch.mean(
+            torch.abs(
+                grad_img[:, 0, :, :] * img[:, 1, :, :]
+                - grad_img[:, 1, :, :] * img[:, 0, :, :]
+            )
+        )
+        loss_gb = torch.mean(
+            torch.abs(
+                grad_img[:, 1, :, :] * img[:, 2, :, :]
+                - grad_img[:, 2, :, :] * img[:, 1, :, :]
+            )
+        )
         loss = loss_rg + loss_gb
         return loss
 
 
 class TVLoss(nn.Module):
-    def __init__(self, reduction='mean'):
+    def __init__(self, reduction="mean"):
         super(TVLoss, self).__init__()
-        assert reduction == 'mean'
+        assert reduction == "mean"
 
     def forward(self, pred, target):
-        """ Not tested. Written by GPT.
-        """
+        """Not tested. Written by GPT."""
         assert len(pred.size()) == 4
-        return (torch.mean(torch.abs(pred[:, :, :, :-1] - pred[:, :, :, 1:])) + torch.mean(torch.abs(pred[:, :, :-1, :] - pred[:, :, 1:, :])))
-
-
-
+        return torch.mean(
+            torch.abs(pred[:, :, :, :-1] - pred[:, :, :, 1:])
+        ) + torch.mean(torch.abs(pred[:, :, :-1, :] - pred[:, :, 1:, :]))
 
 
 # ======================================================
@@ -231,74 +257,86 @@ class PSFLoss(nn.Module):
     def __init__(self, ks):
         super(PSFLoss, self).__init__()
         self.x, self.y = torch.meshgrid(
-            torch.linspace(-1, 1, ks), 
-            torch.linspace(-1, 1, ks),
-            indexing='xy'
+            torch.linspace(-1, 1, ks), torch.linspace(-1, 1, ks), indexing="xy"
         )
-        self.r = torch.sqrt(self.x ** 2 + self.y ** 2) / np.sqrt(2)
+        self.r = torch.sqrt(self.x**2 + self.y**2) / np.sqrt(2)
 
     def forward(self, psf):
-        """ Calculate the loss of PSF size.
+        """Calculate the loss of PSF size.
 
         Input:
             PSF: shape [3, ks, ks]
         """
         # loss = torch.sum(psf * self.r.to(psf.device))
         r = self.r.to(psf.device)
-        loss = (psf[0, ...] * r).sum()**2 + (psf[1, ...] * r).sum()**2 + (psf[2, ...] * r).sum()**2
+        loss = (
+            (psf[0, ...] * r).sum() ** 2
+            + (psf[1, ...] * r).sum() ** 2
+            + (psf[2, ...] * r).sum() ** 2
+        )
         # loss = (psf[0, ...] * r).sum() + (psf[2, ...] * r).sum()
         return loss
+
 
 class PSFRMSLoss(nn.Module):
     def __init__(self, ks):
         super(PSFRMSLoss, self).__init__()
         self.x, self.y = torch.meshgrid(
-            torch.linspace(-1, 1, ks), 
-            torch.linspace(-1, 1, ks),
-            indexing='xy'
+            torch.linspace(-1, 1, ks), torch.linspace(-1, 1, ks), indexing="xy"
         )
-        self.r = torch.sqrt(self.x ** 2 + self.y ** 2) / np.sqrt(2)
+        self.r = torch.sqrt(self.x**2 + self.y**2) / np.sqrt(2)
 
     def forward(self, psf):
-        """ Calculate the loss of PSF centering and size.
+        """Calculate the loss of PSF centering and size.
 
         Input:
             PSF: shape [3, ks, ks]
         """
         device = psf.device
-        psfc = [(self.x.to(device) * psf[1, ...]).mean(), (self.y.to(device) * psf[1, ...]).mean()]
+        psfc = [
+            (self.x.to(device) * psf[1, ...]).mean(),
+            (self.y.to(device) * psf[1, ...]).mean(),
+        ]
         loss_center = (psfc[0].abs() + psfc[1].abs()) * psf.shape[1]
 
-        r = torch.sqrt((self.x.to(device) - psfc[0].item()) ** 2 + (self.y.to(device) - psfc[1].item()) ** 2) / np.sqrt(2)
-        loss_size = torch.sqrt((psf[0, ...] * r).sum()**2 + (psf[1, ...] * r).sum()**2 + (psf[2, ...] * r).sum()**2)
+        r = torch.sqrt(
+            (self.x.to(device) - psfc[0].item()) ** 2
+            + (self.y.to(device) - psfc[1].item()) ** 2
+        ) / np.sqrt(2)
+        loss_size = torch.sqrt(
+            (psf[0, ...] * r).sum() ** 2
+            + (psf[1, ...] * r).sum() ** 2
+            + (psf[2, ...] * r).sum() ** 2
+        )
 
         return loss_center + loss_size
+
 
 class PSFCenterLoss(nn.Module):
     def __init__(self, ks):
         super(PSFCenterLoss, self).__init__()
         self.x, self.y = torch.meshgrid(
-            torch.linspace(-1, 1, ks), 
-            torch.linspace(-1, 1, ks),
-            indexing='xy'
+            torch.linspace(-1, 1, ks), torch.linspace(-1, 1, ks), indexing="xy"
         )
 
     def forward(self, psf):
-        """ Calculate the loss of PSF center.
+        """Calculate the loss of PSF center.
 
         Input:
             PSF: shape [3, ks, ks]
         """
-        loss = (psf * self.x.to(psf.device)).sum().abs()**2 + (psf * self.y.to(psf.device)).sum().abs()**2
+        loss = (psf * self.x.to(psf.device)).sum().abs() ** 2 + (
+            psf * self.y.to(psf.device)
+        ).sum().abs() ** 2
         return loss
-    
+
 
 class PSFSimLoss(nn.Module):
     def __init__(self):
         super(PSFSimLoss, self).__init__()
 
     def forward(self, psf):
-        """ Red and Blue PSF should be similar.
+        """Red and Blue PSF should be similar.
 
         Input:
             PSF: shape [3, ks, ks]
@@ -306,34 +344,37 @@ class PSFSimLoss(nn.Module):
         loss = (psf[0, ...] - psf[2, ...]).abs().mean()
         return loss
 
+
 class PSFDiffLoss(nn.Module):
     def __init__(self):
         super(PSFDiffLoss, self).__init__()
 
     def forward(self, psf):
-        """ Calculate the cosine similarity of a PSF batch.
+        """Calculate the cosine similarity of a PSF batch.
 
         Input:
             PSF: shape [N, 3, ks, ks]
         """
         N, C, H, W = psf.shape
         flattened_tensors = psf.view(N, -1)
-        similarity_matrix = torch.mm(flattened_tensors, flattened_tensors.t())  #[N, N] similarity matrix
+        similarity_matrix = torch.mm(
+            flattened_tensors, flattened_tensors.t()
+        )  # [N, N] similarity matrix
 
         loss = torch.mean(similarity_matrix)
         return loss
+
 
 class PSFAlignLoss(nn.Module):
     def __init__(self, ks):
         super(PSFAlignLoss, self).__init__()
         self.x, self.y = torch.meshgrid(
-            torch.linspace(-1, 1, ks), 
-            torch.linspace(-1, 1, ks),
-            indexing='xy')
+            torch.linspace(-1, 1, ks), torch.linspace(-1, 1, ks), indexing="xy"
+        )
 
     def calc_center(self, psf):
-        """ Calculate the center of a PSF.
-            
+        """Calculate the center of a PSF.
+
         Input:
             PSF: shape [ks, ks]
         """
@@ -343,7 +384,7 @@ class PSFAlignLoss(nn.Module):
         return torch.stack([center_x, center_y])
 
     def forward(self, psf):
-        """ Calculate the loss of PSF alignment.
+        """Calculate the loss of PSF alignment.
 
         Input:
             PSF: shape [3, ks, ks]

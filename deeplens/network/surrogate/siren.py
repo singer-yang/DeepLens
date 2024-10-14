@@ -1,17 +1,28 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
+
 
 class Siren(nn.Module):
-    def __init__(self, dim_in, dim_out, w0 = 1., c = 6., is_first = False, use_bias = True, activation = None):
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        w0=1.0,
+        c=6.0,
+        is_first=False,
+        use_bias=True,
+        activation=None,
+    ):
         super().__init__()
         self.dim_in = dim_in
         self.is_first = is_first
 
         weight = torch.zeros(dim_out, dim_in)
         bias = torch.zeros(dim_out) if use_bias else None
-        self.init_(weight, bias, c = c, w0 = w0)
+        self.init_(weight, bias, c=c, w0=w0)
 
         self.weight = nn.Parameter(weight)
         self.bias = nn.Parameter(bias) if use_bias else None
@@ -28,10 +39,11 @@ class Siren(nn.Module):
         out = self.activation(out)
         return out
 
+
 class Sine(nn.Module):
-    def __init__(self, w0 = 1.):
+    def __init__(self, w0=1.0):
         super().__init__()
         self.w0 = w0
+
     def forward(self, x):
         return torch.sin(self.w0 * x)
-
