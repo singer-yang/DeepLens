@@ -3197,7 +3197,11 @@ class GeoLens(DeepObj):
             self.surfaces[i].activate_grad(activate)
 
     def get_optimizer_params(
-        self, lr=[1e-4, 1e-4, 1e-1, 1e-3], decay=0.01, diff_surf_range=None
+        self,
+        lr=[1e-4, 1e-4, 1e-1, 1e-3],
+        decay=0.01,
+        diff_surf_range=None,
+        optim_mat=False,
     ):
         """Get optimizer parameters for different lens surface.
 
@@ -3223,13 +3227,15 @@ class GeoLens(DeepObj):
                 pass
 
             elif isinstance(surf, Aspheric):
-                params += surf.get_optimizer_params(lr=lr, decay=decay)
+                params += surf.get_optimizer_params(
+                    lr=lr, decay=decay, optim_mat=optim_mat
+                )
 
             elif isinstance(surf, DOE_GEO):
                 params += surf.get_optimizer_params(lr=lr[2])
 
             elif isinstance(surf, Spheric):
-                params += surf.get_optimizer_params(lr=lr[:2])
+                params += surf.get_optimizer_params(lr=lr[:2], optim_mat=optim_mat)
 
             else:
                 raise Exception("Surface type not supported yet.")
@@ -3239,7 +3245,7 @@ class GeoLens(DeepObj):
 
         return params
 
-    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02):
+    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_mat=False):
         """Get optimizers and schedulers for different lens parameters.
 
         Args:
@@ -3247,7 +3253,7 @@ class GeoLens(DeepObj):
             epochs (int, optional): _description_. Defaults to 100.
             ai_decay (float, optional): _description_. Defaults to 0.2.
         """
-        params = self.get_optimizer_params(lr, decay)
+        params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
         optimizer = torch.optim.Adam(params)
         return optimizer
 
@@ -3295,7 +3301,7 @@ class GeoLens(DeepObj):
             f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
         )
 
-        optimizer = self.get_optimizer(lrs, decay)
+        optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
         scheduler = get_cosine_schedule_with_warmup(
             optimizer, num_warmup_steps=200, num_training_steps=iterations
         )
@@ -3410,7 +3416,7 @@ class GeoLens(DeepObj):
                     s = Aperture(r=surf_dict["r"], d=d)
 
                 elif surf_dict["type"] == "Aspheric":
-                    try:
+                    if "roc" in surf_dict:
                         s = Aspheric(
                             c=1 / surf_dict["roc"],
                             r=surf_dict["r"],
@@ -3419,7 +3425,7 @@ class GeoLens(DeepObj):
                             ai=surf_dict["ai"],
                             mat2=surf_dict["mat2"],
                         )
-                    except:
+                    else:
                         s = Aspheric(
                             c=surf_dict["c"],
                             r=surf_dict["r"],
@@ -3441,16 +3447,19 @@ class GeoLens(DeepObj):
                     s = DOE_GEO(l=surf_dict["l"], d=d, glass=surf_dict["glass"])
 
                 elif surf_dict["type"] == "Plane":
-                    s = Plane(l=surf_dict["l"], d=d, mat2=surf_dict["mat2"])
+                    if "l" in surf_dict:
+                        s = Plane(l=surf_dict["l"], d=d, mat2=surf_dict["mat2"])
+                    else:
+                        s = Plane(l=2 * surf_dict["r"], d=d, mat2=surf_dict["mat2"])
 
                 elif surf_dict["type"] == "Stop":
                     s = Aperture(r=surf_dict["r"], d=d)
 
                 elif surf_dict["type"] == "Spheric":
-                    try:
+                    if "roc" in surf_dict:
                         c = 1 / surf_dict["roc"] if surf_dict["roc"] != 0 else 0
                         s = Spheric(c=c, r=surf_dict["r"], d=d, mat2=surf_dict["mat2"])
-                    except:
+                    else:
                         s = Spheric(
                             c=surf_dict["c"],
                             r=surf_dict["r"],
