@@ -131,11 +131,11 @@ deeplens/
 
 DeepLens is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then developed and maintained by [Xinge Yang](https://singer-yang.github.io/).
 
-If you use DeeoLens in your research, please cite the corresponding papers:
+If you use DeepLens in your research, please cite the corresponding papers:
 
 - [TCI 2022] dO: A differentiable engine for deep lens design of computational imaging systems. [Paper](https://ieeexplore.ieee.org/document/9919421), [BibTex](./misc/do_bibtex.txt)
 - [NatComm 2024] Curriculum Learning for ab initio Deep Learned Refractive Optics. [Paper](https://www.nature.com/articles/s41467-024-50835-7), [BibTex](./misc/deeplens_bibtex.txt)
-- [Arxiv 2024] End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model. [Paper](https://arxiv.org/abs/2406.00834), [BibTex](./misc/hybridlens_bibtex.txt)
+- [SiggraphAsia 2024] End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model. [Paper](https://arxiv.org/abs/2406.00834), [BibTex](./misc/hybridlens_bibtex.txt)
 
 #### Projects built on top of DeepLens/dO
 
