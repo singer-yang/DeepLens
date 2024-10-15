@@ -324,11 +324,11 @@ class Surface(DeepObj):
     def activate_grad(self, activate=True):
         raise NotImplementedError()
 
-    def get_optimizer_params(self, lr):
+    def get_optimizer_params(self, lr, optim_mat=False):
         raise NotImplementedError()
 
-    def get_optimizer(self, lr):
-        params = self.get_optimizer_params(lr)
+    def get_optimizer(self, lr, optim_mat=False):
+        params = self.get_optimizer_params(lr, optim_mat=optim_mat)
         return torch.optim.Adam(params)
 
     def surf_dict(self):
@@ -717,7 +717,9 @@ class Aspheric(Surface):
 
         return max_height
 
-    def get_optimizer_params(self, lr=[1e-4, 1e-4, 1e-1, 1e-2], decay=0.01):
+    def get_optimizer_params(
+        self, lr=[1e-4, 1e-4, 1e-1, 1e-2], decay=0.01, optim_mat=False
+    ):
         """Get optimizer parameters for different parameters.
 
         Args:
@@ -780,6 +782,9 @@ class Aspheric(Surface):
                     exec(
                         f"params.append({{'params': [self.ai{2*i}], 'lr': lr[3] * decay**{i-1}}})"
                     )
+
+        if optim_mat and self.mat2.name != "air":
+            params += self.mat2.get_optimizer_params()
 
         return params
 
@@ -941,7 +946,7 @@ class Cubic(Surface):
 
         return sx, sy
 
-    def get_optimizer_params(self, lr):
+    def get_optimizer_params(self, lr, optim_mat=False):
         """Return parameters for optimizer."""
         params = []
 
@@ -965,6 +970,9 @@ class Cubic(Surface):
             params.append({"params": [self.b7], "lr": lr * 0.01})
         else:
             raise Exception("Unsupported cubic degree!")
+
+        if optim_mat and self.mat2.name != "air":
+            params += self.mat2.get_optimizer_params()
 
         return params
 
@@ -1562,7 +1570,7 @@ class Spheric(Surface):
         self.c_perturb = 0.0
         self.d_perturb = 0.0
 
-    def get_optimizer_params(self, lr=[0.001, 0.001]):
+    def get_optimizer_params(self, lr=[0.001, 0.001], optim_mat=False):
         """Activate gradient computation for c and d and return optimizer parameters."""
         self.c.requires_grad_(True)
         self.d.requires_grad_(True)
@@ -1570,6 +1578,10 @@ class Spheric(Surface):
         params = []
         params.append({"params": [self.c], "lr": lr[0]})
         params.append({"params": [self.d], "lr": lr[1]})
+
+        if optim_mat and self.mat2.name != "air":
+            params += self.mat2.get_optimizer_params()
+
         return params
 
     def surf_dict(self):
