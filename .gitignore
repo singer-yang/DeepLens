@@ -1,0 +1,12 @@
+.vscode/
+__pycache__/
+.DS_Store
+deeplens.egg-info/
+0_test.py
+*.png
+*.sh
+results/
+deeplens/do_code/
+!lenses/*.png
+!lenses/**/*.png
+!images/*.png
