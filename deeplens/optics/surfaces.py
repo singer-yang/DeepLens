@@ -29,9 +29,7 @@ class Surface(DeepObj):
         self.NEWTONS_MAXITER = 10
         self.NEWTONS_TOLERANCE_TIGHT = 10e-6  # in [mm], here is 10 [nm]
         self.NEWTONS_TOLERANCE_LOOSE = 50e-6  # in [mm], here is 50 [nm]
-        self.NEWTONS_STEP_BOUND = (
-            5  # [mm], maximum iteration step in Newton's iteration
-        )
+        self.NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in Newton's iteration
         self.APERTURE_SAMPLING = 257
 
         self.to(device)
@@ -187,7 +185,7 @@ class Surface(DeepObj):
 
         Normal vector points to the left by default.
         """
-        x, y, z = ray.o[..., 0], ray.o[..., 1], ray.o[..., 2]
+        x, y = ray.o[..., 0], ray.o[..., 1]
         nx, ny, nz = self.dfdxyz(x, y)
         n = torch.stack((nx, ny, nz), axis=-1)
         n = F.normalize(n, p=2, dim=-1)
@@ -335,7 +333,7 @@ class Surface(DeepObj):
         surf_dict = {
             "type": self.__class__.__name__,
             "r": self.r,
-            "d": self.d.item(),
+            "(d)": self.d.item(),
             "is_square": self.is_square,
             "mat2": self.mat2.name,
         }
@@ -405,7 +403,7 @@ class Aperture(Surface):
         surf_dict = {
             "type": "Aperture",
             "r": self.r,
-            "d": self.d.item(),
+            "(d)": self.d.item(),
             "is_square": self.is_square,
             "diffraction": self.diffraction,
         }
@@ -814,15 +812,15 @@ class Aspheric(Surface):
         surf_dict = {
             "type": "Aspheric",
             "r": self.r,
-            "c": self.c.item(),
+            "(c)": self.c.item(),
             "roc": 1 / self.c.item(),
-            "d": self.d.item(),
+            "(d)": self.d.item(),
             "k": self.k.item(),
             "ai": [],
             "mat2": self.mat2.name,
         }
         for i in range(1, self.ai_degree + 1):
-            exec(f"surf_dict['ai{2*i}'] = self.ai{2*i}.item()")
+            exec(f"surf_dict['(ai{2*i})'] = self.ai{2*i}.item()")
             surf_dict["ai"].append(eval(f"self.ai{2*i}.item()"))
 
         return surf_dict
@@ -1008,7 +1006,7 @@ class Cubic(Surface):
             "b5": self.b5.item(),
             "b7": self.b7.item(),
             "r": self.r,
-            "d": self.d.item(),
+            "(d)": self.d.item(),
         }
 
 
@@ -1409,7 +1407,7 @@ class DOE_GEO(Surface):
                 "glass": self.glass,
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
-                "d": self.d.item(),
+                "(d)": self.d.item(),
                 "mat2": self.mat2.name,
             }
 
@@ -1423,7 +1421,7 @@ class DOE_GEO(Surface):
                 "order4": self.order4.item(),
                 "order6": self.order6.item(),
                 "order8": self.order8.item(),
-                "d": self.d.item(),
+                "(d)": self.d.item(),
                 "mat2": self.mat2.name,
             }
 
@@ -1439,7 +1437,7 @@ class DOE_GEO(Surface):
                 "order5": self.order5.item(),
                 "order6": self.order6.item(),
                 "order7": self.order7.item(),
-                "d": self.d.item(),
+                "(d)": self.d.item(),
                 "mat2": self.mat2.name,
             }
 
@@ -1451,7 +1449,7 @@ class DOE_GEO(Surface):
                 "param_model": self.param_model,
                 "theta": self.theta.item(),
                 "alpha": self.alpha.item(),
-                "d": self.d.item(),
+                "(d)": self.d.item(),
                 "mat2": self.mat2.name,
             }
 
@@ -1464,6 +1462,7 @@ class Plane(Surface):
         Surface.__init__(
             self, l / np.sqrt(2), d, mat2=mat2, is_square=is_square, device=device
         )
+        self.l = l
 
     def intersect(self, ray, n=1.0):
         """Solve ray-surface intersection and update ray data."""
@@ -1511,8 +1510,9 @@ class Plane(Surface):
         surf_dict = {
             "type": "Plane",
             "l": self.l,
-            "d": self.d.item(),
+            "(d)": self.d.item(),
             "is_square": True,
+            "mat2": self.mat2.name,
         }
 
         return surf_dict
@@ -1590,9 +1590,9 @@ class Spheric(Surface):
         surf_dict = {
             "type": "Spheric",
             "r": self.r,
-            "c": self.c.item(),
+            "(c)": self.c.item(),
             "roc": roc,
-            "d": self.d.item(),
+            "(d)": self.d.item(),
             "mat2": self.mat2.name,
         }
 

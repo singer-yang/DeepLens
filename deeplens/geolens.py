@@ -3234,6 +3234,9 @@ class GeoLens(DeepObj):
             elif isinstance(surf, DOE_GEO):
                 params += surf.get_optimizer_params(lr=lr[2])
 
+            elif isinstance(surf, Plane):
+                pass
+
             elif isinstance(surf, Spheric):
                 params += surf.get_optimizer_params(lr=lr[:2], optim_mat=optim_mat)
 
