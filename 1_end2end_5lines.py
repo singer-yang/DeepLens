@@ -175,12 +175,12 @@ def end2end_train(lens, net, args):
             net.eval()
             with torch.no_grad():
                 # => Save data and simple evaluation
-                lens.write_lens_json(f"{result_dir}/epoch{epoch}.json")
+                lens.write_lens_json(f"{result_dir}/epoch{epoch+1}.json")
                 lens.analysis(
-                    f"{result_dir}/epoch{epoch}", render=False, zmx_format=True
+                    f"{result_dir}/epoch{epoch+1}", render=False, zmx_format=True
                 )
 
-                torch.save(net.state_dict(), f"{result_dir}/net_epoch{epoch}.pth")
+                torch.save(net.state_dict(), f"{result_dir}/net_epoch{epoch+1}.pth")
 
                 # => Qualitative evaluation
                 img1 = cv.cvtColor(cv.imread("./datasets/bird.png"), cv.COLOR_BGR2RGB)
@@ -198,18 +198,18 @@ def end2end_train(lens, net, args):
                 ssim_render = batch_SSIM(img1, img1_render)
                 save_image(
                     denormalize_ImageNet(img1_render),
-                    f"{result_dir}/img1_render_epoch{epoch}.png",
+                    f"{result_dir}/img1_render_epoch{epoch+1}.png",
                 )
                 img1_rec = net(img1_render)
                 psnr_rec = batch_PSNR(img1, img1_rec)
                 ssim_rec = batch_SSIM(img1, img1_rec)
                 save_image(
                     denormalize_ImageNet(img1_rec),
-                    f"{result_dir}/img1_rec_epoch{epoch}.png",
+                    f"{result_dir}/img1_rec_epoch{epoch+1}.png",
                 )
 
                 logging.info(
-                    f'Epoch [{epoch}/{args["train"]["epochs"]}], PSNR_render: {psnr_render:.4f}, SSIM_render: {ssim_render:.4f}, PSNR_rec: {psnr_rec:.4f}, SSIM_rec: {ssim_rec:.4f}'
+                    f'Epoch [{epoch+1}/{args["train"]["epochs"]}], PSNR_render: {psnr_render:.4f}, SSIM_render: {ssim_render:.4f}, PSNR_rec: {psnr_rec:.4f}, SSIM_rec: {ssim_rec:.4f}'
                 )
 
                 # => Quantitative evaluation

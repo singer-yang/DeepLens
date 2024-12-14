@@ -68,6 +68,23 @@ class NAFNet(nn.Module):
 
         self.padder_size = 2 ** len(self.encoders)
 
+        # Initialize weights  
+        self.initialize_weights()  
+
+    def initialize_weights(self):  
+        for m in self.modules():  
+            if isinstance(m, nn.Conv2d):  
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')  
+                if m.bias is not None:  
+                    nn.init.constant_(m.bias, 0)  
+            elif isinstance(m, nn.BatchNorm2d):  
+                nn.init.constant_(m.weight, 1)  
+                nn.init.constant_(m.bias, 0)  
+            elif isinstance(m, nn.Linear):  
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')  
+                if m.bias is not None:  
+                    nn.init.constant_(m.bias, 0) 
+
     def forward(self, inp):
         B, C, H, W = inp.shape
         inp = self.check_image_size(inp)
@@ -89,7 +106,7 @@ class NAFNet(nn.Module):
             x = decoder(x)
 
         x = self.ending(x)
-        # x = x + inp   # FIXME: this line is comment out by me
+        x = x + inp
 
         return x[:, :, :H, :W]
 

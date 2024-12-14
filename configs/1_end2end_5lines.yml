@@ -8,7 +8,7 @@ lens:
 
 network:
   pretrained: False
-  lr: !!float 1e-2
+  lr: !!float 1e-3
 
 train:
   train_dir: './datasets/DIV2K_train_HR'
