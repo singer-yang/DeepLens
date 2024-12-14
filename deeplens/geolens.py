@@ -35,7 +35,7 @@ from .optics.basics import (
     BLUE_RESPONSE,
     COHERENT_SPP,
     DEFAULT_WAVE,
-    DEVICE,
+    init_device,
     GEO_GRID,
     GREEN_RESPONSE,
     RED_RESPONSE,
@@ -69,9 +69,7 @@ from .utils import (
 class GeoLens(DeepObj):
     """Geolens class. A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate."""
 
-    def __init__(
-        self, filename=None, sensor_res=[1024, 1024], use_roc=False, device=DEVICE
-    ):
+    def __init__(self, filename=None, sensor_res=[1024, 1024], use_roc=False):
         """Initialize Lensgroup.
 
         Args:
@@ -80,13 +78,13 @@ class GeoLens(DeepObj):
             sensor_res: (H, W)
         """
         super(GeoLens, self).__init__()
+        self.device = init_device()
 
         # Load lens file.
         if filename is not None:
             self.lens_name = filename
-            self.device = device
             self.load_file(filename, use_roc, sensor_res)
-            self.to(device)
+            self.to(self.device)
 
             # Lens calculation
             self.find_aperture()
@@ -98,7 +96,7 @@ class GeoLens(DeepObj):
             self.sensor_res = sensor_res
             self.surfaces = []
             self.materials = []
-            self.to(device)
+            self.to(self.device)
 
     def load_file(self, filename, use_roc, sensor_res):
         """Load lens from .txt file.
@@ -110,17 +108,17 @@ class GeoLens(DeepObj):
             sensor_res (list): sensor resolution.
         """
         if filename[-4:] == ".txt":
-            self.surfaces, self.materials, self.r_last, d_last = self.read_lensfile(
+            self.surfaces, self.materials, self.r_sensor, d_last = self.read_lensfile(
                 filename, use_roc
             )
             self.d_sensor = d_last + self.surfaces[-1].d.item()
             self.sensor_size = [
                 2
-                * self.r_last
+                * self.r_sensor
                 * sensor_res[0]
                 / math.sqrt(sensor_res[0] ** 2 + sensor_res[1] ** 2),
                 2
-                * self.r_last
+                * self.r_sensor
                 * sensor_res[1]
                 / math.sqrt(sensor_res[0] ** 2 + sensor_res[1] ** 2),
             ]
@@ -135,11 +133,11 @@ class GeoLens(DeepObj):
         else:
             raise Exception("File format not supported.")
 
-    def load_external(self, surfaces, materials, r_last, d_sensor):
+    def load_external(self, surfaces, materials, r_sensor, d_sensor):
         """Load lens from extrenal surface/material list."""
         self.surfaces = surfaces
         self.materials = materials
-        self.r_last = r_last
+        self.r_sensor = r_sensor
         self.d_sensor = d_sensor
 
         for i in range(len(self.surfaces)):
@@ -160,17 +158,17 @@ class GeoLens(DeepObj):
         H, W = sensor_res
         if sensor_size is None:
             self.sensor_size = [
-                2 * self.r_last * H / math.sqrt(H**2 + W**2),
-                2 * self.r_last * W / math.sqrt(H**2 + W**2),
+                2 * self.r_sensor * H / math.sqrt(H**2 + W**2),
+                2 * self.r_sensor * W / math.sqrt(H**2 + W**2),
             ]
         else:
             assert (
                 sensor_size[0] * sensor_res[1] == sensor_res[0] * sensor_size[1]
             ), "Pixel is not square."
             self.sensor_size = sensor_size
-            self.r_last = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
+            self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
 
-        # self.r_last = float(self.r_last)
+        # self.r_sensor = float(self.r_sensor)
         self.sensor_size = [float(self.sensor_size[0]), float(self.sensor_size[1])]
         self.pixel_size = self.sensor_size[0] / sensor_res[0]
 
@@ -183,7 +181,7 @@ class GeoLens(DeepObj):
         avg_pupilz, avg_pupilx = self.entrance_pupil()
         self.fnum = self.foclen / avg_pupilx / 2
 
-        if self.r_last < 8.0:
+        if self.r_sensor < 8.0:
             self.is_cellphone = True
         else:
             self.is_cellphone = False
@@ -1358,7 +1356,7 @@ class GeoLens(DeepObj):
             rms_map (torch.Tensor): RMS map normalized to [0, 1].
         """
         M = 128
-        scale = -depth * np.tan(self.hfov) / self.r_last
+        scale = -depth * np.tan(self.hfov) / self.r_sensor
         ray = self.sample_point_source(
             M=M, depth=depth, R=self.sensor_size[0] / 2 * scale, pupil=True
         )
@@ -1642,7 +1640,9 @@ class GeoLens(DeepObj):
 
     def calc_foclen(self):
         """Calculate the focus length."""
-        if self.r_last < 8:  # Cellphone lens, we usually use EFL to describe the lens.
+        if (
+            self.r_sensor < 8
+        ):  # Cellphone lens, we usually use EFL to describe the lens.
             return self.calc_efl()
         else:  # Camera lens, we use the to describe the lens.
             return self.calc_bfl()
@@ -1680,7 +1680,7 @@ class GeoLens(DeepObj):
 
         EFL: Defined by FoV and sensor radius.
         """
-        return self.r_last / math.tan(self.hfov)
+        return self.r_sensor / math.tan(self.hfov)
 
     def calc_eqfl(self):
         """35mm equivalent focal length. For cellphone lens, we usually use EFL to describe the lens.
@@ -1789,7 +1789,7 @@ class GeoLens(DeepObj):
         """
         # Sample rays going out from edge of sensor, shape [M, 3]
         o1 = torch.zeros([GEO_SPP, 3])
-        o1 = torch.tensor([self.r_last, 0, self.d_sensor.item()]).repeat(GEO_SPP, 1)
+        o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(GEO_SPP, 1)
 
         pupilz, pupilx = self.exit_pupil()
         x2 = torch.linspace(-pupilx, pupilx, GEO_SPP)
@@ -1849,7 +1849,7 @@ class GeoLens(DeepObj):
         mag = 1 / torch.mean(tmp[~tmp.isnan()]).item()
 
         if mag == 0:
-            scale = -depth * np.tan(self.hfov) / self.r_last
+            scale = -depth * np.tan(self.hfov) / self.r_sensor
             return 1 / scale
 
         return mag
@@ -1886,7 +1886,7 @@ class GeoLens(DeepObj):
     @torch.no_grad()
     def calc_scale_pinhole(self, depth):
         """Assume the first principle point is at (0, 0, 0), use pinhole camera to calculate the scale factor."""
-        scale = -depth * np.tan(self.hfov) / self.r_last
+        scale = -depth * np.tan(self.hfov) / self.r_sensor
         return scale
 
     @torch.no_grad()
@@ -1988,8 +1988,6 @@ class GeoLens(DeepObj):
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
         avg_pupilx = intersection_points[:, 0].cpu().numpy().mean()
         avg_pupilz = intersection_points[:, 1].cpu().numpy().mean()
-        # avg_pupilx = stats.trim_mean(intersection_points[:, 0].cpu().numpy(), 0.1)
-        # avg_pupilz = stats.trim_mean(intersection_points[:, 1].cpu().numpy(), 0.1)
 
         if shrink_pupil:
             avg_pupilx *= 0.5
@@ -2078,7 +2076,7 @@ class GeoLens(DeepObj):
         This function now only works for aperture in the front
         """
         if imgh is not None:
-            self.r_last = imgh / 2
+            self.r_sensor = imgh / 2
         self.hfov = hfov
         self.fnum = fnum
 
@@ -2118,8 +2116,8 @@ class GeoLens(DeepObj):
 
         Args:
             outer (float): extra height to reserve.
-                For cellphone lens, we usually use 0.1mm or 0.05 * r_last.
-                For camera lens, we usually use 0.5mm or 0.1 * r_last.
+                For cellphone lens, we usually use 0.1mm or 0.05 * r_sensor.
+                For camera lens, we usually use 0.5mm or 0.1 * r_sensor.
         """
         surface_range = (
             self.find_diff_surf() if surface_range is None else surface_range
@@ -2130,14 +2128,14 @@ class GeoLens(DeepObj):
 
             # ==> 1. Reset lens to maximum height(sensor radius)
             for i in surface_range:
-                self.surfaces[i].r = self.r_last
+                self.surfaces[i].r = self.r_sensor
 
             # ==> 2. Prune to reserve valid surface height
             # sample maximum fov rays to compute valid surface height
             view = (
                 self.hfov
                 if self.hfov is not None
-                else np.arctan(self.r_last / self.d_sensor.item())
+                else np.arctan(self.r_sensor / self.d_sensor.item())
             )
             ray = self.sample_parallel_2D(
                 view=np.rad2deg(view), M=GEO_GRID, entrance_pupil=True
@@ -2161,7 +2159,7 @@ class GeoLens(DeepObj):
 
             # ==> 4. Remove nan part, also the maximum height should not exceed sensor radius
             for i in surface_range:
-                max_height = min(self.surfaces[i].max_height(), self.r_last)
+                max_height = min(self.surfaces[i].max_height(), self.r_sensor)
                 self.surfaces[i].r = min(self.surfaces[i].r, max_height)
 
         else:
@@ -2171,7 +2169,7 @@ class GeoLens(DeepObj):
             view = (
                 self.hfov
                 if self.hfov is not None
-                else np.arctan(self.r_last / self.d_sensor.item())
+                else np.arctan(self.r_sensor / self.d_sensor.item())
             )
             ray = self.sample_parallel_2D(
                 view=np.rad2deg(view), M=21, entrance_pupil=True
@@ -2247,7 +2245,7 @@ class GeoLens(DeepObj):
     @torch.no_grad()
     def analysis(
         self,
-        save_name="./test",
+        save_name="./lens",
         render=False,
         multi_plot=False,
         plot_invalid=True,
@@ -2364,9 +2362,9 @@ class GeoLens(DeepObj):
         if lens_title is None:
             if self.aper_idx is not None:
                 fnum = self.foclen / self.entrance_pupil()[1] / 2
-                lens_title = f"FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_F/{round(fnum,2)}_DIAG{round(self.r_last*2, 2)}mm_FocLen{round(self.foclen,2)}mm"
+                lens_title = f"FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_F/{round(fnum,2)}_DIAG{round(self.r_sensor*2, 2)}mm_FocLen{round(self.foclen,2)}mm"
             else:
-                lens_title = f"FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_DIAG{round(self.r_last*2, 2)}mm_FocLen{round(self.foclen,2)}mm"
+                lens_title = f"FoV{round(2*self.hfov*57.3, 1)}({int(self.calc_eqfl())}mm EFL)_DIAG{round(self.r_sensor*2, 2)}mm_FocLen{round(self.foclen,2)}mm"
 
         # ==> Plot RGB seperately
         if multi_plot:
@@ -2623,7 +2621,7 @@ class GeoLens(DeepObj):
         # Draw sensor
         ax.plot(
             [self.d_sensor.item(), self.d_sensor.item()],
-            [-self.r_last, self.r_last],
+            [-self.r_sensor, self.r_sensor],
             color,
         )
 
@@ -3007,7 +3005,7 @@ class GeoLens(DeepObj):
         H = 31
 
         # ==> PSF and RMS by patch
-        scale = -depth * np.tan(self.hfov) / self.r_last
+        scale = -depth * np.tan(self.hfov) / self.r_sensor
 
         rms = 0.0
         for wvln in WAVE_RGB:
@@ -3076,7 +3074,7 @@ class GeoLens(DeepObj):
         )
         ray = self.trace2sensor(ray)
         loss = (
-            (ray.o[:, 0] * ray.ra).sum() / (ray.ra.sum() + EPSILON) - self.r_last
+            (ray.o[:, 0] * ray.ra).sum() / (ray.ra.sum() + EPSILON) - self.r_sensor
         ).abs()
         return loss
 
@@ -3158,26 +3156,59 @@ class GeoLens(DeepObj):
 
         By default we should use weight 0.1 * self.loss_reg()
         """
+        # if self.is_cellphone:
+        #     w_focus = 2.0 if w_focus is None else w_focus
+        #     loss_reg = (
+        #         w_focus * self.loss_infocus()
+        #         + self.loss_self_intersec(
+        #             dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5
+        #         )
+        #         + self.loss_surface(sag_bound=0.8)
+        #         + 0.05 * self.loss_ray_angle()
+        #     )
+        # else:
+        #     w_focus = 10.0 if w_focus is None else w_focus
+        #     loss_reg = (
+        #         w_focus * self.loss_infocus()
+        #         + 0.1
+        #         * self.loss_self_intersec(
+        #             dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0
+        #         )
+        #         + 0.1 * self.loss_surface(sag_bound=7.0)
+        #         + 0.05 * self.loss_ray_angle()
+        #     )
+
+        # return loss_reg
+
+        loss_focus = self.loss_infocus()
+
         if self.is_cellphone:
+            loss_intersec = self.loss_self_intersec(
+                dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5
+            )
+            loss_surf = self.loss_surface(sag_bound=0.8)
+            loss_angle = self.loss_ray_angle()
+
             w_focus = 2.0 if w_focus is None else w_focus
             loss_reg = (
-                w_focus * self.loss_infocus()
-                + self.loss_self_intersec(
-                    dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5
-                )
-                + self.loss_surface(sag_bound=0.8)
-                + 0.05 * self.loss_ray_angle()
+                w_focus * loss_focus
+                + 1.0 * loss_intersec
+                + 1.0 * loss_surf
+                + 0.05 * loss_angle
             )
         else:
+            loss_intersec = self.loss_self_intersec(
+                dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0
+            )
+            loss_surf = self.loss_surface(sag_bound=7.0)
+            loss_angle = self.loss_ray_angle()
+
             w_focus = 10.0 if w_focus is None else w_focus
             loss_reg = (
-                w_focus * self.loss_infocus()
-                + 0.1
-                * self.loss_self_intersec(
-                    dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0
-                )
-                + 0.1 * self.loss_surface(sag_bound=7.0)
-                + 0.05 * self.loss_ray_angle()
+                w_focus * loss_focus
+                + 0.1 * loss_intersec
+                + 0.1 * loss_surf
+                + 0.05 * loss_angle
             )
 
         return loss_reg
@@ -3480,17 +3511,19 @@ class GeoLens(DeepObj):
                 d += surf_dict["d_next"]
 
         # self.sensor_size = data['sensor_size']
-        self.r_last = data["r_last"]
+        self.r_sensor = data["r_sensor"]
         self.d_sensor = torch.tensor(d)
+        self.lens_info = data["info"]
 
     def write_lens_json(self, filename="./test.json"):
         """Write the lens into .json file."""
         data = {}
+        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
         data["foclen"] = self.foclen
         data["fnum"] = self.fnum
-        data["r_last"] = self.r_last
+        data["r_sensor"] = self.r_sensor
         data["d_sensor"] = self.d_sensor.item()
-        data["sensor_size"] = self.sensor_size
+        data["(sensor_size)"] = self.sensor_size
         data["surfaces"] = []
         for i, s in enumerate(self.surfaces):
             surf_dict = {"idx": i + 1}
@@ -3580,7 +3613,7 @@ class GeoLens(DeepObj):
 
             elif surf_idx == current_surf:
                 # Image sensor
-                self.r_last = float(surf_dict["DIAM"].split()[0])
+                self.r_sensor = float(surf_dict["DIAM"].split()[0])
 
         self.d_sensor = torch.tensor(d)
 
@@ -3637,7 +3670,7 @@ SURF 0
     TYPE STANDARD
     CURV 0.
     DISZ 0.0
-    DIAM {self.r_last}
+    DIAM {self.r_sensor}
 """
         lens_zmx_str += sensor_str
 
@@ -3650,26 +3683,94 @@ SURF 0
 # ====================================================================================
 # Other functions.
 # ====================================================================================
+# def create_cellphone_lens(
+#     hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=None, flange=0.8, save_dir="./"
+# ):
+#     """Create a flat starting point for cellphone lens design.
+
+#         Aperture is placed 0.2mm i front of the first surface.
+
+#     Args:
+#         hfov: half horizontal fov in radian.
+#         imgh: image height in mm.
+#         fnum: maximum f number.
+#         lens_num: number of pieces to use.
+#         flange: distance from last surface to sensor.
+#         save_dir: directory to save the lens.
+#     """
+#     # Calculate parameters
+#     foclen = imgh / 2 / np.tan(hfov)
+#     aper_r = foclen / fnum / 2
+#     aper_d = 0.1
+#     ttl = imgh / 2 / math.tan(hfov) * 1.4 if thickness is None else thickness
+
+#     d_opt = ttl - flange - aper_d
+#     d_lens = np.random.rand(lens_num * 2 - 1).astype(np.float32) + 1
+#     d_lens = d_lens / np.sum(d_lens) * d_opt
+#     d_lens = np.insert(d_lens, 0, aper_d)
+
+#     mat_names = ["coc", "okp4", "pmma", "pc", "ps"]
+
+#     # Create lens
+#     d_total = 0
+#     lens = GeoLens()
+#     surfaces = lens.surfaces
+#     surfaces.append(Aperture(r=aper_r, d=0.0))
+#     for i in range(0, lens_num):
+#         # front surface
+#         d_total += d_lens[2 * i]
+#         c1 = np.random.randn(1).astype(np.float32) * 0.001
+#         k1 = np.random.randn(1).astype(np.float32) * 0.01
+#         ai1 = np.random.randn(7).astype(np.float32) * 1e-16
+#         mat = random.choice(mat_names)
+#         surfaces.append(Aspheric(r=imgh / 2, d=d_total, c=c1, k=k1, ai=ai1, mat2=mat))
+
+#         # back surface
+#         d_total += d_lens[2 * i + 1]
+#         c2 = np.random.randn(1).astype(np.float32) * 0.001
+#         k2 = np.random.randn(1).astype(np.float32) * 0.01
+#         ai2 = np.random.randn(7).astype(np.float32) * 1e-16
+#         surfaces.append(Aspheric(r=imgh / 2, d=d_total, c=c2, k=k2, ai=ai2, mat2="air"))
+
+#     # Lens calculation
+#     lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
+#     lens.find_aperture()
+#     lens.prepare_sensor(
+#         sensor_res=lens.sensor_res,
+#         sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)],
+#     )
+#     lens.diff_surf_range = lens.find_diff_surf()
+#     lens.post_computation()
+#     lens.set_target_fov_fnum(hfov=hfov, fnum=fnum)
+
+#     # Save lens
+#     lens.write_lens_json(
+#         f"{save_dir}/starting_point_hfov{hfov}_imgh{imgh}_fnum{fnum}.json"
+#     )
+#     return lens
+
+
 def create_cellphone_lens(
     hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=None, flange=0.8, save_dir="./"
 ):
     """Create a flat starting point for cellphone lens design.
 
-        Aperture is placed 0.2mm i front of the first surface.
+    Aperture is placed 0.2mm in front of the first surface.
 
     Args:
-        hfov: half horizontal fov in radian.
+        hfov: half horizontal fov in radians.
         imgh: image height in mm.
         fnum: maximum f number.
-        lens_num: number of pieces to use.
+        lens_num: number of lens elements to use.
+        thickness: Total thickness if specified.
         flange: distance from last surface to sensor.
         save_dir: directory to save the lens.
     """
     # Calculate parameters
     foclen = imgh / 2 / np.tan(hfov)
     aper_r = foclen / fnum / 2
-    aper_d = 0.1
-    ttl = imgh / 2 / math.tan(hfov) * 1.4 if thickness is None else thickness
+    aper_d = 0.1  # Aperture distance in mm
+    ttl = (imgh / 2 / math.tan(hfov) * 1.4) if thickness is None else thickness
 
     d_opt = ttl - flange - aper_d
     d_lens = np.random.rand(lens_num * 2 - 1).astype(np.float32) + 1
@@ -3683,8 +3784,9 @@ def create_cellphone_lens(
     lens = GeoLens()
     surfaces = lens.surfaces
     surfaces.append(Aperture(r=aper_r, d=0.0))
-    for i in range(0, lens_num):
-        # front surface
+
+    for i in range(lens_num):
+        # Front surface
         d_total += d_lens[2 * i]
         c1 = np.random.randn(1).astype(np.float32) * 0.001
         k1 = np.random.randn(1).astype(np.float32) * 0.01
@@ -3692,12 +3794,15 @@ def create_cellphone_lens(
         mat = random.choice(mat_names)
         surfaces.append(Aspheric(r=imgh / 2, d=d_total, c=c1, k=k1, ai=ai1, mat2=mat))
 
-        # back surface
-        d_total += d_lens[2 * i + 1]
-        c2 = np.random.randn(1).astype(np.float32) * 0.001
-        k2 = np.random.randn(1).astype(np.float32) * 0.01
-        ai2 = np.random.randn(7).astype(np.float32) * 1e-16
-        surfaces.append(Aspheric(r=imgh / 2, d=d_total, c=c2, k=k2, ai=ai2, mat2="air"))
+        # Back surface
+        if (2 * i + 1) < len(d_lens):
+            d_total += d_lens[2 * i + 1]
+            c2 = np.random.randn(1).astype(np.float32) * 0.001
+            k2 = np.random.randn(1).astype(np.float32) * 0.01
+            ai2 = np.random.randn(7).astype(np.float32) * 1e-16
+            surfaces.append(
+                Aspheric(r=imgh / 2, d=d_total, c=c2, k=k2, ai=ai2, mat2="air")
+            )
 
     # Lens calculation
     lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
@@ -3711,10 +3816,80 @@ def create_cellphone_lens(
     lens.set_target_fov_fnum(hfov=hfov, fnum=fnum)
 
     # Save lens
-    lens.write_lens_json(
-        f"{save_dir}/starting_point_hfov{hfov}_imgh{imgh}_fnum{fnum}.json"
-    )
+    lens_filename = f"starting_point_hfov{hfov}_imgh{imgh}_fnum{fnum}.json"
+    lens.write_lens_json(f"{save_dir}/{lens_filename}")
+
     return lens
+
+
+# def create_camera_lens(
+#     foclen=50.0,
+#     imgh=20.0,
+#     fnum=4.0,
+#     lens_num=4,
+#     flange=18.0,
+#     thickness=None,
+#     save_dir="./",
+# ):
+#     """Create a flat starting point for camera lens design.
+
+#     Args:
+#         foclen: focal length in mm.
+#         imgh: image height in mm.
+#         fnum: maximum f number.
+#         lens_num: number of pieces to use.
+#         flange: distance from last surface to sensor.
+#         save_dir: directory to save the lens.
+#     """
+#     # Calculate parameters
+#     aper_r = foclen / fnum / 2
+#     ttl = foclen + flange if thickness is None else thickness
+
+#     d_opt = ttl - flange
+#     d_lens = np.random.rand(lens_num * 2).astype(np.float32) + 1
+#     d_lens = d_lens / np.sum(d_lens) * d_opt
+
+#     mat_names = list(SELLMEIER_TABLE.keys())
+#     mat_names.remove("air")
+#     mat_names.remove("vacuum")
+#     mat_names.remove("occluder")
+
+#     # Create lens
+#     d_total = 0
+#     lens = GeoLens()
+#     surfaces = lens.surfaces
+#     # surfaces.append(Aperture(r = aper_r, d = 0.0))
+#     for i in range(0, lens_num):
+#         # front surface
+#         d_total += d_lens[2 * i]
+#         c1 = np.random.randn(1).astype(np.float32) * 0.001
+#         mat = np.random.choice(mat_names)
+#         surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
+
+#         # back surface
+#         d_total += d_lens[2 * i + 1]
+#         c2 = np.random.randn(1).astype(np.float32) * 0.001
+#         surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, mat2="air"))
+
+#         if i == int(lens_num / 2) - 1:
+#             d_total += 2.0
+#             surfaces.append(Aperture(r=aper_r, d=d_total))
+
+#     # Lens calculation
+#     lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
+#     lens.find_aperture()
+#     lens.prepare_sensor(
+#         sensor_res=lens.sensor_res,
+#         sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)],
+#     )
+#     lens.diff_surf_range = lens.find_diff_surf()
+#     lens.post_computation()
+
+#     # Save lens
+#     lens.write_lens_json(
+#         f"{save_dir}/starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
+#     )
+#     return lens
 
 
 def create_camera_lens(
@@ -3729,12 +3904,13 @@ def create_camera_lens(
     """Create a flat starting point for camera lens design.
 
     Args:
-        foclen: focal length in mm.
-        imgh: image height in mm.
-        fnum: maximum f number.
-        lens_num: number of pieces to use.
-        flange: distance from last surface to sensor.
-        save_dir: directory to save the lens.
+        foclen: Focal length in mm.
+        imgh: Image height in mm.
+        fnum: Maximum f number.
+        lens_num: Number of lens elements to use.
+        flange: Distance from last surface to sensor.
+        thickness: Total thickness if specified.
+        save_dir: Directory to save the lens.
     """
     # Calculate parameters
     aper_r = foclen / fnum / 2
@@ -3745,29 +3921,34 @@ def create_camera_lens(
     d_lens = d_lens / np.sum(d_lens) * d_opt
 
     mat_names = list(SELLMEIER_TABLE.keys())
-    mat_names.remove("air")
-    mat_names.remove("vacuum")
-    mat_names.remove("occluder")
+
+    # Safely remove materials
+    remove_materials = ["air", "vacuum", "occluder"]
+    for mat in remove_materials:
+        if mat in mat_names:
+            mat_names.remove(mat)
+        else:
+            print(f"Warning: '{mat}' not found in SELLMEIER_TABLE keys.")
 
     # Create lens
     d_total = 0
     lens = GeoLens()
     surfaces = lens.surfaces
-    # surfaces.append(Aperture(r = aper_r, d = 0.0))
-    for i in range(0, lens_num):
-        # front surface
+    for i in range(lens_num):
+        # Front surface
         d_total += d_lens[2 * i]
         c1 = np.random.randn(1).astype(np.float32) * 0.001
-        mat = np.random.choice(mat_names)
+        mat = random.choice(mat_names)
         surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
 
-        # back surface
+        # Back surface
         d_total += d_lens[2 * i + 1]
         c2 = np.random.randn(1).astype(np.float32) * 0.001
         surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, mat2="air"))
 
+        # Insert aperture in the middle lens elements
         if i == int(lens_num / 2) - 1:
-            d_total += 2.0
+            d_total += 2.0  # Additional distance for aperture placement
             surfaces.append(Aperture(r=aper_r, d=d_total))
 
     # Lens calculation
@@ -3781,7 +3962,7 @@ def create_camera_lens(
     lens.post_computation()
 
     # Save lens
-    lens.write_lens_json(
-        f"{save_dir}/starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
-    )
+    filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
+    lens.write_lens_json(os.path.join(save_dir, filename))
+
     return lens

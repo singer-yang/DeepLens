@@ -22,8 +22,8 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from .geolens import GeoLens
-from .network import MLP, MLPConv
-from .optics.basics import DeepObj
+from .network.surrogate import MLP, MLPConv
+from .optics.basics import DeepObj, init_device
 from .optics.render_psf import local_psf_render, local_psf_render_high_res
 
 DMIN = 200  # [mm]
@@ -37,12 +37,12 @@ class PSFNet(DeepObj):
         model_name="mlp",
         kernel_size=128,
         sensor_res=(480, 640),
-        device="cuda",
     ):
         super().__init__()
 
         # Load lens
         self.lens = GeoLens(filename=filename, sensor_res=sensor_res)
+        device = init_device()
         self.to(device)
 
         # Init implicit PSF network

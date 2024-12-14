@@ -2,7 +2,7 @@
     "info": "JP 1991-141313 Example 1 (Canon EF100mm f2.8 Macro)",
     "foclen": 100.03337780917897,
     "fnum": 2.920501708255921,
-    "r_last": 21.6,
+    "r_sensor": 21.6,
     "d_sensor": 115.73999786376953,
     "sensor_size": [
         30.547012947258853,

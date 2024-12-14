@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.fft import fft2, fftshift, ifft2, ifftshift
 from torchvision.utils import save_image
 
-from .basics import DELTA, DEVICE, DeepObj
+from .basics import DELTA, DeepObj
 
 
 # ===================================
@@ -24,7 +24,6 @@ class ComplexWave(DeepObj):
         phy_size=[4.0, 4.0],
         valid_phy_size=None,
         res=[1024, 1024],
-        device=DEVICE,
     ):
         """Complex wave field class."""
         super(ComplexWave, self).__init__()

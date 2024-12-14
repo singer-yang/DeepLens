@@ -2,7 +2,7 @@
     "info": "US 2021/0263286 Example 1 (Canon RF50mm F1.8 STM)",
     "foclen": 49.8176600996622,
     "fnum": 1.855399138024343,
-    "r_last": 21.6,
+    "r_sensor": 21.6,
     "d_sensor": 59.58000183105469,
     "sensor_size": [
         30.547012947258853,

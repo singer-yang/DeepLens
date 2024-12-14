@@ -1,18 +1,19 @@
 """Geometric surfaces for ray tracing."""
 
 import math
+import random
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .basics import DEVICE, EPSILON, MAXT, DeepObj
+from .basics import EPSILON, DeepObj
 from .materials import Material
 
 
 class Surface(DeepObj):
-    def __init__(self, r, d, mat2, is_square=False, device=DEVICE):
+    def __init__(self, r, d, mat2, is_square=False, device="cpu"):
         super(Surface, self).__init__()
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         self.d_perturb = 0.0
@@ -37,13 +38,17 @@ class Surface(DeepObj):
     # ==============================
     # Intersection and Refraction
     # ==============================
-    def ray_reaction(self, ray, n1, n2):
+    def ray_reaction(self, ray, n1, n2, refraction=True):
         """Compute output ray after intersection and refraction with a surface."""
         # Intersection
         ray = self.intersect(ray, n1)
 
-        # Refraction
-        ray = self.refract(ray, n1 / n2)
+        if refraction:
+            # Refraction
+            ray = self.refract(ray, n1 / n2)
+        else:
+            # Reflection
+            ray = self.reflect(ray)
 
         return ray
 
@@ -88,7 +93,7 @@ class Surface(DeepObj):
         with torch.no_grad():
             it = 0
             t = t0  # initial guess of t
-            ft = MAXT * torch.ones_like(ray.o[..., 2])
+            ft = 1e6 * torch.ones_like(ray.o[..., 2])
             while (torch.abs(ft) > self.NEWTONS_TOLERANCE_LOOSE).any() and (
                 it < self.NEWTONS_MAXITER
             ):
@@ -177,6 +182,20 @@ class Surface(DeepObj):
         ray.d = new_d
         ray.obliq = new_obliq
         ray.ra = ray.ra * valid
+
+        return ray
+
+    def reflect(self, ray):
+        # Compute normal vectors
+        n = self.normal(ray)
+        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
+        if forward:
+            n = -n
+
+        # Reflect
+        cos_alpha = -(n * ray.d).sum(-1)
+        ray.d = ray.d + 2 * cos_alpha[..., None] * n
+        ray.d = F.normalize(ray.d, p=2, dim=-1)
 
         return ray
 
@@ -314,7 +333,7 @@ class Surface(DeepObj):
 
     def max_height(self):
         """Maximum valid height."""
-        raise NotImplementedError()
+        return self.r
 
     # =========================================
     # Optimization-related methods
@@ -332,8 +351,8 @@ class Surface(DeepObj):
     def surf_dict(self):
         surf_dict = {
             "type": self.__class__.__name__,
-            "r": self.r,
-            "(d)": self.d.item(),
+            "r": float(f"{self.r:.6f}"),
+            "(d)": float(f"{self.d.item():.3f}"),
             "is_square": self.is_square,
             "mat2": self.mat2.name,
         }
@@ -347,12 +366,12 @@ class Surface(DeepObj):
     @torch.no_grad()
     def perturb(self, d_precision=0.0005, r_precision=0.001):
         """Randomly perturb surface parameters to simulate manufacturing errors."""
-        self.r_perturb = self.r.item() * float(np.random.randn() * r_precision)
+        self.r_perturb = self.r.item() * np.random.randn() * r_precision
         self.d_perturb = float(torch.randn() * d_precision)
 
 
 class Aperture(Surface):
-    def __init__(self, r, d, diffraction=False, device=DEVICE):
+    def __init__(self, r, d, diffraction=False, device="cpu"):
         """Aperture, can be circle or rectangle.
         For geo optics, it works as a binary mask.
         For wave optics, it works as a diffractive plane.
@@ -361,7 +380,7 @@ class Aperture(Surface):
         self.diffraction = diffraction
         self.to(device)
 
-    def ray_reaction(self, ray, n1=1.0, n2=1.0):
+    def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
         """Compute output ray after intersection and refraction.
 
         In each step, first get a guess of new o and d, then compute valid and only update valid rays.
@@ -402,8 +421,8 @@ class Aperture(Surface):
         """Return a dict of surface."""
         surf_dict = {
             "type": "Aperture",
-            "r": self.r,
-            "(d)": self.d.item(),
+            "r": float(f"{self.r:.6f}"),
+            "(d)": float(f"{self.d.item():.3f}"),
             "is_square": self.is_square,
             "diffraction": self.diffraction,
         }
@@ -430,7 +449,7 @@ class Aspheric(Surface):
         3. aspheric:
     """
 
-    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, device=DEVICE):
+    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, device="cpu"):
         """Initialize aspheric surface.
 
         Args:
@@ -811,11 +830,11 @@ class Aspheric(Surface):
         """Return a dict of surface."""
         surf_dict = {
             "type": "Aspheric",
-            "r": self.r,
-            "(c)": self.c.item(),
-            "roc": 1 / self.c.item(),
-            "(d)": self.d.item(),
-            "k": self.k.item(),
+            "r": float(f"{self.r:.6f}"),
+            "(c)": float(f"{self.c.item():.3f}"),
+            "roc": float(f"{1/self.c.item():.3f}"),
+            "(d)": float(f"{self.d.item():.3f}"),
+            "k": float(f"{self.k.item():.6f}"),
             "ai": [],
             "mat2": self.mat2.name,
         }
@@ -871,26 +890,27 @@ class Cubic(Surface):
     Can also be written as: f(x, y, z) = 0
     """
 
-    def __init__(self, r, d, b, mat2, is_square=False, device=DEVICE):
+    def __init__(self, r, d, b, mat2, is_square=False, device="cpu"):
         Surface.__init__(self, r, d, mat2, is_square=is_square, device=device)
         self.b = torch.tensor(b)
 
         if len(b) == 1:
-            self.b3 = torch.tensor(b[0]).to(device)
+            self.b3 = torch.tensor(b[0])
             self.b_degree = 1
         elif len(b) == 2:
-            self.b3 = torch.tensor(b[0]).to(device)
-            self.b5 = torch.tensor(b[1]).to(device)
+            self.b3 = torch.tensor(b[0])
+            self.b5 = torch.tensor(b[1])
             self.b_degree = 2
         elif len(b) == 3:
-            self.b3 = torch.tensor(b[0]).to(device)
-            self.b5 = torch.tensor(b[1]).to(device)
-            self.b7 = torch.tensor(b[2]).to(device)
+            self.b3 = torch.tensor(b[0])
+            self.b5 = torch.tensor(b[1])
+            self.b7 = torch.tensor(b[2])
             self.b_degree = 3
         else:
             raise Exception("Unsupported cubic degree!!")
 
         self.rotate_angle = 0.0
+        self.to(device)
 
     def g(self, x, y):
         """Compute surface height z(x, y)."""
@@ -1001,12 +1021,12 @@ class Cubic(Surface):
     def surf_dict(self):
         """Return surface parameters."""
         return {
-            "type": "cubic",
+            "type": "Cubic",
             "b3": self.b3.item(),
             "b5": self.b5.item(),
             "b7": self.b7.item(),
             "r": self.r,
-            "(d)": self.d.item(),
+            "(d)": float(f"{self.d.item():.3f}"),
         }
 
 
@@ -1017,7 +1037,7 @@ class DOE_GEO(Surface):
     """
 
     def __init__(
-        self, l, d, thickness=0.5, glass="test", param_model="binary2", device=DEVICE
+        self, l, d, thickness=0.5, glass="test", param_model="binary2", device="cpu"
     ):
         Surface.__init__(
             self, l / np.sqrt(2), d, mat2="air", is_square=True, device=device
@@ -1078,7 +1098,7 @@ class DOE_GEO(Surface):
     # ==============================
     # Computation (ray tracing)
     # ==============================
-    def ray_reaction(self, ray, n1=1.0, n2=1.0):
+    def ray_reaction(self, ray, **kwargs):
         """Ray reaction on DOE surface. Imagine the DOE as a wrapped positive convex lens for debugging.
 
         1, The phase φ in radians adds to the optical path length of the ray
@@ -1407,7 +1427,7 @@ class DOE_GEO(Surface):
                 "glass": self.glass,
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
-                "(d)": self.d.item(),
+                "(d)": float(f"{self.d.item():.3f}"),
                 "mat2": self.mat2.name,
             }
 
@@ -1421,7 +1441,7 @@ class DOE_GEO(Surface):
                 "order4": self.order4.item(),
                 "order6": self.order6.item(),
                 "order8": self.order8.item(),
-                "(d)": self.d.item(),
+                "(d)": f"{float(self.d.item()):.3f}",
                 "mat2": self.mat2.name,
             }
 
@@ -1437,7 +1457,7 @@ class DOE_GEO(Surface):
                 "order5": self.order5.item(),
                 "order6": self.order6.item(),
                 "order7": self.order7.item(),
-                "(d)": self.d.item(),
+                "(d)": float(f"{self.d.item():.3f}"),
                 "mat2": self.mat2.name,
             }
 
@@ -1449,15 +1469,58 @@ class DOE_GEO(Surface):
                 "param_model": self.param_model,
                 "theta": self.theta.item(),
                 "alpha": self.alpha.item(),
-                "(d)": self.d.item(),
+                "(d)": float(f"{self.d.item():.3f}"),
                 "mat2": self.mat2.name,
             }
 
         return surf_dict
 
 
+class Mirror(Surface):
+    def __init__(self, l, d, device="cpu"):
+        """Mirror surface."""
+        Surface.__init__(
+            self, l / np.sqrt(2), d, mat2="air", is_square=True, device=device
+        )
+        self.l = l
+
+    def intersect(self, ray, **kwargs):
+        # Solve intersection
+        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        new_o = ray.o + t.unsqueeze(-1) * ray.d
+        valid = (
+            (torch.abs(new_o[..., 0]) < self.w / 2)
+            & (torch.abs(new_o[..., 1]) < self.h / 2)
+            & (ray.ra > 0)
+        )
+
+        # Update ray position
+        new_o = ray.o + ray.d * t.unsqueeze(-1)
+
+        new_o[~valid] = ray.o[~valid]
+        ray.o = new_o
+        ray.ra = ray.ra * valid
+
+        if ray.coherent:
+            new_opl = ray.opl + 1.0 * t
+            new_opl[~valid] = ray.opl[~valid]
+            ray.opl = new_opl
+
+        return ray
+
+    def ray_reaction(self, ray, **kwargs):
+        """Compute output ray after intersection and refraction with the mirror surface."""
+        # Intersection
+        ray = self.intersect(ray)
+
+        # Reflection
+        ray = self.reflect(ray)
+
+        return ray
+
+
 class Plane(Surface):
-    def __init__(self, l, d, mat2, is_square=True, device=DEVICE):
+    def __init__(self, l, d, mat2, is_square=True, device="cpu"):
         """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
         Surface.__init__(
             self, l / np.sqrt(2), d, mat2=mat2, is_square=is_square, device=device
@@ -1510,7 +1573,7 @@ class Plane(Surface):
         surf_dict = {
             "type": "Plane",
             "l": self.l,
-            "(d)": self.d.item(),
+            "(d)": float(f"{self.d.item():.3f}"),
             "is_square": True,
             "mat2": self.mat2.name,
         }
@@ -1521,7 +1584,7 @@ class Plane(Surface):
 class Spheric(Surface):
     """Spheric surface."""
 
-    def __init__(self, c, r, d, mat2, device=DEVICE):
+    def __init__(self, c, r, d, mat2, device="cpu"):
         super(Spheric, self).__init__(r, d, mat2, is_square=False, device=device)
         self.c = torch.tensor(c)
 
@@ -1562,8 +1625,8 @@ class Spheric(Surface):
 
     def perturb(self, d_precision=0.001, c_precision=0.001):
         """Randomly perturb surface parameters to simulate manufacturing errors."""
-        self.c_perturb = self.c.item() * float(np.random.randn() * c_precision)
-        self.d_perturb = float(np.random.randn() * d_precision)
+        self.c_perturb = self.c.item() * np.random.randn() * c_precision
+        self.d_perturb = np.random.randn() * d_precision
 
     def no_perturb(self):
         """Reset perturbation."""
@@ -1589,10 +1652,10 @@ class Spheric(Surface):
         roc = 1 / self.c.item() if self.c.item() != 0 else 0.0
         surf_dict = {
             "type": "Spheric",
-            "r": self.r,
-            "(c)": self.c.item(),
-            "roc": roc,
-            "(d)": self.d.item(),
+            "r": float(f"{self.r:.3f}"),
+            "(c)": float(f"{self.c.item():.3f}"),
+            "roc": float(f"{roc:.3f}"),
+            "(d)": float(f"{self.d.item():.3f}"),
             "mat2": self.mat2.name,
         }
 
@@ -1619,7 +1682,7 @@ class Spheric(Surface):
 
 
 class ThinLens(Surface):
-    def __init__(self, f, r, d, mat2="air", is_square=False, device=DEVICE):
+    def __init__(self, f, r, d, mat2="air", is_square=False, device="cpu"):
         """Thin lens surface."""
         Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
         self.f = torch.tensor(f)

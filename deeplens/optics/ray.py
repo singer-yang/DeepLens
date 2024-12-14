@@ -1,15 +1,15 @@
-"""Optical ray class."""
+"""Optical ray"""
 
 import copy
 
 import torch
 import torch.nn.functional as F
 
-from .basics import DEFAULT_WAVE, DEVICE, DeepObj
+from .basics import DEFAULT_WAVE, DeepObj
 
 
 class Ray(DeepObj):
-    def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device=DEVICE):
+    def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
         """Ray class. Optical rays with the same wvln.
 
         Args:

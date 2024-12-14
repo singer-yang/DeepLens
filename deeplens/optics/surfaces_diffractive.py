@@ -11,12 +11,12 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from .basics import DEVICE, DeepObj
+from .basics import DeepObj
 
 
 class DOE(DeepObj):
     def __init__(
-        self, l, d, res=None, fab_ps=0.001, param_model="pixel2d", device=DEVICE
+        self, l, d, res=None, fab_ps=0.001, param_model="pixel2d", device="cpu"
     ):
         """DOE class."""
         super().__init__()
@@ -666,7 +666,7 @@ class ThinLens(DeepObj):
 
 
 class Aperture(DeepObj):
-    def __init__(self, d, r, device=DEVICE):
+    def __init__(self, d, r, device="cpu"):
         super().__init__()
         self.d = d
         self.r = r
@@ -681,7 +681,7 @@ class Aperture(DeepObj):
 
 
 class Sensor(DeepObj):
-    def __init__(self, d, r=None, l=None, res=[2048, 2048], device=DEVICE):
+    def __init__(self, d, r=None, l=None, res=[2048, 2048], device="cpu"):
         """Image sensor class. Now only square sensor is considered.
 
         Args:

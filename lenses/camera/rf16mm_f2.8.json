@@ -2,7 +2,7 @@
     "info": "JP 2022-085382 Example 3 (Canon RF16mm F2.8 STM). The original patent can not cover full-frame sensor.",
     "foclen": 13.053262435784244,
     "fnum": 2.3126179178264614,
-    "r_last": 18.2,
+    "r_sensor": 18.2,
     "d_sensor": 63.189998626708984,
     "sensor_size": [
         30.547012947258853,

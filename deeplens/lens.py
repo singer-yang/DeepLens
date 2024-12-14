@@ -6,6 +6,7 @@ When creating a new lens class, it is recommended to inherit from the Lens class
 import torch
 from .optics import (
     DeepObj,
+    init_device,
     WAVE_RGB,
     WAVE_BLUE,
     WAVE_GREEN,
@@ -22,15 +23,15 @@ from .optics import (
 class Lens(DeepObj):
     """Geolens class. A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate."""
 
-    def __init__(self, filename=None, sensor_res=[1024, 1024], device="cuda"):
+    def __init__(self, filename=None, sensor_res=[1024, 1024]):
         """A lens class."""
         super(Lens, self).__init__()
+        self.device = init_device()
 
-        # Load lens file.
+        # Load lens file
         self.lens_name = filename
-        self.device = device
         self.load_file(filename, sensor_res)
-        self.to(device)
+        self.to(self.device)
 
         # Lens calculation
         self.prepare_sensor(sensor_res)

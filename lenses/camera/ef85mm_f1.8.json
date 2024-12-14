@@ -2,7 +2,7 @@
     "info": "JP 1993-157964 Example 1 (Canon EF85mm f1.8 USM)",
     "foclen": 83.87447467479473,
     "fnum": 1.6915526808585557,
-    "r_last": 21.6,
+    "r_sensor": 21.6,
     "d_sensor": 112.43000030517578,
     "sensor_size": [
         30.547012947258853,
