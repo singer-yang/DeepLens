@@ -2,7 +2,7 @@
     "info": "An cellphone lens (80deg FoV, F/2.0) designed by DeepLens, Xinge Yang",
     "foclen": 6.525688727904891,
     "fnum": 3.2628443639524454,
-    "r_last": 3.5649999999999995,
+    "r_sensor": 3.5649999999999995,
     "d_sensor": 8.093751907348633,
     "sensor_size": [
         5.041671349860083,

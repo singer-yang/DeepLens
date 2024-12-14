@@ -162,7 +162,7 @@ def sphere_wave(
 # ==================================
 # Image batch to wave field
 # ==================================
-def img2field(img=None, wvln=0.589, phy_size=[1, 1], padding=False, device="cuda"):
+def img2field(img=None, wvln=0.589, phy_size=[1, 1], padding=False):
     """Convert a monochrome image to a complex field.
 
         phase = 0, amplitutu = image
@@ -195,14 +195,12 @@ def img2field(img=None, wvln=0.589, phy_size=[1, 1], padding=False, device="cuda
         u = F.pad(u, (H // 4, H // 4, W // 4, W // 4), mode="constant", value=0)
 
     res = u.shape
-    field = ComplexWave(u=u, phy_size=phy_size, res=res, wvln=wvln, device=device)
+    field = ComplexWave(u=u, phy_size=phy_size, res=res, wvln=wvln)
 
     return field
 
 
-def batch2field(
-    img, phy_size, z=0, wvln=0.589, padding=False, phase="zero", device="cuda"
-):
+def batch2field(img, phy_size, z=0, wvln=0.589, padding=False, phase="zero"):
     """Convert a batch of images to a complex field.
 
     Args:

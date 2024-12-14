@@ -1,4 +1,4 @@
-"""Basic variables and class for DeepLens."""
+"""Basic variables and classes for DeepLens."""
 
 import copy
 
@@ -6,11 +6,28 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+
+def init_device():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        device_name = torch.cuda.get_device_name(0)
+        print(f"Using CUDA: {device_name}")
+    # elif torch.backends.mps.is_available():
+    #     raise NotImplementedError(
+    #         "MPS is not supported yet due to incompatible with some functions."
+    #     )
+    #     device = torch.device("mps")
+    #     print("Using MPS")
+    else:
+        device = torch.device("cpu")
+        device_name = "CPU"
+        print("Using CPU")
+    return device
+
+
 # ===========================================
 # Variables
 # ===========================================
-DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-
 DEFAULT_WAVE = 0.589
 WAVE_RGB = [0.656, 0.589, 0.486]
 
@@ -225,7 +242,7 @@ class DeepObj(nn.Module):
         """Clone a DeepObj object."""
         return copy.deepcopy(self)
 
-    def to(self, device=DEVICE):
+    def to(self, device):
         """Move all variables to target device.
 
         Args:

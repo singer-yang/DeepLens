@@ -2,7 +2,7 @@
     "info": "US 2022/0019061 Example 3 (Canon RF24mm F1.8 Macro IS STM)",
     "foclen": 39.53853478898897,
     "fnum": 5.242542902817878,
-    "r_last": 21.6,
+    "r_sensor": 21.6,
     "d_sensor": 80.98999786376953,
     "sensor_size": [
         30.547012947258853,
