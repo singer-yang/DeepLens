@@ -15,9 +15,7 @@ from .basics import DeepObj
 
 
 class DOE(DeepObj):
-    def __init__(
-        self, l, d, res=None, fab_ps=0.001, param_model="pixel2d", device="cpu"
-    ):
+    def __init__(self, l, d, res, fab_ps=0.001, param_model="pixel2d", device="cpu"):
         """DOE class."""
         super().__init__()
 
@@ -77,7 +75,10 @@ class DOE(DeepObj):
 
         if self.param_model == "fresnel":
             # "Phase fresnel" or "Fresnel zone plate (FPZ)"
-            self.f0 = torch.tensor([100.0])
+            f0 = kwargs.get("f0", 100.0)
+            self.f0 = torch.tensor([f0])
+            fresnel_wvln = kwargs.get("fresnel_wvln", 0.55)
+            self.fresnel_wvln = fresnel_wvln
 
         elif self.param_model == "cubic":
             self.a3 = torch.tensor([0.001])
@@ -115,6 +116,10 @@ class DOE(DeepObj):
             raise Exception("Unknown parameterization.")
 
         self.to(self.device)
+
+    def save_doe(self, save_path="./doe.pth"):
+        """Save DOE phase map."""
+        self.save_ckpt(save_path)
 
     def save_ckpt(self, save_path="./doe.pth"):
         """Save DOE phase map."""
@@ -176,6 +181,10 @@ class DOE(DeepObj):
 
         else:
             raise Exception("Unknown parameterization.")
+
+    def load_doe(self, load_path="./doe_fab.pth"):
+        """Load DOE phase map."""
+        self.load_ckpt(load_path)
 
     def load_ckpt(self, load_path="./doe.pth"):
         """Load DOE phase map."""
@@ -248,7 +257,10 @@ class DOE(DeepObj):
             pmap = (
                 -2
                 * np.pi
-                * torch.fmod((self.x**2 + self.y**2) / (2 * 0.55e-3 * self.f0), 1)
+                * torch.fmod(
+                    (self.x**2 + self.y**2) / (2 * self.fresnel_wvln * 1e-3 * self.f0),
+                    1,
+                )
             )  # unit [mm]
 
         elif self.param_model == "cubic":
@@ -606,9 +618,30 @@ class DOE(DeepObj):
         fig.savefig(save_name, dpi=600, bbox_inches="tight")
         plt.close(fig)
 
+    # =======================================
+    # Utils
+    # =======================================
+    def surf_dict(self):
+        """Return a dict of surface."""
+        surf_dict = {
+            "type": "DOE",
+            "l": float(f"{self.l:.6f}"),
+            "res": self.res,
+            "fab_ps": float(f"{self.fab_ps:.6f}"),
+            "is_square": True,
+            "param_model": self.param_model,
+            "doe_path": None,
+        }
+        return surf_dict
+
 
 class ThinLens(DeepObj):
-    """Paraxial optics, consisting of both thin lens and thick lens."""
+    """Paraxial optical model for refractive lens.
+
+    Two types of thin lenses supported:
+        (1) Thin lens without chromatic aberration.
+        (2) Extended thin lens with chromatic aberration.
+    """
 
     def __init__(self, foclen, d, r):
         super().__init__()
@@ -619,7 +652,7 @@ class ThinLens(DeepObj):
         self.chromatic = False
 
     def load_foclens(self, wvlns, foclens):
-        """Load a list of wvlns and corresponding focus lenghs for interpolation."""
+        """Load a list of wvlns and corresponding focus lenghs for interpolation. This function is used for chromatic aberration simulation."""
         self.chromatic = True
         self.ref_wvlns = wvlns
         self.ref_foclens = foclens
@@ -664,11 +697,20 @@ class ThinLens(DeepObj):
 
         return field
 
+    def surf_dict(self):
+        """Return a dict of surface."""
+        surf_dict = {
+            "type": "ThinLens",
+            "foclen": float(f"{self.foclen:.6f}"),
+            "r": float(f"{self.r:.6f}"),
+        }
+        return surf_dict
+
 
 class Aperture(DeepObj):
     def __init__(self, d, r, device="cpu"):
         super().__init__()
-        self.d = d
+        self.d = torch.tensor([d])
         self.r = r
 
     def forward(self, field):
@@ -678,6 +720,14 @@ class Aperture(DeepObj):
         field.u *= aper_lens
 
         return field
+
+    def surf_dict(self):
+        """Return a dict of surface."""
+        surf_dict = {
+            "type": "Aperture",
+            "r": float(f"{self.r:.6f}"),
+        }
+        return surf_dict
 
 
 class Sensor(DeepObj):
@@ -725,6 +775,15 @@ class Sensor(DeepObj):
             )
 
         return response
+
+    def surf_dict(self):
+        """Return a dict of surface."""
+        surf_dict = {
+            "type": "Sensor",
+            "res": self.res,
+            "l": float(f"{self.l:.6f}"),
+        }
+        return surf_dict
 
 
 def Zernike(z_coeff, grid=256):

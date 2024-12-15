@@ -9,6 +9,12 @@ class Material:
         self.name = "vacuum" if name is None else name.lower()
         self.load_dispersion()
 
+    def get_name(self):
+        if self.dispersion == "optimizable":
+            return f"{self.n.item():.4f}/{self.V.item():.2f}"
+        else:
+            return self.name
+
     def load_dispersion(self):
         """Load material dispersion equation."""
         if self.name in SELLMEIER_TABLE:
@@ -115,7 +121,7 @@ class Material:
 
         self.load_dispersion()
 
-    def get_optimizer_params(self, lr=1e-3):
+    def get_optimizer_params(self, lr=[1e-4, 1e-2]):
         """Optimize the material parameters (n, V)."""
         self.n = torch.tensor(self.n).to(self.device)
         self.V = torch.tensor(self.V).to(self.device)
@@ -124,7 +130,7 @@ class Material:
         self.V.requires_grad = True
         self.dispersion = "optimizable"
 
-        params = {"params": [self.A, self.B], "lr": lr}
+        params = [{"params": [self.n], "lr": lr[0]}, {"params": [self.V], "lr": lr[1]}]
         return params
 
 

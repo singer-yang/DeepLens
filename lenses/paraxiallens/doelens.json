@@ -1,0 +1,23 @@
+{
+    "info": "A paraxial DOE lens system.",
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "DOE",
+            "l": 4.0,
+            "res": [4000, 4000],
+            "fab_ps": 0.001,
+            "(d)": 1.2,
+            "is_square": true,
+            "param_model": "pixel2d",
+            "doe_path": null,
+            "d_next": 50.0
+        },
+        {
+            "idx": 2,
+            "type": "Sensor",
+            "l": 4.0,
+            "res": [2000, 2000]
+        }
+    ]
+}

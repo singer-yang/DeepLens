@@ -354,7 +354,7 @@ class Surface(DeepObj):
             "r": float(f"{self.r:.6f}"),
             "(d)": float(f"{self.d.item():.3f}"),
             "is_square": self.is_square,
-            "mat2": self.mat2.name,
+            "mat2": self.mat2.get_name(),
         }
 
         return surf_dict
@@ -800,7 +800,7 @@ class Aspheric(Surface):
                         f"params.append({{'params': [self.ai{2*i}], 'lr': lr[3] * decay**{i-1}}})"
                     )
 
-        if optim_mat and self.mat2.name != "air":
+        if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
 
         return params
@@ -836,7 +836,7 @@ class Aspheric(Surface):
             "(d)": float(f"{self.d.item():.3f}"),
             "k": float(f"{self.k.item():.6f}"),
             "ai": [],
-            "mat2": self.mat2.name,
+            "mat2": self.mat2.get_name(),
         }
         for i in range(1, self.ai_degree + 1):
             exec(f"surf_dict['(ai{2*i})'] = self.ai{2*i}.item()")
@@ -852,7 +852,7 @@ class Aspheric(Surface):
         assert (
             self.ai is not None or self.k != 0
         ), "Spheric surface is re-implemented in Spheric class."
-        if self.mat2.name == "air":
+        if self.mat2.get_name() == "air":
             zmx_str = f"""SURF {surf_idx} 
     TYPE EVENASPH
     CURV {self.c.item()} 
@@ -870,7 +870,7 @@ class Aspheric(Surface):
     TYPE EVENASPH 
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
-    GLAS {self.mat2.name.upper()} 0 0 {self.mat2.n} {self.mat2.V}
+    GLAS {self.mat2.get_name().upper()} 0 0 {self.mat2.n} {self.mat2.V}
     DIAM {self.r * 2}
     PARM 1 {self.ai2.item()}
     PARM 2 {self.ai4.item()}
@@ -989,7 +989,7 @@ class Cubic(Surface):
         else:
             raise Exception("Unsupported cubic degree!")
 
-        if optim_mat and self.mat2.name != "air":
+        if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
 
         return params
@@ -1428,7 +1428,7 @@ class DOE_GEO(Surface):
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
                 "(d)": float(f"{self.d.item():.3f}"),
-                "mat2": self.mat2.name,
+                "mat2": self.mat2.get_name(),
             }
 
         elif self.param_model == "binary2":
@@ -1442,7 +1442,7 @@ class DOE_GEO(Surface):
                 "order6": self.order6.item(),
                 "order8": self.order8.item(),
                 "(d)": f"{float(self.d.item()):.3f}",
-                "mat2": self.mat2.name,
+                "mat2": self.mat2.get_name(),
             }
 
         elif self.param_model == "poly1d":
@@ -1458,7 +1458,7 @@ class DOE_GEO(Surface):
                 "order6": self.order6.item(),
                 "order7": self.order7.item(),
                 "(d)": float(f"{self.d.item():.3f}"),
-                "mat2": self.mat2.name,
+                "mat2": self.mat2.get_name(),
             }
 
         elif self.param_model == "grating":
@@ -1470,7 +1470,7 @@ class DOE_GEO(Surface):
                 "theta": self.theta.item(),
                 "alpha": self.alpha.item(),
                 "(d)": float(f"{self.d.item():.3f}"),
-                "mat2": self.mat2.name,
+                "mat2": self.mat2.get_name(),
             }
 
         return surf_dict
@@ -1575,7 +1575,7 @@ class Plane(Surface):
             "l": self.l,
             "(d)": float(f"{self.d.item():.3f}"),
             "is_square": True,
-            "mat2": self.mat2.name,
+            "mat2": self.mat2.get_name(),
         }
 
         return surf_dict
@@ -1642,7 +1642,7 @@ class Spheric(Surface):
         params.append({"params": [self.c], "lr": lr[0]})
         params.append({"params": [self.d], "lr": lr[1]})
 
-        if optim_mat and self.mat2.name != "air":
+        if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
 
         return params
@@ -1656,14 +1656,14 @@ class Spheric(Surface):
             "(c)": float(f"{self.c.item():.3f}"),
             "roc": float(f"{roc:.3f}"),
             "(d)": float(f"{self.d.item():.3f}"),
-            "mat2": self.mat2.name,
+            "mat2": self.mat2.get_name(),
         }
 
         return surf_dict
 
     def zmx_str(self, surf_idx, d_next):
         """Return Zemax surface string."""
-        if self.mat2.name == "air":
+        if self.mat2.get_name() == "air":
             zmx_str = f"""SURF {surf_idx} 
     TYPE STANDARD 
     CURV {self.c.item()} 
@@ -1675,7 +1675,7 @@ class Spheric(Surface):
     TYPE STANDARD 
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
-    GLAS {self.mat2.name.upper()} 0 0 {self.mat2.n} {self.mat2.V}
+    GLAS {self.mat2.get_name().upper()} 0 0 {self.mat2.n} {self.mat2.V}
     DIAM {self.r*2}
 """
         return zmx_str

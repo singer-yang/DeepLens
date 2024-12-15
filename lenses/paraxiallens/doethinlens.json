@@ -1,0 +1,40 @@
+{
+    "info": "A paraxial hybrid lens system with a diffractive optical element (DOE) and a thin lens.",
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Aperture",
+            "r": 2.0,
+            "(d)": 0.0,
+            "is_square": false,
+            "diffraction": false,
+            "d_next": 2.0
+        },
+        {
+            "idx": 2,
+            "type": "ThinLens",
+            "foclen": 50.0,
+            "r": 5.0,
+            "(d)": 0.2,
+            "d_next": 2.0
+        },
+        {
+            "idx": 3,
+            "type": "DOE",
+            "l": 4.0,
+            "res": [4000, 4000],
+            "fab_ps": 0.001,
+            "(d)": 1.2,
+            "is_square": true,
+            "param_model": "pixel2d",
+            "doe_path": null,
+            "d_next": 48.0
+        },
+        {
+            "idx": 4,
+            "type": "Sensor",
+            "l": 4.0,
+            "res": [2000, 2000]
+        }
+    ]
+}
