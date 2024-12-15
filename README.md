@@ -141,5 +141,8 @@ If you use DeepLens in your research, please cite the corresponding papers:
 
 (If you donot want to list your paper here, we can remove it.)
 
+- [SiggraphAsia 2024] End-to-end Optimization of Fluidic Lenses. [Paper](https://dl.acm.org/doi/10.1145/3680528.3687584), [BibTex](.misc/fluidiclens_bibtext.txt)
 - [TPAMI 2023] Aberration-Aware Depth-From-Focus. [Paper](https://ieeexplore.ieee.org/document/10209238), [BibTex](./misc/aatdff_bibtex.txt)
 - [Arxiv 2024] Centimeter-Scale Achromatic Hybrid Metalens Design: A New Paradigm Based on Differentiable Ray Tracing in the Visible Spectrum. [Paper](https://arxiv.org/abs/2404.03173)
+
+# End-to-end Optimization of Fluidic Lenses
