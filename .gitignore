@@ -10,3 +10,8 @@ deeplens/do_code/
 !lenses/*.png
 !lenses/**/*.png
 !images/*.png
+debug.py
+
+
+
+lenses/pancake/

@@ -4,19 +4,22 @@ seed: ~
 # experiment settings
 EXP_NAME: 'Auto lens design'
 
-# cellphone lens target
-HFOV: 0.73
-FNUM: 2.0
-DIAG: 10.0
-lens_num: 7
-lrs: [3e-4, 5e-4, 1e-1, 1e-2] # aspheric lens design
+# # cellphone lens target
+# HFOV: 0.73
+# FNUM: 2.0
+# DIAG: 10.0
+# lens_num: 7
+# lrs: [3e-4, 5e-4, 1e-1, 1e-2] # aspheric lens design
 
-# # camera lens target
-# FOCLEN: 85.0
-# FNUM: 3.0
-# DIAG: 43.0
-# lens_num: 8
-# lrs: [1e-3, 1e-3, 0, 0]
+# camera lens target
+FOCLEN: 85.0
+FNUM: 3.0
+DIAG: 43.0
+lens_num: 8
+lrs: [1e-3, 1e-3, 0, 0]
+thickness: 80.0
+surf_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Aspheric", "Aspheric"]
+
 
 # curriculum learning
 start_ratio: 0.4
