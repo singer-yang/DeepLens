@@ -60,7 +60,7 @@ def config():
     # Device
     num_gpus = torch.cuda.device_count()
     args["num_gpus"] = num_gpus
-    device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args["device"] = device
     logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
 
@@ -203,23 +203,37 @@ if __name__ == "__main__":
     # Bind function
     GeoLens.curriculum_design = curriculum_design
 
-    # ===> Create a cellphone lens
-    lens = create_cellphone_lens(
-        hfov=args["HFOV"],
+    # # ===> Create a cellphone lens
+    # lens = create_cellphone_lens(
+    #     hfov=args["HFOV"],
+    #     imgh=args["DIAG"],
+    #     fnum=args["FNUM"],
+    #     lens_num=args["lens_num"],
+    #     save_dir=result_dir,
+    # )
+    # lens.set_target_fov_fnum(hfov=args["HFOV"], fnum=args["FNUM"], imgh=args["DIAG"])
+    # logging.info(
+    #     f'==> Design target: FOV {round(args["HFOV"]*2*57.3, 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}, FOCLEN {round(args["DIAG"]/2/np.tan(args["HFOV"]), 2)}mm.'
+    # )
+
+    # ===> Create a camera lens
+    lens = create_camera_lens(
+        foclen=args["FOCLEN"],
         imgh=args["DIAG"],
         fnum=args["FNUM"],
         lens_num=args["lens_num"],
+        thickness=args["thickness"],
+        surf_type=args["surf_type"],
         save_dir=result_dir,
     )
-    lens.set_target_fov_fnum(hfov=args["HFOV"], fnum=args["FNUM"], imgh=args["DIAG"])
-    logging.info(
-        f'==> Design target: FOV {round(args["HFOV"]*2*57.3, 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}, FOCLEN {round(args["DIAG"]/2/np.tan(args["HFOV"]), 2)}mm.'
+    lens.set_target_fov_fnum(
+        hfov=float(np.arctan(args["DIAG"] / args["FOCLEN"] / 2)),
+        fnum=args["FNUM"],
+        imgh=args["DIAG"],
     )
-
-    # # ===> Create a camera lens
-    # lens = create_camera_lens(foclen=args['FOCLEN'], imgh=args['DIAG'], fnum=args['FNUM'], lens_num=args['lens_num'], save_dir=result_dir)
-    # lens.set_target_fov_fnum(hfov=float(np.arctan(args['DIAG'] / args['FOCLEN'] / 2)), fnum=args['FNUM'], imgh=args['DIAG'])
-    # logging.info(f'==> Design target: FOCLEN {round(args["FOCLEN"], 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}')
+    logging.info(
+        f'==> Design target: FOCLEN {round(args["FOCLEN"], 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}'
+    )
 
     # =====> 2. Curriculum learning with RMS errors
     lens.curriculum_design(
