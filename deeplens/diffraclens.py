@@ -1,68 +1,96 @@
-"""Pure diffractive lens with all surface represented for wave optics.
+"""Refractive-diffractive lens with all surface represented using paraxial wave optics."""
 
-1. Thinlens + DOE + Sensor
-2. Real lens + DOE + Sensor
-"""
-
+import json
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import save_image
 
-from .optics.basics import (
-    BLUE_RESPONSE,
-    DEPTH,
-    DEVICE,
-    GREEN_RESPONSE,
-    RED_RESPONSE,
-    WAVE_BOARD_BAND,
-    WAVE_RGB,
-    DeepObj,
-)
-from .optics.surfaces_diffractive import DOE, Sensor, ThinLens
+from .optics.basics import DEPTH
+from .optics.surfaces_diffractive import DOE, Sensor, ThinLens, Aperture
 from .optics.waveoptics_utils import point_source_field
+from .lens import Lens
 
 
-class DoeThinLens(DeepObj):
-    """DOE with thin lens model.
+class DoeThinLens(Lens):
+    """Paraxial refractive-diffractive lens model. The lens consists of a thin lens, a diffractive optical element (DOE), an aperture, and a sensor. All optical surfaces are modeled using paraxial wave optics.
 
-    Reference: https://www.lighttrans.com/use-cases/application/chromatic-aberration-correction.html
+    This paraxial model is used in most existing computational imaging papers. It is a good approximation for the lens with a small field of view and a small aperture. The model can optimize the DOE but not the thin lens.
     """
 
-    def __init__(self, thinlens=None, doe=None, sensor=None, aper=None, device=DEVICE):
-        super().__init__()
+    def __init__(self, filename, sensor_res=[1024, 1024]):
+        super().__init__(filename, sensor_res)
 
-        self.aper = aper
-        self.thinlens = thinlens
-        self.doe = doe
-        self.sensor = sensor
+    def load_file(self, filename):
+        """Load lens from a file."""
+        self.surfaces = []
+        with open(filename, "r") as f:
+            data = json.load(f)
+            d = 0.0
+            for surf_dict in data["surfaces"]:
+                if surf_dict["type"] == "Aperture":
+                    s = Aperture(r=surf_dict["r"], d=d)
+                    self.aperture = s
 
-        if aper is None:
-            self.surfaces = [self.thinlens, self.doe, self.sensor]
-        else:
-            self.surfaces = [self.aper, self.thinlens, self.doe, self.sensor]
+                elif surf_dict["type"] == "DOE":
+                    s = DOE(
+                        l=surf_dict["l"],
+                        d=d,
+                        res=surf_dict["res"],
+                        fab_ps=surf_dict["fab_ps"],
+                        param_model=surf_dict["param_model"],
+                    )
+                    if surf_dict["doe_path"] is not None:
+                        s.load_doe(surf_dict["doe_path"])
+                    self.doe = s
 
-        assert doe.l == sensor.l, "DOE and sensor should have the same physical size."
-        self.to(device)
+                elif surf_dict["type"] == "ThinLens":
+                    s = ThinLens(foclen=surf_dict["foclen"], r=surf_dict["r"], d=d)
+                    self.thinlens = s
 
-    def load_example(self):
-        """Generate an example lens group. The lens is focused to infinity."""
-        self.thinlens = ThinLens(foclen=50, d=0, r=12.7)
-        self.doe = DOE(d=40, l=4, res=1024)
-        self.sensor = Sensor(d=50, l=4)
+                elif surf_dict["type"] == "Sensor":
+                    s = Sensor(l=surf_dict["l"], d=d, res=surf_dict["res"])
+                    self.sensor = s
 
-        self.surfaces = [self.thinlens, self.doe, self.sensor]
+                else:
+                    raise Exception("Surface type not implemented.")
 
-    def load_example2(self):
-        """Generate an example lens group. The lens is focused to -100mm."""
-        self.thinlens = ThinLens(foclen=50, d=0, r=12.7)
-        self.doe = DOE(d=40, l=4, res=1024)
-        self.sensor = Sensor(d=100, l=4)
+                self.surfaces.append(s)
 
-        self.surfaces = [self.thinlens, self.doe, self.sensor]
+                if not surf_dict["type"] == "Sensor":
+                    d += surf_dict["d_next"]
 
-    def forward(self, field):
+        self.lens_info = data["info"]
+
+    def write_file(self, filename):
+        """Write the lens into a file."""
+        # Save DOE to a file
+        doe_filename = filename.replace(".json", "_doe.pth")
+        self.doe.save_doe(doe_filename)
+
+        # Save lens to a file
+        data = {}
+        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
+        data["surfaces"] = []
+        for i, s in enumerate(self.surfaces):
+            surf_dict = {"idx": i + 1}
+
+            surf_dict = s.surf_dict()
+            if isinstance(s, DOE):
+                surf_dict["doe_path"] = doe_filename
+            surf_dict.update(surf_dict)
+
+            if i < len(self.surfaces) - 1:
+                surf_dict["d_next"] = (
+                    self.surfaces[i + 1].d.item() - self.surfaces[i].d.item()
+                )
+
+            data["surfaces"].append(surf_dict)
+
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def prop_wave(self, field):
         """Propagate a wavefront through the lens group.
 
         Args:
@@ -77,7 +105,7 @@ class DoeThinLens(DeepObj):
         return field
 
     # =============================================
-    # PSF related functions
+    # PSF-related functions
     # =============================================
     def psf(self, point=[0, 0, -10000.0], ks=101, wvln=0.589):
         """Calculate monochromatic point PSF by wave propagation approach.
@@ -108,12 +136,11 @@ class DoeThinLens(DeepObj):
             res=field_res,
             wvln=wvln,
             fieldz=self.surfaces[0].d.item(),
+            device=self.device,
         )
 
-        # Calculate PSF on the sensor.
-        psf_full_res = self.forward(inp_field)[
-            0, 0, :, :
-        ]  # shape of [H_sensor, W_sensor]
+        # Calculate PSF on the sensor. Shape [H_sensor, W_sensor]
+        psf_full_res = self.prop_wave(inp_field)[0, 0, :, :]
 
         # Crop the valid patch of the full-resolution PSF
         coord_c_i = int((1 + y) * sensor.res[0] / 2)
@@ -129,201 +156,279 @@ class DoeThinLens(DeepObj):
 
         return psf_out
 
-    def psf_rgb(self, point=[0, 0, -DEPTH], ks=101):
-        """Calculate RGB point PSF of DOEThinLens.
-
-        Args:
-            point (list, optional): Point source position. Defaults to [0, 0, -DEPTH].
-            ks (int, optional): PSF kernel size. Defaults to 101.
-
-        Returns:
-            psf (tensor): RGB PSF. Shape of [3, ks, ks]
-        """
-        psf = []
-        for wvln in WAVE_RGB:
-            psf_mono = self.psf(point=point, ks=ks, wvln=wvln)
-            psf.append(psf_mono)
-
-        psf = torch.stack(psf, dim=0)  # shape [3, ks, ks]
-        return psf
-
-    def psf_board_band(self, point=[0, 0, -DEPTH], ks=101):
-        """Calculate boardband RGB PSF"""
-        psf_r = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(point=point, ks=ks, wvln=wvln)
-            psf_r.append(psf * RED_RESPONSE[i])
-        psf_r = torch.stack(psf_r, dim=0).sum(dim=0) / sum(RED_RESPONSE)
-
-        psf_g = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(point=point, ks=ks, wvln=wvln)
-            psf_g.append(psf * GREEN_RESPONSE[i])
-        psf_g = torch.stack(psf_g, dim=0).sum(dim=0) / sum(GREEN_RESPONSE)
-
-        psf_b = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(point=point, ks=ks, wvln=wvln)
-            psf_b.append(psf * BLUE_RESPONSE[i])
-        psf_b = torch.stack(psf_b, dim=0).sum(dim=0) / sum(BLUE_RESPONSE)
-
-        psfs = torch.stack([psf_r, psf_g, psf_b], dim=0)  # shape [3, ks, ks]
-
-        return psfs
-
-    def psf_map(self, grid=9, ks=101, wvln=0.589, depth=DEPTH):
-        """Generate PSF map for DoeThinlens.
-
-        Args:
-            grid (int, optional): Grid size. Defaults to 9.
-            ks (int, optional): PSF kernel size. Defaults to 101.
-            wvln (float, optional): wvln. Defaults to 0.589.
-            depth (float, optional): Depth of the point source. Defaults to DEPTH.
-
-        Returns:
-            psf_map (tensor): PSF map. Shape of [grid*ks, grid*ks]
-        """
-        points = self.point_source_grid(depth=depth, grid=grid, center=True)
-        points = points.reshape(-1, 3)
-
-        psfs = []
-        for i in range(points.shape[0]):
-            point = points[i, ...]
-            psf = self.psf(point=point, ks=ks, wvln=wvln)
-            psfs.append(psf)
-
-        psf_map = torch.stack(psfs).unsqueeze(1)
-        psf_map = make_grid(psf_map, nrow=grid, padding=0)[0, :, :]
-
-        return psf_map
-
-    def point_source_grid(
-        self, depth, grid=9, normalized=True, quater=False, center=False
-    ):
-        """
-        Generate point source grid for PSF calculation.
-        """
-        # ==> Use center of each patch
-        if grid == 1:
-            x, y = torch.tensor([[0.0]]), torch.tensor([[0.0]])
-            assert not quater, "Quater should be False when grid is 1."
-        else:
-            if center:
-                half_bin_size = 1 / 2 / (grid - 1)
-                x, y = torch.meshgrid(
-                    torch.linspace(-1 + half_bin_size, 1 - half_bin_size, grid),
-                    torch.linspace(1 - half_bin_size, -1 + half_bin_size, grid),
-                    indexing="xy",
-                )
-            # ==> Use corner
-            else:
-                x, y = torch.meshgrid(
-                    torch.linspace(-0.98, 0.98, grid),
-                    torch.linspace(0.98, -0.98, grid),
-                    indexing="xy",
-                )
-
-        z = torch.full((grid, grid), depth)
-        point_source = torch.stack([x, y, z], dim=-1)
-
-        # ==> Use quater of the sensor plane to save memory
-        if quater:
-            z = torch.full((grid, grid), depth)
-            point_source = torch.stack([x, y, z], dim=-1)
-            bound_i = grid // 2 if grid % 2 == 0 else grid // 2 + 1
-            bound_j = grid // 2
-            point_source = point_source[0:bound_i, bound_j:, :]
-
-        if not normalized:
-            scale = self.calc_scale_pinhole(depth)
-            point_source[..., 0] *= scale * self.sensor_size[0] / 2
-            point_source[..., 1] *= scale * self.sensor_size[1] / 2
-
-        return point_source
-
-    def point_source_radial(self, depth, grid=9, normalized=True, center=False):
-        """
-        Generate radial point source grid for PSF calculation.
-        """
-        if grid == 1:
-            x = torch.tensor([0.0])
-        else:
-            # Select center of bin to calculate PSF
-            if center:
-                half_bin_size = 1 / 2 / (grid - 1)
-                x = torch.linspace(0, 1 - half_bin_size, grid)
-            else:
-                x = torch.linspace(0, 0.98, grid)
-
-        z = torch.full_like(x, depth)
-        point_source = torch.stack([x, x, z], dim=-1)
-        return point_source
-
     def draw_psf(self, depth=DEPTH, ks=101, save_name="./psf_doethinlens.png"):
-        """Draw RGB on-axis PSF."""
-        psfs = []
-        for wvln in WAVE_RGB:
-            psf = self.psf(point=[0, 0, depth], ks=ks, wvln=wvln)
-            psfs.append(psf)
-
-        psfs = torch.stack(psfs, dim=0)  # shape [3, ks, ks]
-        save_image(psfs.unsqueeze(0), save_name, normalize=True)
-
-    def draw_psf_map(
-        self,
-        grid=8,
-        depth=DEPTH,
-        ks=101,
-        log_scale=False,
-        save_name="./psf_map_doethinlens.png",
-    ):
-        """Draw RGB PSF map of the DOE thin lens."""
-        # Calculate PSF map
-        psf_maps = []
-        for wvln in WAVE_RGB:
-            psf_map = self.psf_map(grid=grid, depth=depth, ks=ks, wvln=wvln)
-            psf_maps.append(psf_map)
-        psf_map = torch.stack(psf_maps, dim=0)  # shape [3, grid*ks, grid*ks]
-
-        # Data processing for visualization
-        if log_scale:
-            psf_map = torch.log(psf_map + 1e-4)
-        psf_map = (psf_map - psf_map.min()) / (psf_map.max() - psf_map.min())
-
-        save_image(psf_map.unsqueeze(0), save_name, normalize=True)
-
-    def get_optimizer(self, lr):
-        return self.doe.get_optimizer(lr=lr)
+        """Draw on-axis RGB PSF."""
+        psf_rgb = self.psf_rgb(point=[0, 0, depth], ks=ks)
+        save_image(psf_rgb.unsqueeze(0), save_name, normalize=True)
 
     # =============================================
     # Utils
     # =============================================
+    def get_optimizer(self, lr):
+        return self.doe.get_optimizer(lr=lr)
+
     def draw_layout(self, save_name="./doethinlens.png"):
         """Draw lens setup."""
         fig, ax = plt.subplots()
 
-        # Plot thin lens
+        # Draw aperture
+        d = self.aperture.d.item()
+        r = self.aperture.r
+        ax.plot([d, d], [r, r + 0.5], "gray")
+        ax.plot([d - 0.5, d + 0.5], [r, r], "gray")  # top wedge
+        ax.plot([d, d], [-r, -r - 0.5], "gray")
+        ax.plot([d - 0.5, d + 0.5], [-r, -r], "gray")  # bottom wedge
+
+        # Draw thinlens
         d = self.thinlens.d.item()
         r = self.thinlens.r
-        roc = r * 2  # A manually set roc for plotting
-        r_ls = np.arange(-r, r, 0.01)
-        d1_ls = d - (np.sqrt(roc**2 - r_ls**2) - np.sqrt(roc**2 - r**2))
-        d2_ls = d + (np.sqrt(roc**2 - r_ls**2) - np.sqrt(roc**2 - r**2))
-        ax.plot(d1_ls, r_ls, "black")
-        ax.plot(d2_ls, r_ls, "black")
+        arrow_length = r
+        ax.arrow(
+            d,
+            -arrow_length,
+            0,
+            2 * arrow_length,
+            head_width=0.5,
+            head_length=0.5,
+            fc="black",
+            ec="black",
+            length_includes_head=True,
+        )
+        ax.arrow(
+            d,
+            arrow_length,
+            0,
+            -2 * arrow_length,
+            head_width=0.5,
+            head_length=0.5,
+            fc="black",
+            ec="black",
+            length_includes_head=True,
+        )
 
-        # Plot DOE
+        # Draw DOE
         d = self.doe.d.item()
-        l = self.doe.l
-        ax.plot([d, d], [-l / 2, l / 2], "black")
+        doe_l = self.doe.l
+        ax.plot(
+            [d, d], [-doe_l / 2, doe_l / 2], "orange", linestyle="--", dashes=[1, 1]
+        )
 
-        # Plot sensor
+        # Draw sensor
         d = self.sensor.d.item()
-        l = self.sensor.l
-        ax.plot([d, d], [-l / 2, l / 2], "black")
+        sensor_l = self.sensor.l
+        width = 0.2  # Width of the rectangle
+        rect = plt.Rectangle(
+            (d - width / 2, -sensor_l / 2),
+            width,
+            sensor_l,
+            facecolor="none",
+            edgecolor="black",
+            linewidth=1,
+        )
+        ax.add_patch(rect)
 
-        # ax.set_xlim(-1, 100)
-        # ax.set_ylim(-100, 100)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        fig.savefig(save_name, dpi=600, bbox_inches="tight")
+        plt.close(fig)
+
+
+class DoeLens(Lens):
+    """Paraxial diffractive lens model. The lens consists of a diffractive optical element (DOE) and a sensor. DOE is modeled using paraxial wave optics."""
+
+    def __init__(self, filename, sensor_res=[1024, 1024]):
+        super().__init__(filename, sensor_res)
+
+    def load_example(self):
+        self.doe = DOE(d=0, l=4, res=4000)
+        self.doe.init_param_model(param_model="fresnel", f0=50, fresnel_wvln=0.589)
+        self.sensor = Sensor(d=50, l=4)
+        self.surfaces = [self.doe, self.sensor]
+
+    def load_file(self, filename):
+        """Load lens from a file."""
+        self.surfaces = []
+        with open(filename, "r") as f:
+            data = json.load(f)
+            d = 0.0
+            for surf_dict in data["surfaces"]:
+                if surf_dict["type"] == "DOE":
+                    s = DOE(
+                        l=surf_dict["l"],
+                        d=d,
+                        res=surf_dict["res"],
+                        fab_ps=surf_dict["fab_ps"],
+                        param_model=surf_dict["param_model"],
+                    )
+                    if surf_dict["doe_path"] is not None:
+                        s.load_doe(surf_dict["doe_path"])
+                    self.doe = s
+
+                elif surf_dict["type"] == "Sensor":
+                    s = Sensor(l=surf_dict["l"], d=d, res=surf_dict["res"])
+                    self.sensor = s
+
+                else:
+                    raise Exception("Surface type not implemented.")
+
+                self.surfaces.append(s)
+
+                if not surf_dict["type"] == "Sensor":
+                    d += surf_dict["d_next"]
+
+        self.lens_info = data["info"]
+
+    def write_file(self, filename):
+        """Write the lens into a file."""
+        # Save DOE to a file
+        doe_filename = filename.replace(".json", "_doe.pth")
+        self.doe.save_doe(doe_filename)
+
+        # Save lens to a file
+        data = {}
+        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
+        data["surfaces"] = []
+        for i, s in enumerate(self.surfaces):
+            surf_dict = {"idx": i + 1}
+
+            surf_dict = s.surf_dict()
+            if isinstance(s, DOE):
+                surf_dict["doe_path"] = doe_filename
+            surf_dict.update(surf_dict)
+
+            if i < len(self.surfaces) - 1:
+                surf_dict["d_next"] = (
+                    self.surfaces[i + 1].d.item() - self.surfaces[i].d.item()
+                )
+
+            data["surfaces"].append(surf_dict)
+
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def prop_wave(self, field):
+        """Propagate a wavefront through the lens group.
+
+        Args:
+            field (Field): Input wavefront.
+
+        Returns:
+            field (torch.tensor): Output energy distribution. Shape of [H_sensor, W_sensor]
+        """
+        for surf in self.surfaces:
+            field = surf(field)
+
+        return field
+
+    # =============================================
+    # PSF-related functions
+    # =============================================
+    def psf(self, point=[0, 0, -10000.0], ks=101, wvln=0.589):
+        """Calculate monochromatic point PSF by wave propagation approach.
+
+            For the shifted phase issue, refer to "Modeling off-axis diffraction with the least-sampling angular spectrum method".
+
+        Args:
+            point (list, optional): Point source position. Defaults to [0, 0, -10000].
+            ks (int, optional): PSF kernel size. Defaults to 256.
+            wvln (float, optional): wvln. Defaults to 0.55.
+            padding (bool, optional): Whether to pad the PSF. Defaults to True.
+
+        Returns:
+            psf_out (tensor): PSF. shape [ks, ks]
+        """
+        # Get input field
+        x, y, z = point
+        sensor = self.sensor
+        sensor_l = sensor.l
+        field_res = self.doe.res
+        scale = -z / sensor.d.item()
+        x_obj, y_obj = x * scale * sensor_l / 2, y * scale * sensor_l / 2
+
+        # We have to sample high resolution to meet Nyquist sampling constraint.
+        inp_field = point_source_field(
+            point=[x_obj, y_obj, z],
+            phy_size=[sensor_l, sensor_l],
+            res=field_res,
+            wvln=wvln,
+            fieldz=self.surfaces[0].d.item(),
+            device=self.device,
+        )
+
+        # Calculate PSF on the sensor. Shape [H_sensor, W_sensor]
+        psf_full_res = self.prop_wave(inp_field)[0, 0, :, :]
+
+        # Crop the valid patch of the full-resolution PSF
+        coord_c_i = int((1 + y) * sensor.res[0] / 2)
+        coord_c_j = int((1 - x) * sensor.res[1] / 2)
+        psf_full_res = F.pad(
+            psf_full_res, [ks // 2, ks // 2, ks // 2, ks // 2], mode="constant", value=0
+        )
+        psf_out = psf_full_res[coord_c_i : coord_c_i + ks, coord_c_j : coord_c_j + ks]
+
+        # Normalize PSF
+        psf_out /= psf_out.sum()
+        psf_out = torch.flip(psf_out, [0, 1])
+
+        return psf_out
+
+    def draw_psf(
+        self,
+        depth=DEPTH,
+        ks=101,
+        save_name="./psf_doelens.png",
+        log_scale=True,
+        eps=1e-4,
+    ):
+        """
+        Draw on-axis RGB PSF.
+
+        Args:
+            depth (float): Depth of the point source
+            ks (int): Size of the PSF kernel
+            save_name (str): Path to save the PSF image
+            log_scale (bool): If True, display PSF in log scale
+        """
+        psf_rgb = self.psf_rgb(point=[0, 0, depth], ks=ks)
+
+        if log_scale:
+            psf_rgb = torch.log10(psf_rgb + eps)
+            psf_rgb = (psf_rgb - psf_rgb.min()) / (psf_rgb.max() - psf_rgb.min())
+            save_name = save_name.replace(".png", "_log.png")
+
+        save_image(psf_rgb.unsqueeze(0), save_name, normalize=True)
+
+    # =============================================
+    # Utils
+    # =============================================
+    def get_optimizer(self, lr):
+        return self.doe.get_optimizer(lr=lr)
+
+    def draw_layout(self, save_name="./doelens.png"):
+        """Draw lens setup."""
+        fig, ax = plt.subplots()
+
+        # Draw DOE
+        d = self.doe.d.item()
+        doe_l = self.doe.l
+        ax.plot(
+            [d, d], [-doe_l / 2, doe_l / 2], "orange", linestyle="--", dashes=[1, 1]
+        )
+
+        # Draw sensor
+        d = self.sensor.d.item()
+        sensor_l = self.sensor.l
+        width = 0.2  # Width of the rectangle
+        rect = plt.Rectangle(
+            (d - width / 2, -sensor_l / 2),
+            width,
+            sensor_l,
+            facecolor="none",
+            edgecolor="black",
+            linewidth=1,
+        )
+        ax.add_patch(rect)
+
         ax.set_aspect("equal")
         ax.axis("off")
         fig.savefig(save_name, dpi=600, bbox_inches="tight")

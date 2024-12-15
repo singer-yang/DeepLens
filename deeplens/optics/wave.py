@@ -69,8 +69,6 @@ class ComplexWave(DeepObj):
         self.x, self.y = self.gen_xy_grid()
         self.z = torch.full_like(self.x, z)
 
-        self.to(device)
-
     def load_img(self, img):
         """Use the pixel value of an image/batch as the amplitute.
 
@@ -87,7 +85,7 @@ class ComplexWave(DeepObj):
 
         phi = torch.zeros_like(amp)
         u = amp + 1j * phi
-        self.u = u.to(self.device)
+        # self.u = u.to(self.device)
         self.res = self.u.shape
 
     def load_pkl(self, data_path):
@@ -104,8 +102,6 @@ class ComplexWave(DeepObj):
         self.phy_size = wave_data["phy_size"]
         self.valid_phy_size = wave_data["valid_phy_size"]
         self.res = self.x.shape
-
-        self.to(self.device)
 
     def save_data(self, save_path="./test.pkl"):
         data = {
@@ -239,7 +235,7 @@ class ComplexWave(DeepObj):
         fy = y / (self.ps * self.phy_size[1])
         return fx, fy
 
-    def show(self, data="irr", save_name=None):
+    def show(self, save_name=None, data="irr"):
         """Show the field."""
         if data == "irr":
             value = self.u.detach().abs() ** 2
@@ -324,7 +320,6 @@ class ComplexWave(DeepObj):
 
     def pad(self, Hpad, Wpad):
         """Pad the input field by (Hpad, Hpad, Wpad, Wpad). This step will also expand physical size of the field."""
-        device = self.device
 
         # Pad directly
         self.u = F.pad(self.u, (Hpad, Hpad, Wpad, Wpad), mode="constant", value=0)
