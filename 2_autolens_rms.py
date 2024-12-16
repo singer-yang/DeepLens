@@ -87,13 +87,13 @@ def curriculum_design(
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
-    num_grid = 21
+    num_grid = 15
     spp = 512
 
     shape_control = True
     centroid = False
     sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
-    aper_start = self.surfaces[self.aper_idx].r * 0.5
+    aper_start = self.surfaces[self.aper_idx].r * 0.4
     aper_final = self.surfaces[self.aper_idx].r
 
     if not logging.getLogger().hasHandlers():
@@ -223,7 +223,7 @@ if __name__ == "__main__":
         fnum=args["FNUM"],
         lens_num=args["lens_num"],
         thickness=args["thickness"],
-        surf_type=args["surf_type"],
+        lens_type=args["lens_type"],
         save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
     # =====> 2. Curriculum learning with RMS errors
     lens.curriculum_design(
-        lrs=[5e-4, 1e-4, 0.1, 1e-2],
+        lrs=[float(lr) for lr in args["lrs"]],
         decay=0.01,
         iterations=5000,
         test_per_iter=50,
@@ -250,7 +250,7 @@ if __name__ == "__main__":
     lens.prune_surf(outer=0.02)
     lens.post_computation()
 
-    logging.info(f"Actual: FOV {lens.hfov}, IMGH {lens.r_last}, F/{lens.fnum}.")
+    logging.info(f"Actual: FOV {lens.hfov}, IMGH {lens.r_sensor}, F/{lens.fnum}.")
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens", zmx_format=True)
 

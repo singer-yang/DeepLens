@@ -16,11 +16,6 @@ FOCLEN: 85.0
 FNUM: 3.0
 DIAG: 43.0
 lens_num: 8
-lrs: [1e-3, 1e-3, 0, 0]
+lrs: [5e-4, 1e-3, 1e-1, 1e-3]
 thickness: 80.0
-surf_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Aspheric", "Aspheric"]
-
-
-# curriculum learning
-start_ratio: 0.4
-curriculum_steps: 6
+lens_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Aspheric"]

@@ -4,7 +4,7 @@ An implicit network to represent the PSF of a lens.
 For rotationally symmetric lenses, we can represent the PSF along the optical axis to improve accuracy.
 
 Technical Paper:
-    Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
+    Xinge Yang, Qiang Fu, Mohamed Elhoseiny, and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
 
 This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
     # The license is only for non-commercial use (commercial licenses can be obtained from authors).
