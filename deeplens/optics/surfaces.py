@@ -505,7 +505,7 @@ class Aspheric(Surface):
         """
         self.c = c_bound * (torch.rand(1) - 0.5).to(self.device)
 
-    def init_ai(self, ai_degree=3, bound=0.0001):
+    def init_ai(self, ai_degree=3):
         """If ai is None, set to random value.
         For different length, create a new initilized value and set original ai.
         """
@@ -513,27 +513,27 @@ class Aspheric(Surface):
         self.ai_degree = ai_degree
         if old_ai_degree == 0:
             if ai_degree == 4:
-                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * bound * 10
-                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * bound
-                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * bound * 0.1
-                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * bound * 0.01
+                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
             elif ai_degree == 5:
-                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * bound * 10
-                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * bound
-                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * bound * 0.1
-                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * bound * 0.01
-                self.ai10 = (torch.rand(1, device=self.device) - 0.5) * bound * 0.001
+                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai10 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
             elif ai_degree == 6:
                 for i in range(1, self.ai_degree + 1):
                     exec(
-                        f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * bound * 0.1 ** {i - 2}"
+                        f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * 1e-30"
                     )
             else:
                 raise Exception("Wrong ai degree")
         else:
             for i in range(old_ai_degree + 1, self.ai_degree + 1):
                 exec(
-                    f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * bound * 0.1 ** {i - 2}"
+                    f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * 1e-30"
                 )
 
     def init_k(self, bound=1):
