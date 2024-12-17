@@ -252,6 +252,45 @@ class Surface(DeepObj):
         dx, dy = self.dgd(x, y)
         return dx, dy, -torch.ones_like(x)
 
+    def d2fdxyz2(self, x, y, valid=None):
+        """Compute second-order partial derivatives of the surface function f(x, y, z): z - g(x, y) = 0.
+
+        This function is only used for surfaces constraints.
+
+        Args:
+            x (tensor): x coordinate
+            y (tensor): y coordinate
+            valid (tensor, optional): valid mask
+
+        Returns:
+            d2fdx2 (tensor): ∂²f/∂x²
+            d2fdxdy (tensor): ∂²f/∂x∂y
+            d2fdy2 (tensor): ∂²f/∂y²
+            d2fdxdz (tensor): ∂²f/∂x∂z (zero tensor)
+            d2fdydz (tensor): ∂²f/∂y∂z (zero tensor)
+            d2fdz2 (tensor): ∂²f/∂z² (zero tensor)
+        """
+        if valid is None:
+            valid = self.valid(x, y)
+
+        x, y = x * valid, y * valid
+
+        # Compute second-order derivatives of g(x, y)
+        d2g_dx2, d2g_dxdy, d2g_dy2 = self.d2gd(x, y)
+
+        # Since f(x, y, z) = z - g(x, y), its second derivatives are:
+        d2fdx2 = -d2g_dx2       # ∂²f/∂x² = -∂²g/∂x²
+        d2fdxdy = -d2g_dxdy     # ∂²f/∂x∂y = -∂²g/∂x∂y
+        d2fdy2 = -d2g_dy2       # ∂²f/∂y² = -∂²g/∂y²
+
+        # Mixed partial derivatives involving z are zero
+        zeros = torch.zeros_like(x)
+        d2fdxdz = zeros          # ∂²f/∂x∂z = 0
+        d2fdydz = zeros          # ∂²f/∂y∂z = 0
+        d2fdz2 = zeros           # ∂²f/∂z² = 0
+
+        return d2fdx2, d2fdxdy, d2fdy2, d2fdxdz, d2fdydz, d2fdz2
+
     def g(self, x, y):
         """Calculate sag (z) of the surface. z = f(x, y)
 
@@ -279,6 +318,19 @@ class Surface(DeepObj):
         Return:
             dgdx (tensor): dg / dx
             dgdy (tensor): dg / dy
+        """
+        raise NotImplementedError()
+    
+    def d2gd(self, x, y):
+        """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdy2) =  (g''xx, g''yy).
+
+        Args:
+            x (tensor): x coordinate
+            y (tensor): y coordinate
+
+        Return:
+            d2gdx2 (tensor): d2g / dx2
+            d2gdy2 (tensor): d2g / dy2
         """
         raise NotImplementedError()
 
@@ -481,8 +533,12 @@ class Aspheric(Surface):
                 self.ai8 = torch.tensor(ai[3])
                 self.ai10 = torch.tensor(ai[4])
             elif self.ai_degree == 6:
-                for i, a in enumerate(ai):
-                    exec(f"self.ai{2*i+2} = torch.tensor({a})")
+                self.ai2 = torch.tensor(ai[0])
+                self.ai4 = torch.tensor(ai[1])
+                self.ai6 = torch.tensor(ai[2])
+                self.ai8 = torch.tensor(ai[3])
+                self.ai10 = torch.tensor(ai[4])
+                self.ai12 = torch.tensor(ai[5])
             else:
                 for i, a in enumerate(ai):
                     exec(f"self.ai{2*i+2} = torch.tensor({a})")
@@ -524,12 +580,17 @@ class Aspheric(Surface):
                 self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
                 self.ai10 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
             elif ai_degree == 6:
+                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai10 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+                self.ai12 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
+            else:
                 for i in range(1, self.ai_degree + 1):
                     exec(
                         f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * 1e-30"
                     )
-            else:
-                raise Exception("Wrong ai degree")
         else:
             for i in range(old_ai_degree + 1, self.ai_degree + 1):
                 exec(
@@ -543,7 +604,7 @@ class Aspheric(Surface):
             self.k = k.to(self.device)
 
     def init_d(self, bound=0.1):
-        return
+        pass
 
     def g(self, x, y):
         """Compute surface height."""
@@ -580,57 +641,6 @@ class Aspheric(Surface):
                     + self.ai10 * r2**5
                     + self.ai12 * r2**6
                 )
-            elif self.ai_degree == 7:
-                total_surface = (
-                    total_surface
-                    + (
-                        self.ai2
-                        + (
-                            self.ai4
-                            + (
-                                self.ai6
-                                + (
-                                    self.ai8
-                                    + (self.ai10 + (self.ai12 + self.ai14 * r2) * r2)
-                                    * r2
-                                )
-                                * r2
-                            )
-                            * r2
-                        )
-                        * r2
-                    )
-                    * r2
-                )
-            elif self.ai_degree == 8:
-                total_surface = (
-                    total_surface
-                    + (
-                        self.ai2
-                        + (
-                            self.ai4
-                            + (
-                                self.ai6
-                                + (
-                                    self.ai8
-                                    + (
-                                        self.ai10
-                                        + (
-                                            self.ai12
-                                            + (self.ai14 + self.ai16 * r2) * r2
-                                        )
-                                        * r2
-                                    )
-                                    * r2
-                                )
-                                * r2
-                            )
-                            * r2
-                        )
-                        * r2
-                    )
-                    * r2
-                )
             else:
                 for i in range(1, self.ai_degree + 1):
                     exec(f"total_surface += self.ai{2*i} * r2 ** {i}")
@@ -638,7 +648,7 @@ class Aspheric(Surface):
         return total_surface
 
     def dgd(self, x, y):
-        """Compute surface height derivatives to x and y."""
+        """Compute first-order height derivatives to x and y."""
         r2 = x**2 + y**2
         sf = torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON)
         dsdr2 = (
@@ -673,7 +683,61 @@ class Aspheric(Surface):
                     + 5 * self.ai10 * r2**4
                     + 6 * self.ai12 * r2**5
                 )
-            elif self.ai_degree == 7:
+            else:
+                for i in range(1, self.ai_degree + 1):
+                    exec(f"dsdr2 += {i} * self.ai{2*i} * r2 ** {i-1}")
+
+        return dsdr2 * 2 * x, dsdr2 * 2 * y
+    
+    def d2gd(self, x, y):
+        """Compute second-order derivatives of surface height with respect to x and y."""
+        r2 = x**2 + y**2
+        c = self.c
+        k = self.k
+        sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
+
+        # Compute dsdr2
+        dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / (2 * sf)) * c / (1 + sf) ** 2
+
+        # Compute derivative of dsdr2 with respect to r2 (ddsdr2_dr2)
+        ddsdr2_dr2 = (
+            ((1 + k) * c**2 / (2 * sf))
+            + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
+        ) * c / (1 + sf) ** 2 \
+        - 2 * dsdr2 * ((1 + sf + (1 + k) * r2 * c**2 / (2 * sf))) / (1 + sf)
+
+        if self.ai_degree > 0:
+            if self.ai_degree == 4:
+                dsdr2 = (
+                    dsdr2
+                    + self.ai2
+                    + 2 * self.ai4 * r2
+                    + 3 * self.ai6 * r2**2
+                    + 4 * self.ai8 * r2**3
+                )
+                ddsdr2_dr2 = (
+                    ddsdr2_dr2
+                    + 2 * self.ai4
+                    + 6 * self.ai6 * r2
+                    + 12 * self.ai8 * r2**2
+                )
+            elif self.ai_degree == 5:
+                dsdr2 = (
+                    dsdr2
+                    + self.ai2
+                    + 2 * self.ai4 * r2
+                    + 3 * self.ai6 * r2**2
+                    + 4 * self.ai8 * r2**3
+                    + 5 * self.ai10 * r2**4
+                )
+                ddsdr2_dr2 = (
+                    ddsdr2_dr2
+                    + 2 * self.ai4
+                    + 6 * self.ai6 * r2
+                    + 12 * self.ai8 * r2**2
+                    + 20 * self.ai10 * r2**3
+                )
+            elif self.ai_degree == 6:
                 dsdr2 = (
                     dsdr2
                     + self.ai2
@@ -682,39 +746,30 @@ class Aspheric(Surface):
                     + 4 * self.ai8 * r2**3
                     + 5 * self.ai10 * r2**4
                     + 6 * self.ai12 * r2**5
-                    + 7 * self.ai14 * r2**6
                 )
-            elif self.ai_degree == 8:
-                dsdr2 = (
-                    dsdr2
-                    + self.ai2
-                    + (
-                        2 * self.ai4
-                        + (
-                            3 * self.ai6
-                            + (
-                                4 * self.ai8
-                                + (
-                                    5 * self.ai10
-                                    + (
-                                        6 * self.ai12
-                                        + (7 * self.ai14 + 8 * self.ai16 * r2) * r2
-                                    )
-                                    * r2
-                                )
-                                * r2
-                            )
-                            * r2
-                        )
-                        * r2
-                    )
-                    * r2
+                ddsdr2_dr2 = (
+                    ddsdr2_dr2
+                    + 2 * self.ai4
+                    + 6 * self.ai6 * r2
+                    + 12 * self.ai8 * r2**2
+                    + 20 * self.ai10 * r2**3
+                    + 30 * self.ai12 * r2**4
                 )
             else:
                 for i in range(1, self.ai_degree + 1):
-                    exec(f"dsdr2 += {i} * self.ai{2*i} * r2 ** {i-1}")
+                    ai_coeff = getattr(self, f'ai{2*i}')
+                    dsdr2 += i * ai_coeff * r2 ** (i - 1)
+                    if i > 1:
+                        ddsdr2_dr2 += i * (i - 1) * ai_coeff * r2 ** (i - 2)
+        else:
+            ddsdr2_dr2 = ddsdr2_dr2
 
-        return dsdr2 * 2 * x, dsdr2 * 2 * y
+        # Compute second-order derivatives
+        d2g_dx2 = 2 * dsdr2 + 4 * x**2 * ddsdr2_dr2
+        d2g_dxdy = 4 * x * y * ddsdr2_dr2
+        d2g_dy2 = 2 * dsdr2 + 4 * y**2 * ddsdr2_dr2
+
+        return d2g_dx2, d2g_dxdy, d2g_dy2
 
     def valid(self, x, y):
         """Invalid when shape is non-defined."""
@@ -1608,6 +1663,35 @@ class Spheric(Surface):
         sf = torch.sqrt(1 - r2 * c**2 + EPSILON)
         dgdr2 = c / (2 * sf)
         return dgdr2 * 2 * x, dgdr2 * 2 * y
+    
+    def d2gd(self, x, y):  
+        """Compute second-order derivatives of the surface sag z = g(x, y).  
+
+        Args:  
+            x (tensor): x coordinate  
+            y (tensor): y coordinate  
+
+        Returns:  
+            d2g_dx2 (tensor): ∂²g / ∂x²  
+            d2g_dxdy (tensor): ∂²g / ∂x∂y  
+            d2g_dy2 (tensor): ∂²g / ∂y²  
+        """  
+        c = self.c + self.c_perturb  
+        r2 = x**2 + y**2  
+        sf = torch.sqrt(1 - r2 * c**2 + EPSILON)  
+
+        # First derivative (dg/dr2)  
+        dgdr2 = c / (2 * sf)  
+
+        # Second derivative (d²g/dr2²)  
+        d2g_dr2_dr2 = (c**3) / (4 * sf**3)  
+
+        # Compute second-order partial derivatives using the chain rule  
+        d2g_dx2 = 4 * x**2 * d2g_dr2_dr2 + 2 * dgdr2  
+        d2g_dxdy = 4 * x * y * d2g_dr2_dr2  
+        d2g_dy2 = 4 * y**2 * d2g_dr2_dr2 + 2 * dgdr2  
+
+        return d2g_dx2, d2g_dxdy, d2g_dy2  
 
     def valid(self, x, y):
         """Invalid when shape is non-defined."""

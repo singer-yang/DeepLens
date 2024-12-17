@@ -3,11 +3,13 @@
 import numpy as np
 import torch
 
+from .basics import DeepObj
 
-class Material:
-    def __init__(self, name=None):
+class Material(DeepObj):
+    def __init__(self, name=None, device="cpu"):
         self.name = "vacuum" if name is None else name.lower()
         self.load_dispersion()
+        self.device = device
 
     def get_name(self):
         if self.dispersion == "optimizable":
@@ -31,7 +33,7 @@ class Material:
             ]
             self.n, self.V = MATERIAL_TABLE[self.name]
 
-        elif self.name in MATERIAL_TABLE:
+        elif self.name in MATERIAL_TABLE or self.name in CDGM_GLASS:
             self.dispersion = "cauchy"
             self.n, self.V = MATERIAL_TABLE[self.name]
             self.A, self.B = self.nV_to_AB(self.n, self.V)
@@ -77,7 +79,7 @@ class Material:
         elif self.dispersion == "optimizable":
             # Cauchy's equation, calculate (A, B) on the fly
             B = (self.n - 1) / self.V / (1 / 0.486**2 - 1 / 0.656**2)
-            A = n - B * 1 / 0.589**2
+            A = self.n - B * 1 / 0.589**2
 
             n = A + B / wvln**2
 
@@ -108,23 +110,32 @@ class Material:
         A = n - B * ivs(lambdas[1])
         return A, B
 
-    def match_material(self):
+    def match_material(self, mat_table=None):
         """Find the closest material in the database."""
+        if mat_table is None:
+            mat_table = MATERIAL_TABLE
+        elif mat_table == "CDGM":
+            mat_table = CDGM_GLASS
+        else:
+            raise NotImplementedError
+        
         weight_n = 2
         dist_min = 1e6
-        for name in MATERIAL_TABLE:
-            n, V = MATERIAL_TABLE[name]
+        for name in mat_table:
+            n, V = mat_table[name]
             dist = weight_n * abs(n - self.n) / self.n + abs(V - self.V) / self.V
             if dist < dist_min:
                 self.name = name
                 dist_min = dist
-
+        
+        breakpoint()
         self.load_dispersion()
 
-    def get_optimizer_params(self, lr=[1e-4, 1e-2]):
+    def get_optimizer_params(self, lr=[1e-5, 1e-3]):
         """Optimize the material parameters (n, V)."""
-        self.n = torch.tensor(self.n).to(self.device)
-        self.V = torch.tensor(self.V).to(self.device)
+        if isinstance(self.n, float):
+            self.n = torch.tensor(self.n).to(self.device)
+            self.V = torch.tensor(self.V).to(self.device)
 
         self.n.requires_grad = True
         self.V.requires_grad = True
