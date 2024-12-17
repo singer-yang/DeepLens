@@ -29,6 +29,7 @@ from deeplens import (
     set_seed,
     create_cellphone_lens,
     create_camera_lens,
+    create_lens,
     create_video_from_images,
 )
 
@@ -82,6 +83,8 @@ def curriculum_design(
     iterations=5000,
     test_per_iter=100,
     importance_sampling=True,
+    optim_mat=False,
+    match_mat=False,
     result_dir="./results",
 ):
     """Optimize the lens by minimizing rms errors."""
@@ -102,7 +105,7 @@ def curriculum_design(
         f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
     )
 
-    optimizer = self.get_optimizer(lrs, decay)
+    optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
     scheduler = get_cosine_schedule_with_warmup(
         optimizer, num_warmup_steps=iterations // 10, num_training_steps=iterations
     )
@@ -121,8 +124,13 @@ def curriculum_design(
             self.fnum = self.foclen / aper_r / 2
 
             # Correct shape and evaluate
-            if i > 0 and shape_control:
-                self.correct_shape()
+            if i > 0:
+                if shape_control:
+                    self.correct_shape()
+            
+                if optim_mat and match_mat:
+                    self.match_materials()
+            
             self.write_lens_json(f"{result_dir}/iter{i}.json")
             self.analysis(
                 f"{result_dir}/iter{i}",
@@ -203,54 +211,51 @@ if __name__ == "__main__":
     # Bind function
     GeoLens.curriculum_design = curriculum_design
 
-    # # ===> Create a cellphone lens
-    # lens = create_cellphone_lens(
-    #     hfov=args["HFOV"],
-    #     imgh=args["DIAG"],
-    #     fnum=args["FNUM"],
-    #     lens_num=args["lens_num"],
-    #     save_dir=result_dir,
-    # )
-    # lens.set_target_fov_fnum(hfov=args["HFOV"], fnum=args["FNUM"], imgh=args["DIAG"])
-    # logging.info(
-    #     f'==> Design target: FOV {round(args["HFOV"]*2*57.3, 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}, FOCLEN {round(args["DIAG"]/2/np.tan(args["HFOV"]), 2)}mm.'
-    # )
-
     # ===> Create a camera lens
-    lens = create_camera_lens(
-        foclen=args["FOCLEN"],
-        imgh=args["DIAG"],
-        fnum=args["FNUM"],
-        lens_num=args["lens_num"],
+    lens = create_lens(
+        foclen=args["foclen"],
+        fov=args["fov"],
+        fnum=args["fnum"],
+        flange=args["flange"],
         thickness=args["thickness"],
         lens_type=args["lens_type"],
-        save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
-        hfov=float(np.arctan(args["DIAG"] / args["FOCLEN"] / 2)),
-        fnum=args["FNUM"],
-        imgh=args["DIAG"],
+        hfov=args["fov"]/2/57.3,
+        fnum=args["fnum"],
     )
     logging.info(
-        f'==> Design target: FOCLEN {round(args["FOCLEN"], 2)}, DIAG {args["DIAG"]}mm, F/{args["FNUM"]}'
+        f'==> Design target: focal length {round(args["foclen"], 2)}, diagonal FoV {args["fov"]}deg, F/{args["fnum"]}'
     )
 
     # =====> 2. Curriculum learning with RMS errors
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
-        decay=0.01,
+        decay=float(args["decay"]),
         iterations=5000,
         test_per_iter=50,
+        optim_mat=True,
+        match_mat=False,
         result_dir=args["result_dir"],
     )
 
-    # Need to train more for the best optical performance
+    # # Need to train more for the best optical performance
+    # lens.optimize(
+    #     lrs=[float(lr) for lr in args["lrs"]],
+    #     decay=float(args["decay"]),
+    #     iterations=5000,
+    #     centroid=False,
+    #     importance_sampling=True,
+    #     optim_mat=True,
+    #     match_mat=False,
+    #     result_dir=args["result_dir"],
+    # )
 
     # =====> 3. Analyze final result
     lens.prune_surf(outer=0.02)
     lens.post_computation()
 
-    logging.info(f"Actual: FOV {lens.hfov}, IMGH {lens.r_sensor}, F/{lens.fnum}.")
+    logging.info(f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}.")
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens", zmx_format=True)
 

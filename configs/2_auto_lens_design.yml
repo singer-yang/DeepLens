@@ -4,18 +4,22 @@ seed: ~
 # experiment settings
 EXP_NAME: 'Auto lens design'
 
-# # cellphone lens target
-# HFOV: 0.73
-# FNUM: 2.0
-# DIAG: 10.0
-# lens_num: 7
-# lrs: [3e-4, 5e-4, 1e-1, 1e-2] # aspheric lens design
-
-# camera lens target
-FOCLEN: 85.0
-FNUM: 3.0
-DIAG: 43.0
-lens_num: 8
+# lens target example 1 (camera lens)
+foclen: 85.0
+fov: 40.0
+fnum: 3.0
+flange: 18.0
+thickness: 120.0
+lens_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Aperture", "Spheric", "Aspheric", "Spheric", "Aspheric"]
 lrs: [5e-4, 1e-3, 1e-1, 1e-3]
-thickness: 80.0
-lens_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Spheric", "Aspheric"]
+decay: 0.001
+
+# # lens target example 2 (mobile lens)
+# foclen: 6.0
+# fov: 70.0
+# fnum: 2.0
+# flange: 1.0
+# thickness: 9.0
+# lens_type: ["Aperture", "Aspheric", "Aspheric", "Aspheric", "Aspheric", "Aspheric", "Aspheric"]
+# lrs: [3e-4, 1e-4, 1e-1, 1e-2]
+# decay: 0.01

@@ -3077,7 +3077,7 @@ class GeoLens(DeepObj):
         ).abs()
         return loss
 
-    def loss_surface(self, sag_bound=1.0, grad_bound=1.0):
+    def loss_surface(self, sag_bound=1.0, grad_bound=1.0, grad2_bound=10.0):
         """Penalize large sag values"""
         loss = 0.0
         for i in self.find_diff_surf():
@@ -3088,9 +3088,13 @@ class GeoLens(DeepObj):
             sag_ls = self.surfaces[i].sag(x_ls, y_ls)
             loss += max(sag_ls.max() - sag_ls.min(), sag_bound)
 
-            # Derivative
+            # 1st-order derivative
             grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
             loss += 10 * max(grad_ls.abs().max(), grad_bound)
+
+            # 2nd-order derivative
+            grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
+            loss += 10 * max(grad2_ls.abs().max(), grad2_bound)
 
         return loss
 
@@ -3164,7 +3168,7 @@ class GeoLens(DeepObj):
             loss_intersec = self.loss_self_intersec(
                 dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5
             )
-            loss_surf = self.loss_surface(sag_bound=0.8, grad_bound=1.0)
+            loss_surf = self.loss_surface(sag_bound=0.8, grad_bound=1.0, grad2_bound=100.0)
             loss_angle = self.loss_ray_angle()
 
             w_focus = 2.0 if w_focus is None else w_focus
@@ -3176,16 +3180,16 @@ class GeoLens(DeepObj):
             )
         else:
             loss_intersec = self.loss_self_intersec(
-                dist_bound=0.1, thickness_bound=2.0, flange_bound=10.0
+                dist_bound=0.1, thickness_bound=3.0, flange_bound=10.0
             )
-            loss_surf = self.loss_surface(sag_bound=5.0, grad_bound=1.0)
+            loss_surf = self.loss_surface(sag_bound=7.0, grad_bound=1.0)
             loss_angle = self.loss_ray_angle()
 
             w_focus = 5.0 if w_focus is None else w_focus
             loss_reg = (
                 w_focus * loss_focus
-                + 5.0 * loss_intersec
-                + 5.0 * loss_surf
+                + 1.0 * loss_intersec
+                + 1.0 * loss_surf
                 + 0.05 * loss_angle
             )
 
@@ -3266,7 +3270,7 @@ class GeoLens(DeepObj):
             ai_decay (float, optional): _description_. Defaults to 0.2.
         """
         params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
-        optimizer = torch.optim.Adam(params)
+        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
         return optimizer
 
     def optimize(
@@ -3276,7 +3280,6 @@ class GeoLens(DeepObj):
         iterations=2000,
         test_per_iter=100,
         centroid=False,
-        dropout=False,
         importance_sampling=False,
         optim_mat=False,
         match_mat=False,
@@ -3285,12 +3288,11 @@ class GeoLens(DeepObj):
         """Optimize the lens by minimizing rms errors.
 
         Debug hints:
+            *, Slowly and continuously update!
             1, thickness (fov and ttl should match)
-            2, dropout ratio (in fine tuning, prefer no dropout)
-            3, alpha order (higher is btter but more sensitive)
-            4, learning rate and decay (prefer smaller lr and decay)
-            5, curriculum steps (more is better)
-            6, correct params range
+            2, alpha order (higher is better but more sensitive)
+            3, learning rate and decay (prefer smaller lr and decay)
+            4, correct params range
         """
         # Preparation
         depth = DEPTH
@@ -3298,7 +3300,6 @@ class GeoLens(DeepObj):
         spp = 1024
 
         shape_control = True
-        importance_sampling = True if centroid else False
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
         result_dir = (
@@ -3322,8 +3323,10 @@ class GeoLens(DeepObj):
             # ===> Evaluate the lens
             if i % test_per_iter == 0:
                 with torch.no_grad():
-                    if i > 0 and shape_control:
-                        self.correct_shape()
+                    if i > 0:
+                        if shape_control:
+                            self.correct_shape()
+                        
                         if optim_mat and match_mat:
                             self.match_materials()
 
@@ -3373,22 +3376,13 @@ class GeoLens(DeepObj):
                 xy = ray.project_to(self.d_sensor)
                 xy_norm = (xy - center_p) * ray.ra.unsqueeze(-1)
 
-                # Use only quater
+                # Use only quater of the sensor
                 xy_norm = xy_norm[:, num_grid // 2 :, num_grid // 2 :]
                 ra = ra[:, num_grid // 2 :, num_grid // 2 :]
 
-                # Weight
-                weight_mask = torch.sqrt(
-                    (xy_norm.clone().detach() ** 2).sum([0, -1])
-                    / (ra.sum([0]) + EPSILON)
-                )  # Use L2 error as weight mask
+                # Weight mask
+                weight_mask = (xy_norm.clone().detach() ** 2).sum([0, -1]) / (ra.sum([0]) + EPSILON)  # Use L2 error as weight mask
                 weight_mask /= weight_mask.mean()  # shape of [M, M]
-
-                # Dropout
-                if dropout:
-                    # Drop out well-trained regions. Very helpful but sensitive
-                    # When a lens is well-trained, we prefer not dropping out
-                    weight_mask[weight_mask < 0.9] *= 0.2
 
                 # RMS loss
                 l_rms = torch.sqrt(
@@ -3675,118 +3669,44 @@ SURF 0
 # ====================================================================================
 # Other functions.
 # ====================================================================================
-def create_cellphone_lens(
-    hfov=0.6, imgh=6.0, fnum=2.8, lens_num=4, thickness=None, flange=0.8, save_dir="./"
-):
-    """Create a flat starting point for cellphone lens design.
 
-    Aperture is placed 0.2mm in front of the first surface.
-
-    Args:
-        hfov: half horizontal fov in radians.
-        imgh: image height in mm.
-        fnum: maximum f number.
-        lens_num: number of lens elements to use.
-        thickness: Total thickness if specified.
-        flange: distance from last surface to sensor.
-        save_dir: directory to save the lens.
-    """
-    # Calculate parameters
-    foclen = imgh / 2 / np.tan(hfov)
-    aper_r = foclen / fnum / 2
-    aper_d = 0.1  # Aperture distance in mm
-    ttl = (imgh / 2 / math.tan(hfov) * 1.4) if thickness is None else thickness
-
-    d_opt = ttl - flange - aper_d
-    d_lens = np.random.rand(lens_num * 2 - 1).astype(np.float32) + 1
-    d_lens = d_lens / np.sum(d_lens) * d_opt
-    d_lens = np.insert(d_lens, 0, aper_d)
-
-    mat_names = ["coc", "okp4", "pmma", "pc", "ps"]
-
-    # Create lens
-    d_total = 0
-    lens = GeoLens()
-    surfaces = lens.surfaces
-    surfaces.append(Aperture(r=aper_r, d=0.0))
-
-    for i in range(lens_num):
-        # Front surface
-        d_total += d_lens[2 * i]
-        c1 = np.random.randn(1).astype(np.float32) * 0.001
-        k1 = np.random.randn(1).astype(np.float32) * 0.01
-        ai1 = np.random.randn(7).astype(np.float32) * 1e-16
-        mat = random.choice(mat_names)
-        surfaces.append(Aspheric(r=imgh / 2, d=d_total, c=c1, k=k1, ai=ai1, mat2=mat))
-
-        # Back surface
-        if (2 * i + 1) < len(d_lens):
-            d_total += d_lens[2 * i + 1]
-            c2 = np.random.randn(1).astype(np.float32) * 0.001
-            k2 = np.random.randn(1).astype(np.float32) * 0.01
-            ai2 = np.random.randn(7).astype(np.float32) * 1e-16
-            surfaces.append(
-                Aspheric(r=imgh / 2, d=d_total, c=c2, k=k2, ai=ai2, mat2="air")
-            )
-
-    # Lens calculation
-    lens = lens.to(lens.device)
-    lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
-    lens.find_aperture()
-    lens.prepare_sensor(
-        sensor_res=lens.sensor_res,
-        sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)],
-    )
-    lens.diff_surf_range = lens.find_diff_surf()
-    lens.post_computation()
-    lens.set_target_fov_fnum(hfov=hfov, fnum=fnum)
-
-    # Save lens
-    lens_filename = f"starting_point_hfov{hfov}_imgh{imgh}_fnum{fnum}.json"
-    lens.write_lens_json(f"{save_dir}/{lens_filename}")
-
-    return lens
-
-
-def create_camera_lens(
-    foclen=50.0,
-    imgh=20.0,
-    fnum=4.0,
-    lens_num=4,
-    flange=18.0,
+def create_lens(
+    foclen,
+    fov,
+    fnum,
+    flange,
     thickness=None,
-    lens_type=None,
+    lens_type=['Spheric', 'Spheric', 'Aperture', 'Spheric', 'Aspheric'],
     save_dir="./",
 ):
     """Create a flat starting point for camera lens design.
 
     Args:
         foclen: Focal length in mm.
-        imgh: Image height in mm.
+        fov: Diagonal field of view in degrees.
         fnum: Maximum f number.
-        lens_num: Number of lens elements to use.
         flange: Distance from last surface to sensor.
         thickness: Total thickness if specified.
-        lens_type: List of surface types. Defaults to None.
-        save_dir: Directory to save the lens.
+        lens_type: List of surface types defining each lens element and aperture.
     """
-    if lens_type is None:
-        lens_type = ["Spheric"] * lens_num
-    assert (
-        len(lens_type) == lens_num
-    ), "Length of lens_type should be equal to lens_num."
-
-    # Calculate parameters
+    assert "Aperture" in lens_type, "Aperture should be included in lens_type."
+    lens_num = len(lens_type)
+    
+    # Compute lens parameters
     aper_r = foclen / fnum / 2
-    ttl = foclen + flange if thickness is None else thickness
+    imgh = 2 * foclen * np.tan(fov / 2 / 57.3)
+    if thickness is None:
+        thickness = foclen + flange
+    d_opt = thickness - flange
+    d_air = np.random.rand(lens_num).astype(np.float32) + 0.5
+    d_lens = np.random.rand(lens_num).astype(np.float32) + 1.0
+    d_lens[lens_type.index('Aperture')] = 0.0
+    d_sum = np.sum(d_air) + np.sum(d_lens)
+    d_air = d_air / d_sum * d_opt
+    d_lens = d_lens / d_sum * d_opt
 
-    d_opt = ttl - flange
-    d_lens = np.random.rand(lens_num * 2).astype(np.float32) + 1
-    d_lens = d_lens / np.sum(d_lens) * d_opt
-
+    # Materials
     mat_names = list(SELLMEIER_TABLE.keys())
-
-    # Safely remove materials
     remove_materials = ["air", "vacuum", "occluder"]
     for mat in remove_materials:
         if mat in mat_names:
@@ -3799,45 +3719,48 @@ def create_camera_lens(
     lens = GeoLens()
     surfaces = lens.surfaces
     for i in range(lens_num):
-        # Front surface
-        d_total += d_lens[2 * i]
-        c1 = np.random.randn(1).astype(np.float32) * 0.001
-        mat = random.choice(mat_names)
-        if lens_type[i] == "Aspheric":
-            ai1 = np.random.randn(7).astype(np.float32) * 1e-20
-            k1 = np.random.randn(1).astype(np.float32) * 0.01
+        if lens_type[i] == "Aperture":
+            d_total += d_air[i]
+            surfaces.append(Aperture(r=aper_r, d=d_total))
+
+        elif lens_type[i] == "Aspheric":
+            # Front surface
+            d_total += d_air[i]
+            c1 = np.random.randn(1).astype(np.float32) * 0.001
+            mat = random.choice(mat_names)
+            ai1 = np.random.randn(7).astype(np.float32) * 1e-30
+            k1 = np.random.randn(1).astype(np.float32) * 0.001
             surfaces.append(
                 Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat)
             )
-        elif lens_type[i] == "Spheric":
-            surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
-        else:
-            raise Exception("Surface type not supported yet.")
 
-        # Back surface
-        d_total += d_lens[2 * i + 1]
-        c2 = np.random.randn(1).astype(np.float32) * 0.001
-        if lens_type[i] == "Aspheric":
-            ai2 = np.random.randn(7).astype(np.float32) * 1e-20
-            k2 = np.random.randn(1).astype(np.float32) * 0.01
+            # Back surface
+            d_total += d_lens[i]
+            c2 = np.random.randn(1).astype(np.float32) * 0.001
+            ai2 = np.random.randn(7).astype(np.float32) * 1e-30
+            k2 = np.random.randn(1).astype(np.float32) * 0.001
             surfaces.append(
                 Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air")
             )
+        
         elif lens_type[i] == "Spheric":
-            surfaces.append(
-                Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, mat2="air")
-            )
+            # Front surface
+            d_total += d_air[i]
+            c1 = np.random.randn(1).astype(np.float32) * 0.001
+            mat = random.choice(mat_names)
+            surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
+
+            # Back surface
+            d_total += d_lens[i]
+            c2 = np.random.randn(1).astype(np.float32) * 0.001
+            surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, mat2="air"))
+
         else:
             raise Exception("Surface type not supported yet.")
 
-        # Insert aperture in the middle lens elements
-        if i == int(lens_num / 2) - 1:
-            d_total += 2.0  # Additional distance for aperture placement
-            surfaces.append(Aperture(r=aper_r, d=d_total))
-
     # Lens calculation
     lens = lens.to(lens.device)
-    lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
+    lens.d_sensor = torch.tensor(thickness, dtype=torch.float32).to(lens.device)
     lens.find_aperture()
     lens.prepare_sensor(
         sensor_res=lens.sensor_res,
@@ -3849,118 +3772,5 @@ def create_camera_lens(
     # Save lens
     filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
     lens.write_lens_json(os.path.join(save_dir, filename))
-
-    return lens
-
-
-def create_lens(
-    foclen,
-    fov,
-    fnum,
-    flange,
-    thickness=None,
-    aper_idx=None,
-    lens_num=4,
-    lens_type=None,
-):
-    """Create a flat starting point for camera lens design.
-
-    Args:
-        foclen: Focal length in mm.
-        fov: Diagonal field of view in degrees.
-        fnum: Maximum f number.
-        flange: Distance from last surface to sensor.
-        thickness: Total thickness if specified.
-        aper_idx: Index where the aperture should be inserted (0-based).
-        lens_num: Number of lens elements to use.
-        lens_type: List of surface types. Defaults to None.
-    """
-    # Lens type
-    if lens_type is None:
-        lens_type = ["Spheric"] * lens_num
-    assert (
-        len(lens_type) == lens_num
-    ), "Length of lens_type should be equal to lens_num."
-
-    # Set default aperture index to be in the front if not specified
-    if aper_idx is None:
-        aper_idx = 0
-
-    # Compute parameters
-    aper_r = foclen / fnum / 2
-    ttl = foclen + flange if thickness is None else thickness
-
-    d_opt = ttl - flange
-    d_lens = np.random.rand(lens_num * 2).astype(np.float32) + 1
-    d_lens = d_lens / np.sum(d_lens) * d_opt
-
-    imgh = ttl * np.tan(fov / 2 / 57.3)
-
-    mat_names = list(SELLMEIER_TABLE.keys())
-
-    # Safely remove materials
-    remove_materials = ["air", "vacuum", "occluder"]
-    for mat in remove_materials:
-        if mat in mat_names:
-            mat_names.remove(mat)
-        else:
-            print(f"Warning: '{mat}' not found in SELLMEIER_TABLE keys.")
-
-    # Create lens
-    d_total = 0
-    lens = GeoLens()
-    surfaces = lens.surfaces
-    for i in range(lens_num):
-        # Insert aperture after the specified lens element
-        if i == aper_idx:
-            d_total += d_lens[2 * i] / 2
-            d_lens[2 * i] -= d_lens[2 * i] / 2
-            surfaces.append(Aperture(r=aper_r, d=d_total))
-
-        # Front surface
-        d_total += d_lens[2 * i]
-        c1 = np.random.randn(1).astype(np.float32) * 0.001
-        mat = random.choice(mat_names)
-        if lens_type[i] == "Aspheric":
-            ai1 = np.random.randn(7).astype(np.float32) * 1e-30
-            k1 = np.random.randn(1).astype(np.float32) * 0.001
-            surfaces.append(
-                Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat)
-            )
-        elif lens_type[i] == "Spheric":
-            surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
-        else:
-            raise Exception("Surface type not supported yet.")
-
-        # Back surface
-        d_total += d_lens[2 * i + 1]
-        c2 = np.random.randn(1).astype(np.float32) * 0.001
-        if lens_type[i] == "Aspheric":
-            ai2 = np.random.randn(7).astype(np.float32) * 1e-30
-            k2 = np.random.randn(1).astype(np.float32) * 0.001
-            surfaces.append(
-                Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air")
-            )
-        elif lens_type[i] == "Spheric":
-            surfaces.append(
-                Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, mat2="air")
-            )
-        else:
-            raise Exception("Surface type not supported yet.")
-
-    # Lens calculation
-    lens = lens.to(lens.device)
-    lens.d_sensor = torch.tensor(ttl, dtype=torch.float32).to(lens.device)
-    lens.find_aperture()
-    lens.prepare_sensor(
-        sensor_res=lens.sensor_res,
-        sensor_size=[imgh / math.sqrt(2), imgh / math.sqrt(2)],
-    )
-    lens.diff_surf_range = lens.find_diff_surf()
-    lens.post_computation()
-
-    # Save lens
-    filename = f"./starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
-    lens.write_lens_json(filename)
 
     return lens
