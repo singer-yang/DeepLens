@@ -27,8 +27,6 @@ from deeplens import (
     EPSILON,
     set_logger,
     set_seed,
-    create_cellphone_lens,
-    create_camera_lens,
     create_lens,
     create_video_from_images,
 )
