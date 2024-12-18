@@ -217,6 +217,7 @@ if __name__ == "__main__":
         flange=args["flange"],
         thickness=args["thickness"],
         lens_type=args["lens_type"],
+        save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
         hfov=args["fov"]/2/57.3,
