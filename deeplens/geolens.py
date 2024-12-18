@@ -3537,7 +3537,7 @@ class GeoLens(DeepObj):
             with open(filename, "r", encoding="utf-16") as file:
                 lines = file.readlines()
 
-        # Iterate through the lines and extract SURF data
+        # Iterate through the lines and extract SURF dict
         surfs_dict = {}
         current_surf = None
         for line in lines:
@@ -3567,7 +3567,7 @@ class GeoLens(DeepObj):
                     else "air"
                 )
                 surf_r = (
-                    float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 0.0
+                    float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 1.0
                 )
                 surf_c = (
                     float(surf_dict["CURV"].split()[0]) if "CURV" in surf_dict else 0.0
@@ -3600,6 +3600,9 @@ class GeoLens(DeepObj):
             elif surf_idx == current_surf:
                 # Image sensor
                 self.r_sensor = float(surf_dict["DIAM"].split()[0])
+
+            else:
+                pass
 
         self.d_sensor = torch.tensor(d)
 

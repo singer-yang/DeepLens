@@ -7,7 +7,7 @@ EXP_NAME: 'Auto lens design'
 # lens target example 1 (camera lens)
 foclen: 85.0
 fov: 40.0
-fnum: 3.0
+fnum: 4.0
 flange: 18.0
 thickness: 120.0
 lens_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Aperture", "Spheric", "Aspheric", "Spheric", "Aspheric"]
