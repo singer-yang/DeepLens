@@ -251,7 +251,7 @@ if __name__ == "__main__":
     # )
 
     # =====> 3. Analyze final result
-    lens.prune_surf(outer=0.02)
+    lens.prune_surf(expand_surf=0.02)
     lens.post_computation()
 
     logging.info(f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}.")
