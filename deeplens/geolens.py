@@ -67,7 +67,6 @@ from .utils import (
 
 class GeoLens(DeepObj):
     """Geolens class. A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate."""
-
     def __init__(self, filename=None, sensor_res=[1024, 1024], use_roc=False):
         """Initialize Lensgroup.
 
@@ -133,7 +132,15 @@ class GeoLens(DeepObj):
             raise Exception("File format not supported.")
 
     def load_external(self, surfaces, materials, r_sensor, d_sensor):
-        """Load lens from extrenal surface/material list."""
+        """Load lens from extrenal surface/material list.
+        
+        Args:
+            surfaces (list): list of surfaces.
+            materials (list): list of materials.
+            r_sensor (float): sensor radius.
+            d_sensor (float): sensor distance.
+        """
+        raise Warning("This function will be removed in the future.")
         self.surfaces = surfaces
         self.materials = materials
         self.r_sensor = r_sensor
@@ -167,7 +174,6 @@ class GeoLens(DeepObj):
             self.sensor_size = sensor_size
             self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
 
-        # self.r_sensor = float(self.r_sensor)
         self.sensor_size = [float(self.sensor_size[0]), float(self.sensor_size[1])]
         self.pixel_size = self.sensor_size[0] / sensor_res[0]
 
@@ -658,7 +664,6 @@ class GeoLens(DeepObj):
     # ====================================================================================
     # Ray Tracing functions
     # ====================================================================================
-
     def trace(self, ray, lens_range=None, record=False):
         """General ray tracing function. Ray in and ray out.
 
@@ -681,7 +686,7 @@ class GeoLens(DeepObj):
             lens_range = range(0, len(self.surfaces))
 
         if is_forward:
-            # for high-precision opd calculation
+            # This is a hack operation for high-precision optical path difference calculation when using single precision
             ray.propagate_to(self.surfaces[0].d - 10.0)
             valid, ray_out, oss = self.forward_tracing(ray, lens_range, record=record)
         else:
@@ -690,7 +695,12 @@ class GeoLens(DeepObj):
         return ray_out, valid, oss
 
     def trace2obj(self, ray, depth=DEPTH):
-        """Trace rays through the lens and reach the sensor plane."""
+        """Trace rays through the lens and reach the sensor plane.
+        
+        Args:
+            ray (Ray object): Ray object.
+            depth (float): sensor distance.
+        """
         (
             ray,
             _,
@@ -733,7 +743,13 @@ class GeoLens(DeepObj):
             return ray
 
     def forward_tracing(self, ray, lens_range, record):
-        """Trace rays from object space to sensor plane."""
+        """Trace rays from object space to sensor plane.
+        
+        Args:
+            ray (Ray object): Ray object.
+            lens_range (list): lens range.
+            record (bool): record ray path or not.
+        """
         dim = ray.o[
             ..., 2
         ].shape  # What does this mean: how many rays do we have? here 31*31
@@ -765,7 +781,13 @@ class GeoLens(DeepObj):
         return valid, ray, oss
 
     def backward_tracing(self, ray, lens_range, record):
-        """Trace rays from sensor plane to object space."""
+        """Trace rays from sensor plane to object space.
+        
+        Args:
+            ray (Ray object): Ray object.
+            lens_range (list): lens range.
+            record (bool): record ray path or not.
+        """
         dim = ray.o[..., 2].shape
         valid = ray.ra == 1
 
@@ -977,9 +999,6 @@ class GeoLens(DeepObj):
 
         return img_render
 
-    def render_rgb(self):
-        pass
-
     def render_sample_ray(self, spp=64, wvln=DEFAULT_WAVE):
         """Ray tracing rendering step1: sample ray and go through lens."""
         ray = self.sample_sensor(spp=spp, pupil=True, wvln=wvln)
@@ -1065,6 +1084,7 @@ class GeoLens(DeepObj):
 
     def isp(self, img, psf, noise=0.01):
         """Image signal processing."""
+        raise NotImplementedError("This function has not been implemented yet.")
         # Energy
 
         # Gamma
@@ -1433,7 +1453,6 @@ class GeoLens(DeepObj):
     # ====================================================================================
     # Coherent ray tracing
     # ====================================================================================
-
     def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=COHERENT_SPP):
         """Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing.
 
@@ -1636,7 +1655,6 @@ class GeoLens(DeepObj):
     # ---------------------------
     # 1. Focus-related functions
     # ---------------------------
-
     def calc_foclen(self):
         """Calculate the focus length."""
         if (
@@ -1649,7 +1667,7 @@ class GeoLens(DeepObj):
     def calc_bfl(self, wvln=DEFAULT_WAVE):
         """Compute back focal length (BFL).
 
-        BFL: Distance from the second principal point to in-focus position.
+        BFL: Distance from the second principal point to focal plane.
         """
         M = GEO_GRID
 
@@ -1934,15 +1952,17 @@ class GeoLens(DeepObj):
     # ---------------------------
     @torch.no_grad()
     def exit_pupil(self, shrink_pupil=False):
-        """Sample **forward** rays to compute z coordinate and radius of exit pupil.
-        Exit pupil: ray comes from sensor to object space.
+        """Sample **forward** rays to compute z coordinate and radius of exit pupil. Exit pupil: ray comes from sensor to object space.
+
+            Reference: https://en.wikipedia.org/wiki/Exit_pupil
         """
         return self.entrance_pupil(entrance=False, shrink_pupil=shrink_pupil)
 
     @torch.no_grad()
     def entrance_pupil(self, M=128, entrance=True, shrink_pupil=False):
-        """We sample **backward** rays, return z coordinate and radius of entrance pupil.
-        Entrance pupil: how many rays can come from object space to sensor.
+        """Sample **backward** rays, return z coordinate and radius of entrance pupil. Entrance pupil: how many rays can come from object space to sensor.
+
+            Reference: https://en.wikipedia.org/wiki/Entrance_pupil "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
         """
         if self.aper_idx is None:
             if entrance:
@@ -1950,13 +1970,13 @@ class GeoLens(DeepObj):
             else:
                 return self.surfaces[-1].d.item(), self.surfaces[-1].r
 
-        # sample M forward rays from edge of aperture to last surface.
+        # Sample M rays from edge of aperture to last surface.
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
         ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(M, 1)
 
-        # phi ranges from [-0.5rad, 0.5rad]
+        # Sample phi ranges from [-0.5rad, 0.5rad]
         phi = torch.linspace(-0.5, 0.5, M)
         if entrance:
             d = torch.stack(
@@ -1969,7 +1989,7 @@ class GeoLens(DeepObj):
 
         ray = Ray(ray_o, d, device=self.device)
 
-        # ray tracing
+        # Ray tracing
         if entrance:
             lens_range = range(0, self.aper_idx)
             ray, _, _ = self.trace(ray, lens_range=lens_range)
@@ -1977,7 +1997,7 @@ class GeoLens(DeepObj):
             lens_range = range(self.aper_idx + 1, len(self.surfaces))
             ray, _, _ = self.trace(ray, lens_range=lens_range)
 
-        # compute intersection. o1+d1*t1 = o2+d2*t2
+        # Compute intersection points. o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
             [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
         )
@@ -1985,18 +2005,28 @@ class GeoLens(DeepObj):
             [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
-        avg_pupilx = intersection_points[:, 0].cpu().numpy().mean()
-        avg_pupilz = intersection_points[:, 1].cpu().numpy().mean()
-
-        if shrink_pupil:
-            avg_pupilx *= 0.5
+        if len(intersection_points) == 0:
+            if entrance:
+                avg_pupilz = self.surfaces[0].d.item()
+                avg_pupilx = self.surfaces[0].r
+            else:
+                avg_pupilz = self.surfaces[-1].d.item()
+                avg_pupilx = self.surfaces[-1].r
+        else:
+            avg_pupilx = intersection_points[:, 0].cpu().numpy().mean()
+            avg_pupilz = intersection_points[:, 1].cpu().numpy().mean()
 
         if avg_pupilx < EPSILON:
             print("Small pupil is detected, use the first surface as pupil.")
             if entrance:
-                return self.surfaces[0].d.item(), self.surfaces[0].r
+                avg_pupilz = self.surfaces[0].d.item()
+                avg_pupilx = self.surfaces[0].r
             else:
-                return self.surfaces[-1].d.item(), self.surfaces[-1].r
+                avg_pupilz = self.surfaces[-1].d.item()
+                avg_pupilx = self.surfaces[-1].r
+        
+        if shrink_pupil:
+            avg_pupilx *= 0.5
         return avg_pupilz, avg_pupilx
 
     @staticmethod
@@ -2110,11 +2140,11 @@ class GeoLens(DeepObj):
     # ---------------------------
 
     @torch.no_grad()
-    def prune_surf(self, outer=None, surface_range=None):
+    def prune_surf(self, expand_surf=None, surface_range=None):
         """Prune surfaces to the minimum height that allows all valid rays to go through.
 
         Args:
-            outer (float): extra height to reserve.
+            expand_surf (float): extra height to reserve.
                 For cellphone lens, we usually use 0.1mm or 0.05 * r_sensor.
                 For camera lens, we usually use 0.5mm or 0.1 * r_sensor.
         """
@@ -2123,11 +2153,12 @@ class GeoLens(DeepObj):
         )
 
         if self.is_cellphone:
-            outer = 0.05 if outer is None else outer
+            expand_surf = 0.05 if expand_surf is None else expand_surf
 
             # ==> 1. Reset lens to maximum height(sensor radius)
             for i in surface_range:
-                self.surfaces[i].r = self.r_sensor
+                # self.surfaces[i].r = self.r_sensor
+                self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
 
             # ==> 2. Prune to reserve valid surface height
             # sample maximum fov rays to compute valid surface height
@@ -2152,17 +2183,18 @@ class GeoLens(DeepObj):
                         continue
 
                 try:
-                    self.surfaces[i].r = max(height) * (1 + outer)
+                    self.surfaces[i].r = max(height) * (1 + expand_surf)
                 except:
                     continue
-
+            
             # ==> 4. Remove nan part, also the maximum height should not exceed sensor radius
             for i in surface_range:
-                max_height = min(self.surfaces[i].max_height(), self.r_sensor)
+                # max_height = min(self.surfaces[i].max_height(), self.r_sensor)
+                max_height = self.surfaces[i].max_height()
                 self.surfaces[i].r = min(self.surfaces[i].r, max_height)
 
         else:
-            outer = 0.5 if outer is None else outer
+            expand_surf = 0.5 if expand_surf is None else expand_surf
 
             # sample maximum fov rays to compute valid surface height
             view = (
@@ -2179,14 +2211,14 @@ class GeoLens(DeepObj):
                 height = []
                 for os in oss:  # iterate all rays
                     try:
-                        # because oss records the starting point at position 0, we need to ignore this.
-                        # the second index 0 means x coordinate
+                        # Because oss records the starting point at position 0, we need to ignore this.
+                        # The second index 0 means x coordinate
                         height.append(np.abs(os[i + 1][0]))
                     except:
                         continue
 
                 try:
-                    self.surfaces[i].r = max(height) * (1 + outer)
+                    self.surfaces[i].r = max(height) * (1 + expand_surf)
                 except:
                     continue
 
@@ -2197,7 +2229,7 @@ class GeoLens(DeepObj):
             surf.mat2.match_material(mat_table=mat_table)
 
     @torch.no_grad()
-    def correct_shape(self):
+    def correct_shape(self, expand_surf=0.1):
         """Correct wrong lens shape during the lens design."""
         aper_idx = self.aper_idx
         diff_surf_range = self.find_diff_surf()
@@ -2231,7 +2263,7 @@ class GeoLens(DeepObj):
                 shape_changed = True
 
         # ==> Rule 4: Prune all surfaces
-        self.prune_surf()
+        self.prune_surf(expand_surf=expand_surf)
 
         if shape_changed:
             print("Surface shape corrected.")
@@ -3499,7 +3531,7 @@ class GeoLens(DeepObj):
         # self.sensor_size = data['sensor_size']
         self.r_sensor = data["r_sensor"]
         self.d_sensor = torch.tensor(d)
-        self.lens_info = data["info"]
+        self.lens_info = data["info"] if "info" in data else "None"
 
     def write_lens_json(self, filename="./test.json"):
         """Write the lens into .json file."""
