@@ -85,9 +85,9 @@ class Surface(DeepObj):
         d_surf = self.d + self.d_perturb
 
         # 1. inital guess of t
-        t0 = (
-            (d_surf - ray.o[..., 2]) / ray.d[..., 2]
-        )  # if the shape of aspheric surface is strange, will hit the back surface region instead
+        t0 = (d_surf - ray.o[..., 2]) / ray.d[
+            ..., 2
+        ]  # if the shape of aspheric surface is strange, will hit the back surface region instead
 
         # 2. use Newton's method to update t to find the intersection points (non-differentiable)
         with torch.no_grad():
@@ -279,15 +279,15 @@ class Surface(DeepObj):
         d2g_dx2, d2g_dxdy, d2g_dy2 = self.d2gd(x, y)
 
         # Since f(x, y, z) = z - g(x, y), its second derivatives are:
-        d2fdx2 = -d2g_dx2       # ∂²f/∂x² = -∂²g/∂x²
-        d2fdxdy = -d2g_dxdy     # ∂²f/∂x∂y = -∂²g/∂x∂y
-        d2fdy2 = -d2g_dy2       # ∂²f/∂y² = -∂²g/∂y²
+        d2fdx2 = -d2g_dx2  # ∂²f/∂x² = -∂²g/∂x²
+        d2fdxdy = -d2g_dxdy  # ∂²f/∂x∂y = -∂²g/∂x∂y
+        d2fdy2 = -d2g_dy2  # ∂²f/∂y² = -∂²g/∂y²
 
         # Mixed partial derivatives involving z are zero
         zeros = torch.zeros_like(x)
-        d2fdxdz = zeros          # ∂²f/∂x∂z = 0
-        d2fdydz = zeros          # ∂²f/∂y∂z = 0
-        d2fdz2 = zeros           # ∂²f/∂z² = 0
+        d2fdxdz = zeros  # ∂²f/∂x∂z = 0
+        d2fdydz = zeros  # ∂²f/∂y∂z = 0
+        d2fdz2 = zeros  # ∂²f/∂z² = 0
 
         return d2fdx2, d2fdxdy, d2fdy2, d2fdxdz, d2fdydz, d2fdz2
 
@@ -320,7 +320,7 @@ class Surface(DeepObj):
             dgdy (tensor): dg / dy
         """
         raise NotImplementedError()
-    
+
     def d2gd(self, x, y):
         """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdy2) =  (g''xx, g''yy).
 
@@ -403,8 +403,8 @@ class Surface(DeepObj):
     def surf_dict(self):
         surf_dict = {
             "type": self.__class__.__name__,
-            "r": float(f"{self.r:.6f}"),
-            "(d)": float(f"{self.d.item():.3f}"),
+            "r": round(self.r, 4),
+            "(d)": round(self.d.item(), 4),
             "is_square": self.is_square,
             "mat2": self.mat2.get_name(),
         }
@@ -473,8 +473,9 @@ class Aperture(Surface):
         """Return a dict of surface."""
         surf_dict = {
             "type": "Aperture",
-            "r": float(f"{self.r:.6f}"),
-            "(d)": float(f"{self.d.item():.3f}"),
+            "r": round(self.r, 4),
+            "(d)": round(self.d.item(), 4),
+            "mat2": "air",
             "is_square": self.is_square,
             "diffraction": self.diffraction,
         }
@@ -688,7 +689,7 @@ class Aspheric(Surface):
                     exec(f"dsdr2 += {i} * self.ai{2*i} * r2 ** {i-1}")
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
-    
+
     def d2gd(self, x, y):
         """Compute second-order derivatives of surface height with respect to x and y."""
         r2 = x**2 + y**2
@@ -701,10 +702,12 @@ class Aspheric(Surface):
 
         # Compute derivative of dsdr2 with respect to r2 (ddsdr2_dr2)
         ddsdr2_dr2 = (
-            ((1 + k) * c**2 / (2 * sf))
-            + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
-        ) * c / (1 + sf) ** 2 \
-        - 2 * dsdr2 * ((1 + sf + (1 + k) * r2 * c**2 / (2 * sf))) / (1 + sf)
+            ((1 + k) * c**2 / (2 * sf)) + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
+        ) * c / (1 + sf) ** 2 - 2 * dsdr2 * (
+            (1 + sf + (1 + k) * r2 * c**2 / (2 * sf))
+        ) / (
+            1 + sf
+        )
 
         if self.ai_degree > 0:
             if self.ai_degree == 4:
@@ -757,7 +760,7 @@ class Aspheric(Surface):
                 )
             else:
                 for i in range(1, self.ai_degree + 1):
-                    ai_coeff = getattr(self, f'ai{2*i}')
+                    ai_coeff = getattr(self, f"ai{2*i}")
                     dsdr2 += i * ai_coeff * r2 ** (i - 1)
                     if i > 1:
                         ddsdr2_dr2 += i * (i - 1) * ai_coeff * r2 ** (i - 2)
@@ -885,17 +888,20 @@ class Aspheric(Surface):
         """Return a dict of surface."""
         surf_dict = {
             "type": "Aspheric",
-            "r": float(f"{self.r:.6f}"),
-            "(c)": float(f"{self.c.item():.3f}"),
-            "roc": float(f"{1/self.c.item():.3f}"),
-            "(d)": float(f"{self.d.item():.3f}"),
-            "k": float(f"{self.k.item():.6f}"),
+            "r": round(self.r, 4),
+            "(c)": round(self.c.item(), 4),
+            "roc": round(1 / self.c.item(), 4),
+            "d": round(self.d.item(), 4),
+            "k": round(self.k.item(), 4),
             "ai": [],
             "mat2": self.mat2.get_name(),
         }
+        # for i in range(1, self.ai_degree + 1):
+        #     exec(f"surf_dict['(ai{2*i})'] = self.ai{2*i}.item()")
+        #     surf_dict["ai"].append(eval(f"self.ai{2*i}.item()"))
         for i in range(1, self.ai_degree + 1):
-            exec(f"surf_dict['(ai{2*i})'] = self.ai{2*i}.item()")
-            surf_dict["ai"].append(eval(f"self.ai{2*i}.item()"))
+            exec(f"surf_dict['(ai{2*i})'] = float(format(self.ai{2*i}.item(), '.6e'))")
+            surf_dict["ai"].append(float(format(eval(f"self.ai{2*i}.item()"), ".6e")))
 
         return surf_dict
 
@@ -1081,14 +1087,15 @@ class Cubic(Surface):
             "b5": self.b5.item(),
             "b7": self.b7.item(),
             "r": self.r,
-            "(d)": float(f"{self.d.item():.3f}"),
+            "(d)": round(self.d.item(), 4),
         }
 
 
-class DOE_GEO(Surface):
-    """Kinoform and binary diffractive surfaces for ray tracing.
+class Diffractive_GEO(Surface):
+    """Diffractive surfaces simulated with ray tracing.
 
-    https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+    Reference:
+        https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
     """
 
     def __init__(
@@ -1108,7 +1115,7 @@ class DOE_GEO(Surface):
         # Use ray tracing to simulate diffraction, the same as Zemax
         self.diffraction = False
         self.diffraction_order = 1
-        print("A DOE_GEO is created, but ray-tracing diffraction is not activated.")
+        # print("A Diffractive_GEO is created, but ray-tracing diffraction is not activated.")
 
         self.to(device)
         self.init_param_model(param_model)
@@ -1153,7 +1160,7 @@ class DOE_GEO(Surface):
     # ==============================
     # Computation (ray tracing)
     # ==============================
-    def ray_reaction(self, ray, **kwargs):
+    def ray_reaction(self, ray, n1=None, n2=None):
         """Ray reaction on DOE surface. Imagine the DOE as a wrapped positive convex lens for debugging.
 
         1, The phase φ in radians adds to the optical path length of the ray
@@ -1482,7 +1489,7 @@ class DOE_GEO(Surface):
                 "glass": self.glass,
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
-                "(d)": float(f"{self.d.item():.3f}"),
+                "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
 
@@ -1496,7 +1503,7 @@ class DOE_GEO(Surface):
                 "order4": self.order4.item(),
                 "order6": self.order6.item(),
                 "order8": self.order8.item(),
-                "(d)": f"{float(self.d.item()):.3f}",
+                "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
 
@@ -1512,7 +1519,7 @@ class DOE_GEO(Surface):
                 "order5": self.order5.item(),
                 "order6": self.order6.item(),
                 "order7": self.order7.item(),
-                "(d)": float(f"{self.d.item():.3f}"),
+                "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
 
@@ -1524,7 +1531,7 @@ class DOE_GEO(Surface):
                 "param_model": self.param_model,
                 "theta": self.theta.item(),
                 "alpha": self.alpha.item(),
-                "(d)": float(f"{self.d.item():.3f}"),
+                "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
 
@@ -1575,12 +1582,10 @@ class Mirror(Surface):
 
 
 class Plane(Surface):
-    def __init__(self, l, d, mat2, is_square=True, device="cpu"):
+    def __init__(self, r, d, mat2, is_square=False, device="cpu"):
         """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
-        Surface.__init__(
-            self, l / np.sqrt(2), d, mat2=mat2, is_square=is_square, device=device
-        )
-        self.l = l
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
+        self.l = r * np.sqrt(2)
 
     def intersect(self, ray, n=1.0):
         """Solve ray-surface intersection and update ray data."""
@@ -1627,8 +1632,9 @@ class Plane(Surface):
     def surf_dict(self):
         surf_dict = {
             "type": "Plane",
-            "l": self.l,
-            "(d)": float(f"{self.d.item():.3f}"),
+            "(l)": self.l,
+            "r": self.r,
+            "(d)": round(self.d.item(), 4),
             "is_square": True,
             "mat2": self.mat2.get_name(),
         }
@@ -1663,35 +1669,35 @@ class Spheric(Surface):
         sf = torch.sqrt(1 - r2 * c**2 + EPSILON)
         dgdr2 = c / (2 * sf)
         return dgdr2 * 2 * x, dgdr2 * 2 * y
-    
-    def d2gd(self, x, y):  
-        """Compute second-order derivatives of the surface sag z = g(x, y).  
 
-        Args:  
-            x (tensor): x coordinate  
-            y (tensor): y coordinate  
+    def d2gd(self, x, y):
+        """Compute second-order derivatives of the surface sag z = g(x, y).
 
-        Returns:  
-            d2g_dx2 (tensor): ∂²g / ∂x²  
-            d2g_dxdy (tensor): ∂²g / ∂x∂y  
-            d2g_dy2 (tensor): ∂²g / ∂y²  
-        """  
-        c = self.c + self.c_perturb  
-        r2 = x**2 + y**2  
-        sf = torch.sqrt(1 - r2 * c**2 + EPSILON)  
+        Args:
+            x (tensor): x coordinate
+            y (tensor): y coordinate
 
-        # First derivative (dg/dr2)  
-        dgdr2 = c / (2 * sf)  
+        Returns:
+            d2g_dx2 (tensor): ∂²g / ∂x²
+            d2g_dxdy (tensor): ∂²g / ∂x∂y
+            d2g_dy2 (tensor): ∂²g / ∂y²
+        """
+        c = self.c + self.c_perturb
+        r2 = x**2 + y**2
+        sf = torch.sqrt(1 - r2 * c**2 + EPSILON)
 
-        # Second derivative (d²g/dr2²)  
-        d2g_dr2_dr2 = (c**3) / (4 * sf**3)  
+        # First derivative (dg/dr2)
+        dgdr2 = c / (2 * sf)
 
-        # Compute second-order partial derivatives using the chain rule  
-        d2g_dx2 = 4 * x**2 * d2g_dr2_dr2 + 2 * dgdr2  
-        d2g_dxdy = 4 * x * y * d2g_dr2_dr2  
-        d2g_dy2 = 4 * y**2 * d2g_dr2_dr2 + 2 * dgdr2  
+        # Second derivative (d²g/dr2²)
+        d2g_dr2_dr2 = (c**3) / (4 * sf**3)
 
-        return d2g_dx2, d2g_dxdy, d2g_dy2  
+        # Compute second-order partial derivatives using the chain rule
+        d2g_dx2 = 4 * x**2 * d2g_dr2_dr2 + 2 * dgdr2
+        d2g_dxdy = 4 * x * y * d2g_dr2_dr2
+        d2g_dy2 = 4 * y**2 * d2g_dr2_dr2 + 2 * dgdr2
+
+        return d2g_dx2, d2g_dxdy, d2g_dy2
 
     def valid(self, x, y):
         """Invalid when shape is non-defined."""
@@ -1736,10 +1742,10 @@ class Spheric(Surface):
         roc = 1 / self.c.item() if self.c.item() != 0 else 0.0
         surf_dict = {
             "type": "Spheric",
-            "r": float(f"{self.r:.3f}"),
-            "(c)": float(f"{self.c.item():.3f}"),
-            "roc": float(f"{roc:.3f}"),
-            "(d)": float(f"{self.d.item():.3f}"),
+            "r": round(self.r, 4),
+            "(c)": round(self.c.item(), 4),
+            "roc": round(roc, 4),
+            "(d)": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
 

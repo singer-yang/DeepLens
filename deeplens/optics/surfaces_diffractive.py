@@ -1,6 +1,6 @@
-"""Diffractive optical surfaces.
+"""Diffractive optical surfaces and related functions.
 
-The input and output of each surface is a complex wave field.
+Diffractive surfaces: the input and output of each surface is a complex wave field.
 """
 
 import math
@@ -11,13 +11,16 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from .basics import DeepObj
+from .basics import DeepObj, EPSILON
 
 
+# =======================================
+# Diffractive optical surfaces
+# =======================================
 class DOE(DeepObj):
     def __init__(self, l, d, res, fab_ps=0.001, param_model="pixel2d", device="cpu"):
         """DOE class."""
-        super().__init__()
+        # super().__init__()
 
         # DOE material
         self.glass = "fused_silica"  # DOE substrate material
@@ -77,6 +80,8 @@ class DOE(DeepObj):
             # "Phase fresnel" or "Fresnel zone plate (FPZ)"
             f0 = kwargs.get("f0", 100.0)
             self.f0 = torch.tensor([f0])
+
+            # In the future we donot want to give another wvln
             fresnel_wvln = kwargs.get("fresnel_wvln", 0.55)
             self.fresnel_wvln = fresnel_wvln
 
@@ -182,45 +187,46 @@ class DOE(DeepObj):
         else:
             raise Exception("Unknown parameterization.")
 
-    def load_doe(self, load_path="./doe_fab.pth"):
-        """Load DOE phase map."""
-        self.load_ckpt(load_path)
+    def load_doe(self, doe_dict):
+        """Load DOE parameters from a dict."""
+        # Init DOE parameter model
+        param_model = doe_dict["param_model"]
+        self.init_param_model(param_model)
+
+        # Load DOE parameters
+        if self.param_model == "fresnel":
+            self.f0 = doe_dict["f0"].to(self.device)
+
+        elif self.param_model == "cubic":
+            self.a3 = doe_dict["a3"].to(self.device)
+
+        elif self.param_model == "binary2":
+            self.order2 = doe_dict["order2"].to(self.device)
+            self.order4 = doe_dict["order4"].to(self.device)
+            self.order6 = doe_dict["order6"].to(self.device)
+            self.order8 = doe_dict["order8"].to(self.device)
+
+        elif self.param_model == "poly1d":
+            self.order2 = doe_dict["order2"].to(self.device)
+            self.order3 = doe_dict["order3"].to(self.device)
+            self.order4 = doe_dict["order4"].to(self.device)
+            self.order5 = doe_dict["order5"].to(self.device)
+            self.order6 = doe_dict["order6"].to(self.device)
+            self.order7 = doe_dict["order7"].to(self.device)
+
+        elif self.param_model == "zernike":
+            self.z_coeff = doe_dict["z_coeff"].to(self.device)
+
+        elif self.param_model == "pixel2d":
+            self.pmap = doe_dict["pmap"].to(self.device)
+
+        else:
+            raise Exception("Unknown parameterization.")
 
     def load_ckpt(self, load_path="./doe.pth"):
         """Load DOE phase map."""
         ckpt = torch.load(load_path)
-        param_model = ckpt["param_model"]
-        self.init_param_model(param_model)
-
-        if self.param_model == "fresnel":
-            self.f0 = ckpt["f0"].to(self.device)
-
-        elif self.param_model == "cubic":
-            self.a3 = ckpt["a3"].to(self.device)
-
-        elif self.param_model == "binary2":
-            self.init_param_model("binary2")
-            self.order2 = ckpt["order2"].to(self.device)
-            self.order4 = ckpt["order4"].to(self.device)
-            self.order6 = ckpt["order6"].to(self.device)
-            self.order8 = ckpt["order8"].to(self.device)
-
-        elif self.param_model == "poly1d":
-            self.order2 = ckpt["order2"].to(self.device)
-            self.order3 = ckpt["order3"].to(self.device)
-            self.order4 = ckpt["order4"].to(self.device)
-            self.order5 = ckpt["order5"].to(self.device)
-            self.order6 = ckpt["order6"].to(self.device)
-            self.order7 = ckpt["order7"].to(self.device)
-
-        elif self.param_model == "zernike":
-            self.z_coeff = ckpt["z_coeff"].to(self.device)
-
-        elif self.param_model == "pixel2d":
-            self.pmap = ckpt["pmap"].to(self.device)
-
-        else:
-            raise Exception("Unknown parameterization.")
+        self.load_doe(ckpt)
 
     # =======================================
     # Computation
@@ -230,7 +236,7 @@ class DOE(DeepObj):
 
         First we should calculate the phase map at 0.55um, then calculate the phase map for the given other wavelength.
         """
-        phase_map0 = self.get_pmap()
+        phase_map0 = self.get_phase_map0()
         n = self.refractive_index(wvln)
         phase_map = phase_map0 * (self.wvln0 / wvln) * (n - 1) / (self.n0 - 1)
 
@@ -243,7 +249,7 @@ class DOE(DeepObj):
         )
         return phase_map
 
-    def get_pmap(self):
+    def get_phase_map0(self):
         """Calculate phase map at wvln 0.55 um.
 
         Returns:
@@ -389,14 +395,14 @@ class DOE(DeepObj):
 
     def pmap_quantize(self, bits=16):
         """Quantize phase map to bits levels."""
-        pmap = self.get_pmap()
+        pmap = self.get_phase_map0()
         pmap_q = torch.round(pmap / (2 * np.pi / bits)) * (2 * np.pi / bits)
         return pmap_q
 
     def pmap_fab(self, bits=16, save_path=None):
         """Convert to fabricate phase map and save it. This function is used to output DOE_fab file, and it will not change the DOE object itself."""
         # Fab resolution quantized pmap
-        pmap = self.get_pmap()
+        pmap = self.get_phase_map0()
         fab_res = int(self.ps / self.fab_ps * self.res[0])
         pmap = (
             F.interpolate(
@@ -424,7 +430,7 @@ class DOE(DeepObj):
 
         Reference: Quantization-aware Deep Optics for Diffractive Snapshot Hyperspectral Imaging
         """
-        pmap = self.get_pmap()
+        pmap = self.get_phase_map0()
         pmap_q = self.pmap_quantize(bits)
         loss = torch.mean(torch.abs(pmap - pmap_q))
         return loss
@@ -435,7 +441,7 @@ class DOE(DeepObj):
     def activate_grad(self, activate=True):
         """Activate gradient for phase map parameters."""
         if self.param_model == "fresnel":
-            self.c.requires_grad = activate
+            self.f0.requires_grad = activate
 
         elif self.param_model == "cubic":
             self.a3.requires_grad = activate
@@ -469,7 +475,7 @@ class DOE(DeepObj):
 
         if self.param_model == "fresnel":
             lr = 0.001 if lr is None else lr
-            params.append({"params": [self.c], "lr": lr})
+            params.append({"params": [self.f0], "lr": lr})
 
         elif self.param_model == "cubic":
             lr = 0.1 if lr is None else lr
@@ -513,7 +519,7 @@ class DOE(DeepObj):
             lr (float, optional): Learning rate. Defaults to 1e-3.
         """
         params = self.get_optimizer_params(lr)
-        optimizer = torch.optim.Adam(params)
+        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
 
         return optimizer
 
@@ -561,12 +567,12 @@ class DOE(DeepObj):
 
     def draw_phase_map(self, save_name="./DOE_phase_map.png"):
         """Draw phase map. Range from [0, 2pi]."""
-        pmap = self.get_pmap()
+        pmap = self.get_phase_map0()
         save_image(pmap, save_name, normalize=True)
 
     def draw_phase_map_fab(self, save_name="./DOE_phase_map.png"):
         """Draw phase map. Range from [0, 2pi]."""
-        pmap = self.get_pmap()
+        pmap = self.get_phase_map0()
         pmap_q = self.pmap_quantize()
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
@@ -585,7 +591,7 @@ class DOE(DeepObj):
 
     def draw_phase_map3d(self, save_name="./DOE_phase_map3d.png"):
         """Draw 3D phase map."""
-        pmap = self.get_pmap() / 20.0
+        pmap = self.get_phase_map0() / 20.0
         x = np.linspace(-self.w / 2, self.w / 2, self.res[0])
         y = np.linspace(-self.h / 2, self.h / 2, self.res[1])
         X, Y = np.meshgrid(x, y)
@@ -608,7 +614,7 @@ class DOE(DeepObj):
 
     def draw_cross_section(self, save_name="./DOE_corss_sec.png"):
         """Draw cross section of the phase map."""
-        pmap = self.get_pmap()
+        pmap = self.get_phase_map0()
         pmap = torch.diag(pmap).cpu().numpy()
         r = np.linspace(-self.w / 2 * np.sqrt(2), self.w / 2 * np.sqrt(2), self.res[0])
 
@@ -618,6 +624,35 @@ class DOE(DeepObj):
         fig.savefig(save_name, dpi=600, bbox_inches="tight")
         plt.close(fig)
 
+    def surface(self, x, y, max_offset=0.2):
+        """When drawing the lens setup, this function is called to compute the surface height.
+
+        Here we use a fake height ONLY for drawing.
+        """
+        roc = self.l
+        r = torch.sqrt(x**2 + y**2 + EPSILON)
+        sag = roc * (1 - torch.sqrt(1 - r**2 / roc**2))
+        sag = max_offset - torch.fmod(sag, max_offset)
+        return sag
+
+    def draw_wedge(self, ax, color="black"):
+        # Create radius points
+        r = torch.linspace(-self.r, self.r, 256, device=self.device)
+        offset = 0.1
+
+        # Draw base at z = self.d
+        base_z = torch.tensor([self.d + offset, self.d, self.d, self.d + offset])
+        base_x = torch.tensor([-self.r, -self.r, self.r, self.r])
+        base_points = torch.stack((base_x, torch.zeros_like(base_x), base_z), dim=-1)
+        base_points = base_points.cpu().detach().numpy()
+        ax.plot(base_points[..., 2], base_points[..., 0], color=color, linewidth=0.8)
+
+        # Calculate and draw surface
+        z = self.surface(r, torch.zeros_like(r), max_offset=offset) + self.d + offset
+        points = torch.stack((r, torch.zeros_like(r), z), dim=-1)
+        points = points.cpu().detach().numpy()
+        ax.plot(points[..., 2], points[..., 0], color=color, linewidth=0.8)
+
     # =======================================
     # Utils
     # =======================================
@@ -625,13 +660,39 @@ class DOE(DeepObj):
         """Return a dict of surface."""
         surf_dict = {
             "type": "DOE",
-            "l": float(f"{self.l:.6f}"),
+            "l": round(self.l, 4),
+            "d": round(self.d[0].item(), 4),
             "res": self.res,
-            "fab_ps": float(f"{self.fab_ps:.6f}"),
+            "fab_ps": round(self.fab_ps, 6),
             "is_square": True,
             "param_model": self.param_model,
             "doe_path": None,
         }
+
+        if self.param_model == "fresnel":
+            surf_dict["f0"] = round(self.f0.item(), 6)
+        elif self.param_model == "cubic":
+            surf_dict["a3"] = round(self.a3.item(), 6)
+        elif self.param_model == "binary2":
+            surf_dict["order2"] = round(self.order2.item(), 6)
+            surf_dict["order4"] = round(self.order4.item(), 6)
+            surf_dict["order6"] = round(self.order6.item(), 6)
+            surf_dict["order8"] = round(self.order8.item(), 6)
+        elif self.param_model == "poly1d":
+            surf_dict["order2"] = round(self.order2.item(), 6)
+            surf_dict["order3"] = round(self.order3.item(), 6)
+            surf_dict["order4"] = round(self.order4.item(), 6)
+            surf_dict["order5"] = round(self.order5.item(), 6)
+            surf_dict["order6"] = round(self.order6.item(), 6)
+            surf_dict["order7"] = round(self.order7.item(), 6)
+        elif self.param_model == "zernike":
+            surf_dict["z_coeff"] = self.z_coeff.tolist()
+        elif self.param_model == "pixel2d":
+            raise NotImplementedError
+            surf_dict["pmap"] = self.pmap.tolist()
+        else:
+            raise NotImplementedError
+
         return surf_dict
 
 
@@ -786,6 +847,9 @@ class Sensor(DeepObj):
         return surf_dict
 
 
+# =======================================
+# Functions
+# =======================================
 def Zernike(z_coeff, grid=256):
     """Calculate phase map produced by the first 37 Zernike polynomials. The output zernike phase map is in real value, to use it in the future we need to convert it to complex value."""
     # Generate meshgrid
