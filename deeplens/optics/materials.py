@@ -5,6 +5,7 @@ import torch
 
 from .basics import DeepObj
 
+
 class Material(DeepObj):
     def __init__(self, name=None, device="cpu"):
         self.name = "vacuum" if name is None else name.lower()
@@ -118,7 +119,7 @@ class Material(DeepObj):
             mat_table = CDGM_GLASS
         else:
             raise NotImplementedError
-        
+
         weight_n = 2
         dist_min = 1e6
         for name in mat_table:
@@ -127,8 +128,7 @@ class Material(DeepObj):
             if dist < dist_min:
                 self.name = name
                 dist_min = dist
-        
-        breakpoint()
+
         self.load_dispersion()
 
     def get_optimizer_params(self, lr=[1e-5, 1e-3]):

@@ -3,46 +3,55 @@
 When creating a new lens class, it is recommended to inherit from the Lens class and re-write core functions.
 """
 
+import matplotlib.pyplot as plt
 import torch
 from torchvision.utils import make_grid, save_image
+
 from .optics import (
-    DeepObj,
-    init_device,
-    WAVE_RGB,
-    WAVE_BLUE,
-    WAVE_GREEN,
-    WAVE_RED,
-    WAVE_BOARD_BAND,
-    RED_RESPONSE,
-    GREEN_RESPONSE,
     BLUE_RESPONSE,
     DEPTH,
+    GREEN_RESPONSE,
+    RED_RESPONSE,
+    WAVE_BLUE,
+    WAVE_BOARD_BAND,
+    WAVE_GREEN,
+    WAVE_RED,
+    WAVE_RGB,
+    DeepObj,
+    init_device,
 )
+from .optics.render_psf import render_psf_map
 
 
 class Lens(DeepObj):
-    """Geolens class. A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate."""
+    """Base lens class."""
 
-    def __init__(self, filename, sensor_res=[1024, 1024]):
-        """A lens class."""
-        super(Lens, self).__init__()
+    def __init__(self, lens_path):
+        """Initialize a lens class."""
         self.device = init_device()
-
-        # Load lens file
-        self.lens_name = filename
-        self.load_file(filename)
+        self.read_lens(lens_path)
         self.to(self.device)
 
-        # # Lens calculation
-        # self.prepare_sensor(sensor_res)
-        # self.post_computation()
+    def read_lens(self, lens_path):
+        """Read lens from a file."""
+        if lens_path.endswith(".json"):
+            self.read_lens_json(lens_path)
+        else:
+            raise Exception("Unknown lens file format.")
 
-    def load_file(self, filename):
-        """Load lens from a file."""
+    def read_lens_json(self, lens_path):
+        """Read lens from a json file."""
         raise NotImplementedError
 
-    def write_file(self, filename):
+    def write_lens(self, lens_path):
         """Write lens to a file."""
+        if lens_path.endswith(".json"):
+            self.write_lens_json(lens_path)
+        else:
+            raise Exception("Unknown lens file format.")
+
+    def write_lens_json(self, lens_path):
+        """Write lens to a json file."""
         raise NotImplementedError
 
     def prepare_sensor(self, sensor_res=[1024, 1024]):
@@ -57,21 +66,46 @@ class Lens(DeepObj):
     # PSF-ralated functions
     # ===========================================
     def psf(self, points, ks=51, wvln=0.589, **kwargs):
-        """Compute monochrome point PSF. This function is differentiable."""
+        """Compute monochrome point PSF. This function is differentiable.
+
+        Args:
+            point (tensor): Shape of [N, 3] or [3].
+            ks (int, optional): Kernel size. Defaults to 51.
+            wvln (float, optional): Wavelength. Defaults to 0.589.
+
+        Returns:
+            psf: Shape of [ks, ks] or [N, ks, ks].
+        """
         raise NotImplementedError
 
-    def psf_rgb(self, point, ks=51, **kwargs):
-        """Compute RGB point PSF. This function is differentiable."""
+    def psf_rgb(self, points, ks=51, **kwargs):
+        """Compute RGB point PSF.
+
+        Args:
+            points (tensor): Shape of [N, 3] or [3].
+            ks (int, optional): Kernel size. Defaults to 51.
+
+        Returns:
+            psf_rgb: Shape of [3, ks, ks] or [N, 3, ks, ks].
+        """
         psfs = []
         for wvln in WAVE_RGB:
-            psfs.append(self.psf(point=point, ks=ks, wvln=wvln, **kwargs))
+            psfs.append(self.psf(points=points, ks=ks, wvln=wvln, **kwargs))
         psf_rgb = torch.stack(psfs, dim=-3)  # shape [3, ks, ks] or [N, 3, ks, ks]
         return psf_rgb
 
     def psf_narrow_band(self, points, ks=51, **kwargs):
-        """Should be migrated to psf_rgb.
+        """Compute RGB PSF considering three wavelengths for each color. Different wavelengths are simpliy averaged for the results, but the sensor response function will be more reasonable.
 
-        In this function we use an average for different wavelengths. Actually we should use the sensor response function.
+        Reference:
+            https://en.wikipedia.org/wiki/Spectral_sensitivity
+
+        Args:
+            points (tensor): Shape of [N, 3] or [3].
+            ks (int, optional): Kernel size. Defaults to 51.
+
+        Returns:
+            psf: Shape of [3, ks, ks].
         """
         # Red
         psf_r = []
@@ -96,7 +130,18 @@ class Lens(DeepObj):
         return psf
 
     def psf_spectrum(self, points, ks=51, **kwargs):
-        """Should be migrated to psf_rgb."""
+        """Compute RGB PSF considering full spectrum for each color. A placeholder RGB sensor response function is used to calculate the final PSF. But the actual sensor response function will be more reasonable.
+
+        Reference:
+            https://en.wikipedia.org/wiki/Spectral_sensitivity
+
+        Args:
+            points (tensor): Shape of [N, 3] or [3].
+            ks (int, optional): Kernel size. Defaults to 51.
+
+        Returns:
+            psf: Shape of [3, ks, ks].
+        """
         # Red
         psf_r = []
         for i, wvln in enumerate(WAVE_BOARD_BAND):
@@ -133,25 +178,35 @@ class Lens(DeepObj):
         save_image(psfs.unsqueeze(0), save_name, normalize=True)
 
     def point_source_grid(
-        self, depth, grid=9, normalized=True, quater=False, center=False
+        self, depth, grid=9, normalized=True, quater=False, center=True
     ):
+        """Generate point source grid for PSF calculation.
+
+        Args:
+            depth (float): Depth of the point source.
+            grid (int): Grid size. Defaults to 9, meaning 9x9 grid.
+            normalized (bool): Return normalized object source coordinates. Defaults to True, meaning object sources xy coordinates range from [-1, 1].
+            quater (bool): Use quater of the sensor plane to save memory. Defaults to False.
+            center (bool): Use center of each patch. Defaults to False.
+
+        Returns:
+            point_source: Shape of [grid, grid, 3].
         """
-        Generate point source grid for PSF calculation.
-        """
-        # ==> Use center of each patch
+        # Compute point source grid
         if grid == 1:
             x, y = torch.tensor([[0.0]]), torch.tensor([[0.0]])
             assert not quater, "Quater should be False when grid is 1."
         else:
             if center:
+                # Use center of each patch
                 half_bin_size = 1 / 2 / (grid - 1)
                 x, y = torch.meshgrid(
                     torch.linspace(-1 + half_bin_size, 1 - half_bin_size, grid),
                     torch.linspace(1 - half_bin_size, -1 + half_bin_size, grid),
                     indexing="xy",
                 )
-            # ==> Use corner
             else:
+                # Use corner of image sensor
                 x, y = torch.meshgrid(
                     torch.linspace(-0.98, 0.98, grid),
                     torch.linspace(0.98, -0.98, grid),
@@ -161,7 +216,7 @@ class Lens(DeepObj):
         z = torch.full((grid, grid), depth)
         point_source = torch.stack([x, y, z], dim=-1)
 
-        # ==> Use quater of the sensor plane to save memory
+        # Use quater of the sensor plane to save memory
         if quater:
             z = torch.full((grid, grid), depth)
             point_source = torch.stack([x, y, z], dim=-1)
@@ -169,32 +224,67 @@ class Lens(DeepObj):
             bound_j = grid // 2
             point_source = point_source[0:bound_i, bound_j:, :]
 
+        # De-normalize object source coordinates to physical coordinates
         if not normalized:
-            raise Exception("Need to specify the scale.")
-            scale = self.calc_scale_pinhole(depth)
+            scale = self.calc_scale(depth)
             point_source[..., 0] *= scale * self.sensor_size[0] / 2
             point_source[..., 1] *= scale * self.sensor_size[1] / 2
 
         return point_source
 
-    def psf_map(self, grid=21, ks=51, depth=-20000.0, wvln=0.589, **kwargs):
-        """Compute PSF map."""
-        # raise NotImplementedError
+    def point_source_radial(self, depth, grid=9, center=False):
+        """Compute point radial [0, 1] in the object space to compute PSF grid.
+
+        Args:
+            grid (int, optional): Grid size. Defaults to 9.
+
+        Returns:
+            point_source: Shape of [grid, 3].
+        """
+        if grid == 1:
+            x = torch.tensor([0.0])
+        else:
+            # Select center of bin to calculate PSF
+            if center:
+                half_bin_size = 1 / 2 / (grid - 1)
+                x = torch.linspace(0, 1 - half_bin_size, grid)
+            else:
+                x = torch.linspace(0, 0.98, grid)
+
+        z = torch.full_like(x, depth)
+        point_source = torch.stack([x, x, z], dim=-1)
+        return point_source
+
+    def psf_map(self, grid=5, ks=51, depth=DEPTH, wvln=0.589, **kwargs):
+        """Compute monochrome PSF map.
+
+        Args:
+            grid (int, optional): Grid size. Defaults to 5, meaning 5x5 grid.
+            ks (int, optional): Kernel size. Defaults to 51, meaning 51x51 kernel size.
+            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            wvln (float, optional): Wavelength. Defaults to 0.589.
+
+        Returns:
+            psf_map: Shape of [1, grid*ks, grid*ks].
+        """
+        # PSF map grid
         points = self.point_source_grid(depth=depth, grid=grid, center=True)
         points = points.reshape(-1, 3)
 
+        # Compute PSF map
         psfs = []
         for i in range(points.shape[0]):
             point = points[i, ...]
-            psf = self.psf(point=point, ks=ks, wvln=wvln)
+            psf = self.psf(points=point, ks=ks, wvln=wvln)
             psfs.append(psf)
-
         psf_map = torch.stack(psfs).unsqueeze(1)
+
+        # Reshape PSF map from [grid*grid, 1, ks, ks] -> [1, grid*ks, grid*ks]
         psf_map = make_grid(psf_map, nrow=grid, padding=0)[0, :, :]
 
         return psf_map
 
-    def psf_map_rgb(self, grid=21, ks=51, depth=-20000.0, **kwargs):
+    def psf_map_rgb(self, grid=5, ks=51, depth=DEPTH, **kwargs):
         """Compute RGB PSF map."""
         psfs = []
         for wvln in WAVE_RGB:
@@ -203,80 +293,137 @@ class Lens(DeepObj):
         psf_map = torch.stack(psfs, dim=0)  # shape [3, grid*ks, grid*ks]
         return psf_map
 
+    @torch.no_grad()
     def draw_psf_map(
-        self,
-        grid=8,
-        depth=DEPTH,
-        ks=101,
-        log_scale=False,
-        save_name="./psf_map.png",
+        self, grid=7, ks=101, depth=DEPTH, log_scale=False, save_name="./psf_map.png"
     ):
-        """Draw RGB PSF map of the DOE thin lens."""
-        # Calculate PSF map
-        psf_maps = []
-        for wvln in WAVE_RGB:
-            psf_map = self.psf_map(grid=grid, depth=depth, ks=ks, wvln=wvln)
-            psf_maps.append(psf_map)
-        psf_map = torch.stack(psf_maps, dim=0)  # shape [3, grid*ks, grid*ks]
+        """Draw RGB PSF map of the doelens."""
+        # Calculate RGB PSF map
+        psf_map = self.psf_map_rgb(depth=depth, grid=grid, ks=ks)
 
-        # Data processing for visualization
         if log_scale:
-            psf_map = torch.log(psf_map + 1e-4)
-        psf_map = (psf_map - psf_map.min()) / (psf_map.max() - psf_map.min())
+            # Log scale normalization for better visualization
+            psf_map = torch.log(psf_map + 1e-4)  # 1e-4 is an empirical value
+            psf_map = (psf_map - psf_map.min()) / (psf_map.max() - psf_map.min())
+        else:
+            # Linear normalization
+            for i in range(0, psf_map.shape[-2], ks):
+                for j in range(0, psf_map.shape[-1], ks):
+                    local_max = psf_map[:, i : i + ks, j : j + ks].max()
+                    if local_max > 0:
+                        psf_map[:, i : i + ks, j : j + ks] /= local_max
 
-        save_image(psf_map.unsqueeze(0), save_name, normalize=True)
+        fig, ax = plt.subplots(figsize=(10, 10))
+
+        psf_map = psf_map.permute(1, 2, 0).cpu().numpy()
+        ax.imshow(psf_map)
+
+        # Add scale bar near bottom-left
+        H, W, _ = psf_map.shape
+        scale_bar_length = 100
+        arrow_length = scale_bar_length / (self.pixel_size * 1e3)
+        y_position = H - 20  # a little above the lower edge
+        x_start = 20
+        x_end = x_start + arrow_length
+
+        ax.annotate(
+            "",
+            xy=(x_start, y_position),
+            xytext=(x_end, y_position),
+            arrowprops=dict(arrowstyle="-", color="white"),
+            annotation_clip=False,
+        )
+        ax.text(
+            x_end + 5,
+            y_position,
+            f"{scale_bar_length} μm",
+            color="white",
+            fontsize=12,
+            ha="left",
+            va="center",
+            clip_on=False,
+        )
+
+        # Clean up axes and save
+        ax.axis("off")
+        plt.tight_layout(pad=0)
+        plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
 
     # ===========================================
-    # Rendering-ralated functions
+    # Image simulation-ralated functions
     # ===========================================
-    def render(self, img, method="psf", noise_std=0.01):
-        """PSF based rendering or image based rendering."""
+    def render(self, img_obj, depth=DEPTH, method="psf", **kwargs):
+        """Differentiable image simulation.
+
+        Image simulation methods:
+            [1] PSF map block convolution.
+            [2] Ray tracing-based rendering.
+            [3] ...
+
+        Args:
+            img_obj (tensor): Input image object in raw space. Shape of [N, C, H, W].
+            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            method (str, optional): Image simulation method. Defaults to "psf".
+            **kwargs: Additional arguments for different methods.
+        """
+        # Check sensor resolution
         if not (
-            self.sensor_res[0] == img.shape[-2] and self.sensor_res[1] == img.shape[-1]
+            self.sensor_res[0] == img_obj.shape[-2]
+            and self.sensor_res[1] == img_obj.shape[-1]
         ):
-            self.prepare_sensor(sensor_res=[img.shape[-2], img.shape[-1]])
+            H, W = img_obj.shape[-2], img_obj.shape[-1]
+            self.prepare_sensor(sensor_res=[H, W])
 
+        # Image simulation (in RAW space)
         if method == "psf":
-            # Note: larger psf_grid and psf_ks are better
-            psf_map = self.psf_map(grid=psf_grid, ks=psf_ks, depth=depth)
-            img_render = render_psf_map(img, psf_map, grid=psf_grid)
+            # Note: larger psf_grid and psf_ks are typically better
+            if "psf_grid" in kwargs and "psf_ks" in kwargs:
+                psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
+            else:
+                raise Exception("Please provide psf_grid and psf_ks.")
+
+            psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
+            img_render = render_psf_map(img_obj, psf_map, grid=psf_grid)
+        elif method == "ray_tracing":
+            raise NotImplementedError
         else:
             raise Exception("Unknown method.")
 
         # Add sensor noise
-        if noise_std > 0:
-            img_render = img_render + torch.randn_like(img_render) * noise_std
+        img_render = self.add_noise(
+            img_render, read_noise_std=0.0, shot_noise_alpha=0.0
+        )
 
         return img_render
 
     def add_noise(self, img, read_noise_std=0.01, shot_noise_alpha=1.0):
-        """Add both read noise and shot noise. Note: for an accurate noise model, we need to convert back to RAW space."""
+        """Add sensor read noise and shot noise.
+
+        Note: use RAW space image for accurate noise simulation.
+
+        Args:
+            img_raw (tensor): RAW space image. Shape of [N, C, H, W].
+            read_noise_std (float): Read noise standard deviation.
+            shot_noise_alpha (float): Shot noise alpha.
+
+        Returns:
+            img: Noisy image. Shape of [N, C, H, W].
+        """
         noise_std = torch.sqrt(img) * shot_noise_alpha + read_noise_std
         noise = torch.randn_like(img) * noise_std
         img = img + noise
         return img
+
+    def isp(self, img_raw):
+        """Image signal processing."""
+        raise NotImplementedError
 
     # ===========================================
     # Visualization-ralated functions
     # ===========================================
     def draw_layout(self):
         """Draw lens layout."""
-        raise NotImplementedError
-
-    def draw_psf_map(
-        self,
-        grid=7,
-        depth=DEPTH,
-        ks=101,
-        log_scale=False,
-        recenter=True,
-        save_name="./psf",
-    ):
-        """Draw lens RGB PSF map."""
-        raise NotImplementedError
-
-    def draw_render_image(self, image):
-        """Draw input and simulated images."""
         raise NotImplementedError
 
     # ===========================================

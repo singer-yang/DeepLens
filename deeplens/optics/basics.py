@@ -12,12 +12,6 @@ def init_device():
         device = torch.device("cuda")
         device_name = torch.cuda.get_device_name(0)
         print(f"Using CUDA: {device_name}")
-    # elif torch.backends.mps.is_available():
-    #     raise NotImplementedError(
-    #         "MPS is not supported yet due to incompatible with some functions."
-    #     )
-    #     device = torch.device("mps")
-    #     print("Using MPS")
     else:
         device = torch.device("cpu")
         device_name = "CPU"
@@ -196,7 +190,7 @@ HYPER_SPEC_BAND = 49  # 5nm/step, according to "Shift-variant color-coded diffra
 
 DEPTH = -20000.0
 GEO_SPP = 10000  # spp for geometric optics calculation (psf)
-COHERENT_SPP = 1000000  # spp for coherent optics calculation
+COHERENT_SPP = 10000000  # spp for coherent optics calculation
 
 GEO_GRID = 21  # grid number for geometric optics calculation (PSF map)
 PSF_KS = 51
@@ -219,7 +213,7 @@ def wave_rgb():
 # ===========================================
 # Classes
 # ===========================================
-class DeepObj(nn.Module):
+class DeepObj:
     def __str__(self):
         """Called when using print() and str()"""
         lines = [self.__class__.__name__ + ":"]
