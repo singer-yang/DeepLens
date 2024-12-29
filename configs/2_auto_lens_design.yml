@@ -10,7 +10,7 @@ fov: 40.0
 fnum: 4.0
 flange: 18.0
 thickness: 120.0
-lens_type: ["Spheric", "Spheric", "Spheric", "Spheric", "Aperture", "Spheric", "Aspheric", "Spheric", "Aspheric"]
+lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric"], ["Spheric", "Aspheric"], ["Spheric", "Aspheric"]]
 lrs: [5e-4, 1e-3, 1e-1, 1e-3]
 decay: 0.001
 
@@ -20,6 +20,6 @@ decay: 0.001
 # fnum: 2.0
 # flange: 1.0
 # thickness: 9.0
-# lens_type: ["Aperture", "Aspheric", "Aspheric", "Aspheric", "Aspheric", "Aspheric", "Aspheric"]
+# lens_type: [["Aperture"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"]]
 # lrs: [3e-4, 1e-4, 1e-1, 1e-2]
 # decay: 0.01

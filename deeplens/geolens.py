@@ -1669,10 +1669,15 @@ class GeoLens(Lens):
         o1 = torch.zeros([GEO_SPP, 3])
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(GEO_SPP, 1)
 
-        pupilz, pupilx = self.exit_pupil()
-        x2 = torch.linspace(-pupilx, pupilx, GEO_SPP)
+        # Option 1: sample second points on exit pupil
+        # pupilz, pupilx = self.exit_pupil()
+        # x2 = torch.linspace(-pupilx, pupilx, GEO_SPP)
+        # z2 = torch.full_like(x2, pupilz)
+        # Option 2: sample second points on last surface
+        x2 = torch.linspace(0, self.surfaces[-1].r, GEO_SPP)
+        z2 = torch.full_like(x2, self.surfaces[-1].d.item())
+
         y2 = torch.full_like(x2, 0)
-        z2 = torch.full_like(x2, pupilz)
         o2 = torch.stack((x2, y2, z2), axis=-1)
 
         ray = Ray(o1, o2 - o1, device=self.device)
@@ -2102,7 +2107,7 @@ class GeoLens(Lens):
             surf.mat2.match_material(mat_table=mat_table)
 
     @torch.no_grad()
-    def correct_shape(self, expand_surf=0.1):
+    def correct_shape(self, expand_surf=None):
         """Correct wrong lens shape during the lens design."""
         aper_idx = self.aper_idx
         diff_surf_range = self.find_diff_surf()
@@ -3523,18 +3528,18 @@ SURF 0
 # ====================================================================================
 # Other functions.
 # ====================================================================================
-
-
 def create_lens(
     foclen,
     fov,
     fnum,
     flange,
     thickness=None,
-    lens_type=["Spheric", "Spheric", "Aperture", "Spheric", "Aspheric"],
+    lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
     save_dir="./",
 ):
     """Create a flat starting point for camera lens design.
+
+    Contributor: Rayengineer
 
     Args:
         foclen: Focal length in mm.
@@ -3544,21 +3549,12 @@ def create_lens(
         thickness: Total thickness if specified.
         lens_type: List of surface types defining each lens element and aperture.
     """
-    assert "Aperture" in lens_type, "Aperture should be included in lens_type."
-    lens_num = len(lens_type)
-
     # Compute lens parameters
     aper_r = foclen / fnum / 2
     imgh = 2 * foclen * np.tan(fov / 2 / 57.3)
     if thickness is None:
         thickness = foclen + flange
     d_opt = thickness - flange
-    d_air = np.random.rand(lens_num).astype(np.float32) + 0.5
-    d_lens = np.random.rand(lens_num).astype(np.float32) + 1.0
-    d_lens[lens_type.index("Aperture")] = 0.0
-    d_sum = np.sum(d_air) + np.sum(d_lens)
-    d_air = d_air / d_sum * d_opt
-    d_lens = d_lens / d_sum * d_opt
 
     # Materials
     mat_names = list(SELLMEIER_TABLE.keys())
@@ -3566,58 +3562,46 @@ def create_lens(
     for mat in remove_materials:
         if mat in mat_names:
             mat_names.remove(mat)
-        else:
-            print(f"Warning: '{mat}' not found in SELLMEIER_TABLE keys.")
 
     # Create lens
-    d_total = 0
     lens = GeoLens()
     surfaces = lens.surfaces
-    for i in range(lens_num):
-        if lens_type[i] == "Aperture":
-            d_total += d_air[i]
+
+    d_total = 0.0
+    for elem_type in lens_type:
+        if elem_type == "Aperture":
+            d_next = np.random.rand(1).astype(np.float32) + 0.5
             surfaces.append(Aperture(r=aper_r, d=d_total))
+            d_total += d_next
 
-        elif lens_type[i] == "Aspheric":
-            # Front surface
-            d_total += d_air[i]
-            c1 = np.random.randn(1).astype(np.float32) * 0.001
-            mat = random.choice(mat_names)
-            ai1 = np.random.randn(7).astype(np.float32) * 1e-30
-            k1 = np.random.randn(1).astype(np.float32) * 0.001
-            surfaces.append(
-                Aspheric(
-                    r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat
-                )
-            )
+        elif isinstance(elem_type, list):
+            if len(elem_type) == 1 and elem_type[0] == "Aperture":
+                d_next = np.random.rand(1).astype(np.float32) + 0.5
+                surfaces.append(Aperture(r=aper_r, d=d_total))
+                d_total += d_next
 
-            # Back surface
-            d_total += d_lens[i]
-            c2 = np.random.randn(1).astype(np.float32) * 0.001
-            ai2 = np.random.randn(7).astype(np.float32) * 1e-30
-            k2 = np.random.randn(1).astype(np.float32) * 0.001
-            surfaces.append(
-                Aspheric(
-                    r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air"
-                )
-            )
+            elif len(elem_type) in [2, 3]:
+                for i, surface_type in enumerate(elem_type):
+                    if i == len(elem_type) - 1:
+                        mat = "air"
+                        d_next = np.random.rand(1).astype(np.float32) + 0.5
+                    else:
+                        mat = random.choice(mat_names)
+                        d_next = np.random.rand(1).astype(np.float32) + 1.0
 
-        elif lens_type[i] == "Spheric":
-            # Front surface
-            d_total += d_air[i]
-            c1 = np.random.randn(1).astype(np.float32) * 0.001
-            mat = random.choice(mat_names)
-            surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
-
-            # Back surface
-            d_total += d_lens[i]
-            c2 = np.random.randn(1).astype(np.float32) * 0.001
-            surfaces.append(
-                Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, mat2="air")
-            )
-
+                    surfaces.append(
+                        create_surface(surface_type, d_total, aper_r, imgh, mat)
+                    )
+                    d_total += d_next
+            else:
+                raise Exception("Lens element type not supported yet.")
         else:
-            raise Exception("Surface type not supported yet.")
+            raise Exception("Lens type format not correct.")
+
+    # Normalize optical part total thickness
+    d_opt_actual = d_total - d_next
+    for s in surfaces:
+        s.d = s.d / d_opt_actual * d_opt
 
     # Lens calculation
     lens = lens.to(lens.device)
@@ -3635,3 +3619,18 @@ def create_lens(
     lens.write_lens_json(os.path.join(save_dir, filename))
 
     return lens
+
+
+def create_surface(surface_type, d_total, aper_r, imgh, mat):
+    """Create a surface object based on the surface type."""
+    c = np.random.randn(1).astype(np.float32) * 0.001
+    r = max(imgh / 2, aper_r)
+
+    if surface_type == "Spheric":
+        return Spheric(r=r, d=d_total, c=c, mat2=mat)
+    elif surface_type == "Aspheric":
+        ai = np.random.randn(7).astype(np.float32) * 1e-30
+        k = np.random.randn(1).astype(np.float32) * 0.001
+        return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
+    else:
+        raise Exception("Surface type not supported yet.")
