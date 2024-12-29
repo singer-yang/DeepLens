@@ -1,5 +1,5 @@
 """
-Automated lens design from scratch. This code uses classical RMS spot size for lens design, which is much faster than image-based lens design.
+Automated lens design from scratch. This code uses RMS spot size for lens design, which is much faster than image-based lens design.
 
 Technical Paper:
     Xinge Yang, Qiang Fu and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
@@ -125,10 +125,10 @@ def curriculum_design(
             if i > 0:
                 if shape_control:
                     self.correct_shape()
-            
+
                 if optim_mat and match_mat:
                     self.match_materials()
-            
+
             self.write_lens_json(f"{result_dir}/iter{i}.json")
             self.analysis(
                 f"{result_dir}/iter{i}",
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     # Bind function
     GeoLens.curriculum_design = curriculum_design
 
-    # ===> Create a camera lens
+    # Create a lens
     lens = create_lens(
         foclen=args["foclen"],
         fov=args["fov"],
@@ -220,7 +220,7 @@ if __name__ == "__main__":
         save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
-        hfov=args["fov"]/2/57.3,
+        hfov=args["fov"] / 2 / 57.3,
         fnum=args["fnum"],
     )
     logging.info(
@@ -254,7 +254,9 @@ if __name__ == "__main__":
     lens.prune_surf(expand_surf=0.02)
     lens.post_computation()
 
-    logging.info(f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}.")
+    logging.info(
+        f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
+    )
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens", zmx_format=True)
 
