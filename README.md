@@ -129,9 +129,7 @@ deeplens/
 
 #### Citations
 
-DeepLens is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then developed and maintained by [Xinge Yang](https://singer-yang.github.io/).
-
-If you use DeepLens in your research, please cite the corresponding papers:
+DeepLens is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then developed and maintained by [Xinge Yang](https://singer-yang.github.io/). If you use DeepLens in your research, please cite the corresponding papers:
 
 - [TCI 2022] dO: A differentiable engine for deep lens design of computational imaging systems. [Paper](https://ieeexplore.ieee.org/document/9919421), [BibTex](./misc/do_bibtex.txt)
 - [NatComm 2024] Curriculum Learning for ab initio Deep Learned Refractive Optics. [Paper](https://www.nature.com/articles/s41467-024-50835-7), [BibTex](./misc/deeplens_bibtex.txt)
@@ -144,5 +142,3 @@ If you use DeepLens in your research, please cite the corresponding papers:
 - [SiggraphAsia 2024] End-to-end Optimization of Fluidic Lenses. [Paper](https://dl.acm.org/doi/10.1145/3680528.3687584), [BibTex](.misc/fluidiclens_bibtext.txt)
 - [TPAMI 2023] Aberration-Aware Depth-From-Focus. [Paper](https://ieeexplore.ieee.org/document/10209238), [BibTex](./misc/aatdff_bibtex.txt)
 - [Arxiv 2024] Centimeter-Scale Achromatic Hybrid Metalens Design: A New Paradigm Based on Differentiable Ray Tracing in the Visible Spectrum. [Paper](https://arxiv.org/abs/2404.03173)
-
-# End-to-end Optimization of Fluidic Lenses
