@@ -133,7 +133,14 @@ class GeoLens(DeepObj):
             raise Exception("File format not supported.")
 
     def load_external(self, surfaces, materials, r_sensor, d_sensor):
-        """Load lens from extrenal surface/material list."""
+        """Load lens from extrenal surface/material list.
+
+        Args:
+            surfaces (list): list of surfaces.
+            materials (list): list of materials.
+            r_sensor (float): sensor radius.
+            d_sensor (float): sensor distance.
+        """
         self.surfaces = surfaces
         self.materials = materials
         self.r_sensor = r_sensor
@@ -144,7 +151,7 @@ class GeoLens(DeepObj):
             self.surfaces[i].mat2 = self.materials[i + 1]
 
     def prepare_sensor(self, sensor_res=[512, 512], sensor_size=None):
-        """Create sensor.
+        """Create camera sensor.
 
         Args:
             sensor_res (list): Resolution, pixel number.
@@ -392,6 +399,9 @@ class GeoLens(DeepObj):
             M (int, optional): ray number. Defaults to 9.
             entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [M, 3]
         """
         if entrance_pupil:
             pupilz, pupilx = self.entrance_pupil()
@@ -445,6 +455,9 @@ class GeoLens(DeepObj):
             forward (bool, optional): forward or backward rays. Defaults to True.
             pupil (bool, optional): whether to use pupil. Defaults to False.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [spp, M, M, 3]
         """
         if R is None:
             R = self.surfaces[0].r
@@ -544,6 +557,9 @@ class GeoLens(DeepObj):
             high_spp (bool, optional): whether to use high spp. Defaults to False.
             pupil (bool, optional): whether to use pupil. Defaults to True.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [spp, H, W, 3]
         """
         # ===> sample o1 on sensor plane
         # We use top-left point as reference in rendering, so here we should sample bottom-right point
@@ -603,6 +619,9 @@ class GeoLens(DeepObj):
             pupilr (float): pupil radius. Defaults to None.
             pupilz (float): pupil z position. Defaults to None.
             multiplexing (bool): whether to use multiplexing. Defaults to False.
+
+        Returns:
+            o (torch.Tensor): Ray origins. Shape [spp, res, res, 3]
         """
         H, W = res
         if pupilr is None or pupilz is None:
@@ -674,7 +693,7 @@ class GeoLens(DeepObj):
         Returns:
             ray_final (Ray object): ray after optical system.
             valid (boolean matrix): mask denoting valid rays.
-            oss (): position of ray on the sensor plane.
+            oss (list): list of intersection points.
         """
         is_forward = ray.d.reshape(-1, 3)[0, 2] > 0
         if lens_range is None:
@@ -690,7 +709,15 @@ class GeoLens(DeepObj):
         return ray_out, valid, oss
 
     def trace2obj(self, ray, depth=DEPTH):
-        """Trace rays through the lens and reach the sensor plane."""
+        """Trace rays through the lens and reach the sensor plane.
+
+        Args:
+            ray (Ray object): Ray object.
+            depth (float): sensor distance.
+
+        Returns:
+            ray (Ray object): Ray object.
+        """
         (
             ray,
             _,
@@ -700,7 +727,17 @@ class GeoLens(DeepObj):
         return ray
 
     def trace2sensor(self, ray, record=False, ignore_invalid=False):
-        """Trace optical rays to sensor plane."""
+        """Trace optical rays to sensor plane.
+
+        Args:
+            ray (Ray object): Ray object.
+            record (bool): record ray path or not.
+            ignore_invalid (bool): ignore invalid rays or not.
+
+        Returns:
+            p (torch.Tensor): intersection points.
+            oss (list): list of intersection points.
+        """
         if record:
             ray_out, valid, oss = self.trace(ray, record=record)
             ray_out = ray_out.propagate_to(self.d_sensor)
@@ -733,7 +770,18 @@ class GeoLens(DeepObj):
             return ray
 
     def forward_tracing(self, ray, lens_range, record):
-        """Trace rays from object space to sensor plane."""
+        """Trace rays from object space to sensor plane.
+
+        Args:
+            ray (Ray object): Ray object.
+            lens_range (list): range of surfaces.
+            record (bool): record ray path or not.
+
+        Returns:
+            valid (boolean matrix): mask denoting valid rays.
+            ray (Ray object): ray after optical system.
+            oss (list): list of intersection points.
+        """
         dim = ray.o[
             ..., 2
         ].shape  # What does this mean: how many rays do we have? here 31*31
@@ -765,7 +813,18 @@ class GeoLens(DeepObj):
         return valid, ray, oss
 
     def backward_tracing(self, ray, lens_range, record):
-        """Trace rays from sensor plane to object space."""
+        """Trace rays from sensor plane to object space.
+
+        Args:
+            ray (Ray object): Ray object.
+            lens_range (list): range of surfaces.
+            record (bool): record ray path or not.
+
+        Returns:
+            valid (boolean matrix): mask denoting valid rays.
+            ray (Ray object): ray after optical system.
+            oss (list): list of intersection points.
+        """
         dim = ray.o[..., 2].shape
         valid = ray.ra == 1
 
@@ -1062,18 +1121,6 @@ class GeoLens(DeepObj):
         )  # no vignetting
 
         return image
-
-    def isp(self, img, psf, noise=0.01):
-        """Image signal processing."""
-        # Energy
-
-        # Gamma
-
-        # White balance
-
-        # Noise
-        img += noise * torch.randn_like(img).to(self.device)
-        return img
 
     # ====================================================================================
     # PSF and spot diagram (incoherent ray tracing)
@@ -3442,7 +3489,9 @@ class GeoLens(DeepObj):
                                 mat2=surf_dict["mat2"],
                             )
                         else:
-                            raise Exception("ROC not found. This case will be removed in the future.")
+                            raise Exception(
+                                "ROC not found. This case will be removed in the future."
+                            )
                             s = Aspheric(
                                 c=surf_dict["c"],
                                 r=surf_dict["r"],
@@ -3453,7 +3502,7 @@ class GeoLens(DeepObj):
                             )
                     else:
                         s = Aspheric(
-                            c=1/surf_dict["roc"],
+                            c=1 / surf_dict["roc"],
                             r=surf_dict["r"],
                             d=d,
                             k=surf_dict["k"] if "k" in surf_dict else 0.001,
@@ -3807,7 +3856,9 @@ def create_camera_lens(
             ai1 = np.random.randn(7).astype(np.float32) * 1e-20
             k1 = np.random.randn(1).astype(np.float32) * 0.01
             surfaces.append(
-                Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat)
+                Aspheric(
+                    r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat
+                )
             )
         elif lens_type[i] == "Spheric":
             surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
@@ -3821,7 +3872,9 @@ def create_camera_lens(
             ai2 = np.random.randn(7).astype(np.float32) * 1e-20
             k2 = np.random.randn(1).astype(np.float32) * 0.01
             surfaces.append(
-                Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air")
+                Aspheric(
+                    r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air"
+                )
             )
         elif lens_type[i] == "Spheric":
             surfaces.append(
@@ -3925,7 +3978,9 @@ def create_lens(
             ai1 = np.random.randn(7).astype(np.float32) * 1e-30
             k1 = np.random.randn(1).astype(np.float32) * 0.001
             surfaces.append(
-                Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat)
+                Aspheric(
+                    r=max(imgh / 2, aper_r), d=d_total, c=c1, ai=ai1, k=k1, mat2=mat
+                )
             )
         elif lens_type[i] == "Spheric":
             surfaces.append(Spheric(r=max(imgh / 2, aper_r), d=d_total, c=c1, mat2=mat))
@@ -3939,7 +3994,9 @@ def create_lens(
             ai2 = np.random.randn(7).astype(np.float32) * 1e-30
             k2 = np.random.randn(1).astype(np.float32) * 0.001
             surfaces.append(
-                Aspheric(r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air")
+                Aspheric(
+                    r=max(imgh / 2, aper_r), d=d_total, c=c2, ai=ai2, k=k2, mat2="air"
+                )
             )
         elif lens_type[i] == "Spheric":
             surfaces.append(
