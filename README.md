@@ -8,6 +8,7 @@ Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the bas
 
 ## News
 
+* We now have a slack group. Welcome to join the discussion via [this link](https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw).
 * DeepLens is finall published on Nature Communications, check it [here](https://www.nature.com/articles/s41467-024-50835-7)!
 * We now have a WeChat group. Please contact Xinge Yang (singeryang1999) to join the discussion!
 
