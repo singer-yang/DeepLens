@@ -23,9 +23,18 @@ class ComplexWave(DeepObj):
         z=0.0,
         phy_size=[4.0, 4.0],
         valid_phy_size=None,
-        res=[1024, 1024],
+        res=[1000, 1000],
     ):
-        """Complex wave field class."""
+        """Complex wave field class.
+
+        Args:
+            u (tensor): complex wave field, shape [H, W] or [B, C, H, W].
+            wvln (float): wavelength in [um].
+            z (float): distance in [mm].
+            phy_size (list): physical size in [mm].
+            valid_phy_size (list): valid physical size in [mm].
+            res (list): resolution.
+        """
         super(ComplexWave, self).__init__()
 
         # Wave field has shape of [N, 1, H, W] for batch processing
@@ -349,11 +358,13 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True, TF=True):
         https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
 
     Args:
-        u: complex field, shape [H, W] or [B, C, H, W]
-        wvln: wvln
-        res: field resolution
-        ps (float): pixel size
-        z (float): propagation distance
+        u (tesor): complex field, shape [H, W] or [B, C, H, W]
+        z (float): propagation distance in [mm]
+        wvln (float): wavelength in [um]
+        ps (float): pixel size in [mm]
+        n (float): refractive index
+        padding (bool): padding or not
+        TF (bool): transfer function or impulse response
     """
     if torch.is_tensor(z):
         z = z.item()
@@ -376,7 +387,8 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True, TF=True):
 
     # Propagation
     assert wvln > 0.1 and wvln < 1, "wvln unit should be [um]."
-    k = 2 * np.pi / (wvln * 1e-3)  # we use k in vaccum, k in [mm]-1
+    wvln_mm = wvln * 1e-3  # [um] to [mm]
+    k = 2 * np.pi / wvln_mm  # we use k in vaccum, k in [mm]-1
     x, y = torch.meshgrid(
         torch.linspace(-0.5 * Wimg * ps, 0.5 * Himg * ps, Wimg, device=u.device),
         torch.linspace(0.5 * Wimg * ps, -0.5 * Himg * ps, Himg, device=u.device),
@@ -389,17 +401,17 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True, TF=True):
     )
 
     # Determine TF or IR
-    if ps > wvln * np.abs(z) / (Wimg * ps):
+    if ps > wvln_mm * np.abs(z) / (Wimg * ps):
         TF = True
     else:
         TF = False
 
     if TF:
         if n == 1:
-            square_root = torch.sqrt(1 - (wvln * 1e-3) ** 2 * (fx**2 + fy**2))
+            square_root = torch.sqrt(1 - wvln_mm**2 * (fx**2 + fy**2))
             H = torch.exp(1j * k * z * square_root)
         else:
-            square_root = torch.sqrt(n**2 - (wvln * 1e-3) ** 2 * (fx**2 + fy**2))
+            square_root = torch.sqrt(n**2 - wvln_mm**2 * (fx**2 + fy**2))
             H = n * torch.exp(1j * k * z * square_root)
 
         H = fftshift(H)
@@ -409,9 +421,9 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True, TF=True):
         r = torch.sqrt(r2)
 
         if n == 1:
-            h = z / (1j * wvln * r2) * torch.exp(1j * k * r)
+            h = z / (1j * wvln_mm * r2) * torch.exp(1j * k * r)
         else:
-            h = z * n / (1j * wvln * r2) * torch.exp(1j * n * k * r)
+            h = z * n / (1j * wvln_mm * r2) * torch.exp(1j * n * k * r)
 
         H = fft2(fftshift(h)) * ps**2
 

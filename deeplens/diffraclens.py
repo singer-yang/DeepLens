@@ -1,4 +1,17 @@
-"""Refractive-diffractive lens with all surface represented using paraxial wave optics."""
+"""Optical lens modeled with pure wave optics.
+
+1. DoeThinLens: refractive lens with one DOE (Metasurface). The refractive lens is modeled as a thin lens (paraxial approximation). 
+2. DoeLens: diffractive lens with only one DOE (Metasurface).
+
+Technical Paper:
+    [1] Vincent Sitzmann*, Steven Diamond*, Yifan Peng*, Xiong Dun, Stephen Boyd, Wolfgang Heidrich, Felix Heide, Gordon Wetzstein, "End-to-end optimization of optics and image processing for achromatic extended depth of field and super-resolution imaging," Siggraph 2018.
+    [2] Qilin Sun, Ethan Tseng, Qiang Fu, Wolfgang Heidrich, Felix Heide. "Learning Rank-1 Diffractive Optics for Single-shot High Dynamic Range Imaging," CVPR 2020.
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
+"""
 
 import json
 import matplotlib.pyplot as plt
@@ -380,8 +393,7 @@ class DoeLens(Lens):
         log_scale=True,
         eps=1e-4,
     ):
-        """
-        Draw on-axis RGB PSF.
+        """Draw on-axis RGB PSF.
 
         Args:
             depth (float): Depth of the point source
