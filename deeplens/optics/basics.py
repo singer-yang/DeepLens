@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-
 def init_device():
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -18,16 +17,28 @@ def init_device():
         print("Using CPU")
     return device
 
-
 # ===========================================
 # Variables
 # ===========================================
-DEFAULT_WAVE = 0.589
-WAVE_RGB = [0.656, 0.589, 0.486]
+DEPTH = -20000.0 # approximate infinity
 
-WAVE_RED = [0.620, 0.660, 0.700]
-WAVE_GREEN = [0.500, 0.530, 0.560]
-WAVE_BLUE = [0.450, 0.470, 0.490]
+SPP_PSF = 10000 # spp (sample per pixel) for psf calculation
+SPP_COHERENT = 10000000 # spp for coherent optics calculation
+SPP_CALC = 1024 # spp for some computation which doesnot need to be very accurate, e.g., refocusing
+SPP_RENDER = 64 # spp for rendering
+
+PSF_KS = 101 # kernel size for psf calculation, better to be odd number
+GEO_GRID = 21  # grid number for PSF map
+
+DELTA = 1e-6
+EPSILON = 1e-9  # replace 0 with EPSILON in some cases
+
+DEFAULT_WAVE = 0.589 # [um] default wavelength
+WAVE_RGB = [0.656, 0.589, 0.486] # [um] R, G, B wavelength
+
+WAVE_RED = [0.620, 0.660, 0.700] # [um] narrow band red spectrum
+WAVE_GREEN = [0.500, 0.530, 0.560] # [um] narrow band green spectrum
+WAVE_BLUE = [0.450, 0.470, 0.490] # [um] narrow band blue spectrum
 
 WAVE_BOARD_BAND = [
     0.400,
@@ -187,19 +198,6 @@ WAVE_SPEC = [
 FULL_SPECTRUM = np.arange(0.400, 0.701, 0.02)
 HYPER_SPEC_RANGE = [0.42, 0.66]  # [um]. reference 400nm to 700nm, 20nm step size
 HYPER_SPEC_BAND = 49  # 5nm/step, according to "Shift-variant color-coded diffractive spectral imaging system"
-
-DEPTH = -20000.0
-GEO_SPP = 10000  # spp for geometric optics calculation (psf)
-COHERENT_SPP = 10000000  # spp for coherent optics calculation
-
-GEO_GRID = 21  # grid number for geometric optics calculation (PSF map)
-PSF_KS = 51
-
-MINT = 1e-5
-MAXT = 1e5
-DELTA = 1e-6
-EPSILON = 1e-9  # replace 0 with EPSILON in some cases
-NEWTON_STEP_BOUND = 1  # Maximum step length in one Newton iteration
 
 
 def wave_rgb():

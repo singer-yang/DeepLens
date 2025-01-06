@@ -1,7 +1,7 @@
 """
 Task-driven lens design for image classification.
 
-We design a lens with from scratch with only image-classification loss. This makes sure no prior knowledge or classical lens design objective (spot size, PSF...) is used in the task-driven lens design. By doing this, we can explore "unseen" lens design space to find a lens that is optimal for a task, because we totally get rid of classical lens design!
+We design a lens with from scratch with only image-classification loss. This makes sure no classical lens design objective (spot size, PSF...) is used in the task-driven lens design. By doing this, we can explore "unseen" lens design space to find a lens that is optimal for a specific task, because we totally get rid of classical lens design!
 
 Technical Paper:
     Xinge Yang, Yunfeng Nie, Fu Qiang and Wolfgang Heidrich, "Image Quality Is Not All You Want: Task-Driven Lens Design for Image Classification" Arxiv preprint 2023.
@@ -73,8 +73,8 @@ def config():
     with open(f"{result_dir}/config.yml", "w") as f:
         yaml.dump(args, f)
 
-    with open(f"{result_dir}/4_tasklens_design.py", "w") as f:
-        with open("4_tasklens_design.py", "r") as code:
+    with open(f"{result_dir}/4_tasklens_img_classi.py", "w") as f:
+        with open("4_tasklens_img_classi.py", "r") as code:
             f.write(code.read())
 
     return args
@@ -324,11 +324,7 @@ if __name__ == "__main__":
     args = config()
 
     # Lens
-    lens = GeoLens(
-        filename=args["lens"]["path"],
-        sensor_res=args["lens"]["sensor_res"],
-        device=args["device"],
-    )
+    lens = GeoLens(filename=args["lens"]["path"]).to(args["device"])
     lens.set_target_fov_fnum(
         hfov=args["lens"]["target_hfov"], fnum=args["lens"]["target_fnum"]
     )

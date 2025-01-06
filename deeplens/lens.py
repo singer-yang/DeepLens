@@ -22,6 +22,9 @@ from .optics import (
 )
 from .optics.render_psf import render_psf_map
 
+# from .sensor.isp import ISP
+# from .sensor.inv_isp import INV_ISP
+
 
 class Lens(DeepObj):
     """Base lens class."""
@@ -57,6 +60,13 @@ class Lens(DeepObj):
     def prepare_sensor(self, sensor_res=[1024, 1024]):
         """Prepare sensor."""
         raise NotImplementedError
+    
+    def change_sensor_res(self, sensor_res):
+        """Change sensor resolution."""
+        if not self.sensor_size[0] * sensor_res[1] == self.sensor_size[1] * sensor_res[0]:
+            raise Exception("Given sensor resolution does not match sensor size.")
+        self.sensor_res = sensor_res
+        self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
 
     def post_computation(self):
         """After loading lens, computing some lens parameters."""
@@ -354,7 +364,7 @@ class Lens(DeepObj):
     # Image simulation-ralated functions
     # ===========================================
     def render(self, img_obj, depth=DEPTH, method="psf", **kwargs):
-        """Differentiable image simulation.
+        """Differentiable image simulation. This function handles only the differentiable components of image simulation, specifically the optical aberrations. The non-differentiable components (such as noise simulation) are handled separately in the self.render_unprocess() function to ensure more accurate overall image simulation.
 
         Image simulation methods:
             [1] PSF map block convolution.
@@ -372,52 +382,88 @@ class Lens(DeepObj):
             self.sensor_res[0] == img_obj.shape[-2]
             and self.sensor_res[1] == img_obj.shape[-1]
         ):
+            raise Exception("Sensor resolution does not match input image object.")
             H, W = img_obj.shape[-2], img_obj.shape[-1]
             self.prepare_sensor(sensor_res=[H, W])
 
         # Image simulation (in RAW space)
         if method == "psf":
-            # Note: larger psf_grid and psf_ks are typically better
             if "psf_grid" in kwargs and "psf_ks" in kwargs:
                 psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
+                img_render = self.render_psf(
+                    img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
+                )
             else:
-                raise Exception("Please provide psf_grid and psf_ks.")
+                img_render = self.render_psf(img_obj, depth=depth)
 
-            psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
-            img_render = render_psf_map(img_obj, psf_map, grid=psf_grid)
-        elif method == "ray_tracing":
-            raise NotImplementedError
         else:
-            raise Exception("Unknown method.")
-
-        # Add sensor noise
-        img_render = self.add_noise(
-            img_render, read_noise_std=0.0, shot_noise_alpha=0.0
-        )
+            raise Exception(f"Image simulation method {method} is not supported.")
 
         return img_render
 
-    def add_noise(self, img, read_noise_std=0.01, shot_noise_alpha=1.0):
+    def render_psf(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
+        """Render image using PSF block convolution.
+
+        Note: larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
+
+        Args:
+            img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
+            depth (float): Depth of the object.
+            psf_grid (int): PSF grid size.
+            psf_ks (int): PSF kernel size.
+
+        Returns:
+            img_render: Rendered image. Shape of [B, C, H, W].
+        """
+        psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
+        img_render = render_psf_map(img_obj, psf_map, grid=psf_grid)
+        return img_render
+
+    # def render_unprocess(self, img_obj, isp=None, inv_isp=None, depth=DEPTH, method="psf", **kwargs):
+    #     """Unprocess image to raw space for image simulation. Because PSF is defined in energy space.
+        
+    #     Accurate image simulation:
+    #         (1) raw image space
+    #         (2) lens vignetting (shading)
+    #         (3) high optical ray sampling
+    #         (4) sensor noise and quantization
+    #     """
+    #     if isp is None and inv_isp is None:
+    #         isp, inv_isp = ISP(), INV_ISP()
+
+    #     img_raw = inv_isp.unprocess(img_obj)
+    #     img_raw_render = self.render(img_raw, depth=depth, method=method, **kwargs)
+        
+    #     img_raw_noise = self.add_noise(img_raw_render)
+    #     img_render = isp.process(img_raw_noise)
+
+    def add_noise(self, img):
         """Add sensor read noise and shot noise.
 
         Note: use RAW space image for accurate noise simulation.
 
         Args:
             img_raw (tensor): RAW space image. Shape of [N, C, H, W].
-            read_noise_std (float): Read noise standard deviation.
-            shot_noise_alpha (float): Shot noise alpha.
 
         Returns:
             img: Noisy image. Shape of [N, C, H, W].
         """
+        # Noise statistics
+        if not hasattr(self, "read_noise_std"):
+            self.read_noise_std = 0.0
+            raise Warning("Read noise standard deviation is not defined.")
+        if not hasattr(self, "shot_noise_alpha"):
+            self.shot_noise_alpha = 0.0
+            raise Warning("Shot noise alpha is not defined.")
+
+        read_noise_std = self.read_noise_std
+        shot_noise_alpha = self.shot_noise_alpha
+        
+        # Add noise to raw image
         noise_std = torch.sqrt(img) * shot_noise_alpha + read_noise_std
         noise = torch.randn_like(img) * noise_std
         img = img + noise
         return img
-
-    def isp(self, img_raw):
-        """Image signal processing."""
-        raise NotImplementedError
 
     # ===========================================
     # Visualization-ralated functions
@@ -440,5 +486,5 @@ class Lens(DeepObj):
     def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-3]):
         """Get optimizer."""
         params = self.get_optimizer_params(lr)
-        optimizer = torch.optim.Adam(params)
+        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
         return optimizer

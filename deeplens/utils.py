@@ -7,10 +7,47 @@ import cv2 as cv
 import lpips
 import numpy as np
 import torch
-from skimage.metrics import peak_signal_noise_ratio as compare_psnr
-from skimage.metrics import structural_similarity as compare_ssim
+from skimage.metrics import peak_signal_noise_ratio
+from skimage.metrics import structural_similarity
 from tqdm import tqdm
+import torch.nn.functional as F
 
+
+# ==================================
+# Image IO
+# ==================================
+def img2batch(img):
+    """Convert image in any type to tensor batch.
+
+    Args:
+        img: image tensor (H, W, C) or (C, H, W).
+
+    Returns:
+        batch: batch tensor (1, C, H, W).
+    """
+    # Tensor shape
+    if len(img.shape) == 2:
+        if isinstance(img, np.ndarray):
+            img = torch.tensor(img).unsqueeze(0).unsqueeze(0) # (H, W) -> (1, 1, H, W)
+        else:
+            raise ValueError("Image should be numpy array.")
+    
+    elif len(img.shape) == 3:
+        if isinstance(img, np.ndarray):
+            assert img.shape[-1] in [1, 3], "Image channel should be 1 or 3."
+            img = torch.tensor(img).unsqueeze(0).permute(0, 3, 1, 2) # (H, W, C) -> (1, C, H, W)
+        else:
+            raise ValueError("Image should be numpy array.")
+    
+    # Tensor dtype
+    if img.dtype == torch.uint8:
+        img = img.to(torch.float32) / 255.0
+    elif img.dtype == torch.float32:
+        pass
+    else:
+        raise ValueError("Image type should be uint8 or float32.")
+        
+    return img
 
 # ==================================
 # Image batch quality evaluation
@@ -23,9 +60,32 @@ def batch_PSNR(img_clean, img):
     )
     PSNR = 0.0
     for i in range(Img.shape[0]):
-        PSNR += compare_psnr(Img_clean[i, :, :, :], Img[i, :, :, :])
+        PSNR += peak_signal_noise_ratio(Img_clean[i, :, :, :], Img[i, :, :, :])
     return round(PSNR / Img.shape[0], 4)
 
+def batch_psnr(pred, target, max_val=1.0, eps=1e-8):  
+    """Calculate PSNR between two image batches.  
+
+    Reference: https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio
+    
+    Args:  
+        pred (torch.Tensor): Predicted images, shape [B, C, H, W]  
+        target (torch.Tensor): Target images, shape [B, C, H, W]  
+        max_val (float): Maximum value of the images (1.0 for normalized, 255 for uint8)  
+        eps (float): Small constant to avoid log(0)  
+        
+    Returns:  
+        torch.Tensor: PSNR value for each image in batch, shape [B]  
+    """  
+    assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"  
+    
+    # Calculate MSE along spatial and channel dimensions  
+    mse = torch.mean((pred - target) ** 2, dim=[1, 2, 3])  # Shape: [B]  
+    
+    # Calculate PSNR  
+    psnr = 20 * torch.log10(max_val / torch.sqrt(mse + eps))  
+    
+    return psnr.item()
 
 def batch_SSIM(img, img_clean, multichannel=True):
     """Compute SSIM for image batch."""
@@ -35,8 +95,45 @@ def batch_SSIM(img, img_clean, multichannel=True):
     )
     SSIM = 0.0
     for i in range(Img.shape[0]):
-        SSIM += compare_ssim(Img_clean[i, ...], Img[i, ...], channel_axis=0)
+        SSIM += structural_similarity(Img_clean[i, ...], Img[i, ...], channel_axis=0)
     return round(SSIM / Img.shape[0], 4)
+
+def batch_ssim(pred, target):  
+    """Calculate SSIM between two image batches with automatic data range detection.  
+    
+    Args:  
+        pred (torch.Tensor): Predicted images [B, C, H, W]  
+        target (torch.Tensor): Target images [B, C, H, W]  
+        
+    Returns:  
+        torch.Tensor: SSIM value for each image in batch [B]  
+    """  
+    assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"  
+    
+    # Detect data range  
+    if pred.dtype in [torch.uint8, torch.int8]:  
+        data_range = 255  
+    else:  
+        # For float tensors, check if normalized [0,1] or [0,255]  
+        max_val = max(pred.max().item(), target.max().item())  
+        data_range = 255 if max_val > 1.1 else 1.0  
+        
+    # Convert to numpy and move channel dimension to end  
+    pred_np = pred.detach().cpu().numpy().transpose(0, 2, 3, 1)  # [B, H, W, C]  
+    target_np = target.detach().cpu().numpy().transpose(0, 2, 3, 1)  # [B, H, W, C]  
+    
+    # Calculate SSIM for each image in batch  
+    ssim_values = []  
+    for p, t in zip(pred_np, target_np):  
+        if p.shape[-1] == 1:  # Grayscale  
+            p = p.squeeze(-1)  
+            t = t.squeeze(-1)  
+        ssim_val = structural_similarity(p, t,   
+                       data_range=data_range,  
+                       channel_axis=-1 if p.ndim == 3 else None)  
+        ssim_values.append(ssim_val)  
+    
+    return np.mean(ssim_values)
 
 
 def batch_LPIPS(img, img_clean):
