@@ -74,14 +74,14 @@ def config():
 
 def main(args):
     # Create a hybrid refractive-diffractive lens
-    lens = HybridLens(filename="./lenses/hybridlens/a489_doe.json")
+    lens = HybridLens(lens_path="./lenses/hybridlens/a489_doe.json")
     lens.double()
 
     # PSF optimization loop to focus blue light
     optimizer = lens.get_optimizer(doe_lr=0.1, lens_lr=[1e-4, 1e-4, 1e-1, 1e-5])
     loss_fn = PSFLoss()
     for i in tqdm(range(100 + 1)):
-        psf = lens.psf(point=[0.0, 0.0, -10000.0], ks=101, wvln=0.489)
+        psf = lens.psf(points=[0.0, 0.0, -10000.0], ks=101, wvln=0.489)
 
         optimizer.zero_grad()
         loss = loss_fn(psf)

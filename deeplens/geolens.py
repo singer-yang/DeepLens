@@ -30,9 +30,9 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from .lens import Lens
-from .optics import DEPTH, EPSILON, GEO_SPP, SELLMEIER_TABLE, Ray
+from .optics import DEPTH, EPSILON, SELLMEIER_TABLE, SPP_CALC, SPP_PSF, Ray, PSF_KS
 from .optics.basics import (
-    COHERENT_SPP,
+    SPP_COHERENT,
     DEFAULT_WAVE,
     GEO_GRID,
     WAVE_RGB,
@@ -42,10 +42,10 @@ from .optics.materials import Material
 from .optics.monte_carlo import forward_integral
 from .optics.render_psf import render_psf_map
 from .optics.surfaces import (
-    Diffractive_GEO,
     Aperture,
     Aspheric,
     Cubic,
+    Diffractive_GEO,
     Plane,
     Spheric,
     ThinLens,
@@ -53,9 +53,10 @@ from .optics.surfaces import (
 from .optics.wave import AngularSpectrumMethod
 from .optics.waveoptics_utils import diff_float
 from .utils import (
-    compare_psnr,
-    compare_ssim,
+    batch_psnr,
+    batch_ssim,
     denormalize_ImageNet,
+    img2batch,
     normalize_ImageNet,
     set_logger,
 )
@@ -65,12 +66,7 @@ class GeoLens(Lens):
     """Geolens class. A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate."""
 
     def __init__(self, filename=None):
-        """Initialize Lensgroup.
-
-        Args:
-            filename (string): lens file.
-            sensor_res: (H, W)
-        """
+        """Initialize a geometric lens."""
         self.device = init_device()
 
         # Load lens file
@@ -191,6 +187,7 @@ class GeoLens(Lens):
     # ====================================================================================
     # Ray Sampling
     # ====================================================================================
+
     @torch.no_grad()
     def sample_parallel_2D(
         self,
@@ -403,7 +400,7 @@ class GeoLens(Lens):
         R=None,
         depth=-10.0,
         M=11,
-        spp=GEO_SPP,
+        spp=SPP_PSF,
         fov=10.0,
         forward=True,
         pupil=True,
@@ -638,6 +635,7 @@ class GeoLens(Lens):
     # ====================================================================================
     # Ray Tracing functions
     # ====================================================================================
+
     def trace(self, ray, lens_range=None, record=False):
         """General ray tracing function. Ray in and ray out.
 
@@ -794,232 +792,123 @@ class GeoLens(Lens):
     # ====================================================================================
     # Ray-tracing based rendering
     # ====================================================================================
-    @torch.no_grad()
-    def render_single_img(
-        self,
-        img_org,
-        depth=DEPTH,
-        spp=64,
-        unwarp=False,
-        save_name=None,
-        return_tensor=False,
-        noise=0,
-        method="ray_tracing",
-    ):
-        """Render a single image for visualization and debugging.
 
-            This function is designed non-differentiable. If want to use differentiable rendering, call self.render() function.
+    def render(self, img_obj, depth=DEPTH, method="raytracing", **kwargs):
+        """Differentiable image simulation.
+
+        Image simulation methods:
+            [1] PSF map block convolution.
+            [2] Ray tracing-based rendering.
+            [3] ...
 
         Args:
-            img_org (ndarray): ndarray read by opencv.
-            render_unwarp (bool, optional): _description_. Defaults to False.
-            depth (float, optional): _description_. Defaults to DEPTH.
-            save_name (string, optional): _description_. Defaults to None.
-
-        Returns:
-            ing_render (ndarray): rendered image. uint8 dtype and ndarray.
+            img_obj (tensor): Input image object in raw space. Shape of [N, C, H, W].
+            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            method (str, optional): Image simulation method. Defaults to "psf".
+            **kwargs: Additional arguments for different methods.
         """
-        if not isinstance(img_org, np.ndarray):
-            raise Exception(
-                "This function only supports ndarray input. If you want to render an image batch, use `render` function."
-            )
+        # Check sensor resolution
+        if not (
+            self.sensor_res[0] == img_obj.shape[-2]
+            and self.sensor_res[1] == img_obj.shape[-1]
+        ):
+            H, W = img_obj.shape[-2], img_obj.shape[-1]
+            self.change_sensor_res(sensor_res=(H, W))
 
-        # ==> Prepare sensor to match the image resolution
-        sensor_res = self.sensor_res
-        if len(img_org.shape) == 2:
-            rgb = False
-            H, W = img_org.shape
-            raise Exception("Monochrome image is not tested yet.")
-        elif len(img_org.shape) == 3:
-            rgb = True
-            H, W, C = img_org.shape
-            assert C == 3, "Only support RGB image, dtype should be ndarray."
-        self.prepare_sensor(sensor_res=[H, W])
-
-        img = (
-            torch.tensor((img_org / 255.0).astype(np.float32))
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-            .to(self.device)
-        )
-
-        if method == "ray_tracing":
-            # ==> Render object image by ray-tracing
-            scale = self.calc_scale_ray(depth=depth)
-            img = torch.flip(img, [-2, -1])
-            if rgb:
-                img_render = torch.zeros_like(img)
-                # Normal rendering
-                if spp <= 64:
-                    for i in range(3):
-                        ray = self.render_sample_ray(spp=spp, wvln=WAVE_RGB[i])
-                        ray, _, _ = self.trace(ray)
-                        img_render[:, i, :, :] = self.render_compute_image(
-                            img[:, i, :, :], depth, scale, ray
-                        )
-                # High-spp rendering
-                else:
-                    iter_num = int(spp // 64)
-                    for ii in range(iter_num):
-                        for i in range(3):
-                            ray = self.render_sample_ray(spp=64, wvln=WAVE_RGB[i])
-                            ray, _, _ = self.trace(ray)
-                            img_render[:, i, :, :] += self.render_compute_image(
-                                img[:, i, :, :], depth, scale, ray
-                            )
-                    img_render /= iter_num
-            else:
-                ray = self.render_sample_ray(spp=spp, wvln=DEFAULT_WAVE)
-                ray, _, _ = self.trace(ray)
-                img_render = self.render_compute_image(img, depth, scale, ray)
-
-        elif method == "psf":
-            psf_grid = 7
-            psf_ks = 21
-            psf_map = self.psf_map(grid=psf_grid, ks=psf_ks, depth=depth)
-            img_render = render_psf_map(img, psf_map, grid=psf_grid)
-
-        # ==> Unwarp to correct geometry distortion
-        if unwarp:
-            img_render = self.unwarp(img_render, depth)
-            if save_name is not None:
-                save_image(img_render, f"{save_name}_unwarped.png")
-
-        # ==> Add noise
-        if noise > 0:
-            img_render = img_render + torch.randn_like(img_render) * noise
-            img_render = torch.clamp(img_render, 0, 1)
-
-        if save_name is not None:
-            save_image(img_render, f"{save_name}.png")
-
-        # ==> Change the sensor resolution back
-        self.prepare_sensor(sensor_res=sensor_res)
-
-        if return_tensor:
-            return img_render
-        else:
-            # ==> Convert to uint8
-            img_render = (
-                img_render[0, ...]
-                .mul(255)
-                .add_(0.5)
-                .clamp_(0, 255)
-                .permute(1, 2, 0)
-                .to("cpu", torch.uint8)
-                .numpy()
-            )
-            return img_render
-
-    def render(
-        self,
-        img,
-        depth=DEPTH,
-        spp=64,
-        psf_grid=9,
-        psf_ks=101,
-        noise=0.0,
-        method="ray_tracing",
-    ):
-        """This function simulate the camera-captured image batch.
-
-            I am planning to support 2 kinds of rendering methods:
-                1. ray tracing based rendering
-                2. PSF based rendering
-
-            We should also implement non-differentiable, but more accurate rendering.
-                1. high spp
-                2. sensor noise and vignetting
-                3. bayer pattern
-                4. ISP
-
-        Args:
-            img (tensor): [N, C, H, W] shape image batch.
-            depth (float, optional): depth of object image. Defaults to DEPTH.
-            spp (int, optional): sample per pixel. Defaults to 64.
-            grid (int, optional): psf grid number. Defaults to 9.
-            method (str, optional): rendering method. Defaults to 'ray_tracing'.
-
-        Returns:
-            img_render (tensor): [N, C, H, W] shape rendered image batch.
-        """
-        assert (
-            self.sensor_res[0] == img.shape[-2] and self.sensor_res[1] == img.shape[-1]
-        ), "Sensor resolution should match image resolution."
-
-        if method == "ray_tracing":
-            img = torch.flip(img, [-2, -1])
-            scale = self.calc_scale_pinhole(depth=depth)
-
-            img_render = torch.zeros_like(img)
-            for i in range(3):
-                ray = self.render_sample_ray(spp=spp, wvln=WAVE_RGB[i])
-                ray = self.trace2obj(ray)
-                img_render[:, i, :, :] = self.render_compute_image(
-                    img[:, i, :, :], depth, scale, ray
+        # Differentiable image simulation
+        if method == "psf":
+            if "psf_grid" in kwargs and "psf_ks" in kwargs:
+                psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
+                img_render = self.render_psf(
+                    img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
                 )
+            else:
+                img_render = self.render_psf(img_obj, depth=depth)
 
-        elif method == "psf":
-            # Note: larger psf_grid and psf_ks are better
-            psf_map = self.psf_map(grid=psf_grid, ks=psf_ks, depth=depth)
-            img_render = render_psf_map(img, psf_map, grid=psf_grid)
+        elif method == "raytracing":
+            if "spp" in kwargs:
+                spp = kwargs["spp"]
+                img_render = self.render_raytracing(img_obj, depth=depth, spp=spp)
+            else:
+                img_render = self.render_raytracing(img_obj, depth=depth)
 
         else:
-            raise Exception("Unknown method.")
-
-        # Add sensor noise
-        if noise > 0:
-            img_render = img_render + torch.randn_like(img_render) * noise
+            raise Exception(f"Image simulation method {method} is not supported.")
 
         return img_render
 
-    def render_sample_ray(self, spp=64, wvln=DEFAULT_WAVE):
-        """Ray tracing rendering step1: sample ray and go through lens."""
-        ray = self.sample_sensor(spp=spp, pupil=True, wvln=wvln)
-        return ray
+    def render_raytracing(self, img, depth=DEPTH, spp=64, vignetting=False):
+        """Render RGB image using ray tracing method.
+        
+        Args:
+            img (tensor): RGB image tensor. Shape of [N, 3, H, W].
+            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            spp (int, optional): Sample per pixel. Defaults to 64.
+            vignetting (bool, optional): whether to consider vignetting effect. Defaults to False.
 
-    def render_compute_image(self, img, depth, scale, ray):
-        """Ray tracing rendering step2: ray and texture plane intersection and computer rendered image.
-
-        Only receive [N, C, H, W] or [N, H, W] tensor in the future
-
-        With interpolation. Can either receive tensor or ndarray
-
-        This function receives [spp, W, H, 3] shape ray, returns [W, H, 3] shape sensor output.
-
-        backpropagation, I -> w_i -> u -> p -> ray
-
-        If render realistic images:
-            1, noise
-            2, vignetting
-            3, each ray has equal weight
+        Returns:
+            img_render (tensor): Rendered RGB image tensor. Shape of [N, 3, H, W].
         """
-        # ====> Preparetion
-        # if img is [N, C, H, W] or [N, H, W] tensor, what situation will [N, H, W] occur?
+        img_render = torch.zeros_like(img)
+        for i in range(3):
+            img_render[:, i, :, :] = self.render_raytracing_mono(
+                img=img[:, i, :, :],
+                wvln=WAVE_RGB[i],
+                depth=depth,
+                spp=spp,
+                vignetting=vignetting,
+            )
+
+        return img_render
+
+    def render_raytracing_mono(self, img, wvln, depth=DEPTH, spp=64, vignetting=False):
+        """Render monochrome image using ray tracing method.
+
+        Args:
+            img (tensor): Monochrome image tensor. Shape of [N, 1, H, W] or [N, H, W].
+            wvln (float): Wavelength of the light.
+            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            spp (int, optional): Sample per pixel. Defaults to 64.
+
+        Returns:
+            img_mono (tensor): Rendered monochrome image tensor. Shape of [N, 1, H, W] or [N, H, W].
+        """
+        img = torch.flip(img, [-2, -1])
+        scale = self.calc_scale_pinhole(depth=depth)
+        ray = self.sample_sensor(spp=spp, wvln=wvln)
+        ray = self.trace2obj(ray)
+        img_mono = self.render_compute_image(
+            img, depth=depth, scale=scale, ray=ray, vignetting=vignetting
+        )
+        return img_mono
+
+    def render_compute_image(self, img, depth, scale, ray, vignetting=False):
+        """Computes the intersection points between rays and the object image plane, then generates the rendered image following rendering equation.
+
+        Back-propagation gradient flow: image -> w_i -> u -> p -> ray -> surface
+
+        Args:
+            img (tensor): [N, C, H, W] or [N, H, W] shape image tensor.
+            depth (float): depth of the object.
+            scale (float): scale factor.
+            ray (Ray object): Ray object. Shape [spp, H, W].
+            vignetting (bool): whether to consider vignetting effect.
+
+        Returns:
+            image (tensor): [N, C, H, W] or [N, H, W] shape rendered image tensor.
+        """
+        # Preparetion (img is [N, C, H, W] or [N, H, W] tensor)
         if torch.is_tensor(img):
             H, W = img.shape[-2:]
             if len(img.shape) == 4:
-                # we MUST use replicate padding.
                 img = F.pad(img, (1, 1, 1, 1), "replicate")
             else:
                 img = F.pad(img.unsqueeze(1), (1, 1, 1, 1), "replicate").squeeze(1)
             # img = F.pad(img, (1,1,1,1), "constant")    #constant padding can work for arbitary dmensions
-
-        elif isinstance(img, np.ndarray):  # if img is [H, W, C] ndarray
-            if img.dtype == np.uint8:
-                img = img / 255.0
-                img = img.astype(np.float32)
-            if img.ndim == 2:
-                img = np.expand_dims(img, axis=2)
-
-            H, W = img.shape[:2]
-            img = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).to(self.device)
-            img = F.pad(img, (1, 1, 1, 1), "replicate")
-
         else:
-            raise Exception("Input image should be tensor or ndarray.")
+            raise Exception("Input image should be Tensor.")
 
-        # ====> Scale scene image to get 1:1 alignment.
+        # Scale object image physical size to get 1:1 pixel-pixel alignment with sensor image
         ray = ray.propagate_to(depth)
         p = ray.o[..., :2]
         pixel_size = scale * self.pixel_size
@@ -1029,36 +918,99 @@ class GeoLens(Lens):
             * (torch.abs(p[..., 1] / pixel_size) < (H / 2 + 1))
         )
 
-        # ====> Convert to uv coordinates
-        # convert to pixel position in texture(image) coordinate. we do padding so texture corrdinates should add 1
+        # Convert to uv coordinates in object image coordinate
+        # (we do padding so corrdinates should add 1)
         u = torch.clamp(W / 2 + p[..., 0] / pixel_size, min=-0.99, max=W - 0.01)
         v = torch.clamp(H / 2 + p[..., 1] / pixel_size, min=0.01, max=H + 0.99)
 
-        # (idx_i, idx_j) denotes left-top pixel (reference pixel), we donot need index to preserve gradient
-        # idx +1 because we did padding
+        # (idx_i, idx_j) denotes left-top pixel (reference pixel). Index does not store gradients
+        # (idx + 1 because we did padding)
         idx_i = H - v.ceil().long() + 1
         idx_j = u.floor().long() + 1
 
-        # gradients are stored in weight parameters
+        # Gradients are stored in interpolation weight parameters
         w_i = v - v.floor().long()
         w_j = u.ceil().long() - u
 
-        # ====> Bilinear interpolation
-        # img shape [B, N, H', W'], idx_i shape [spp, H, W], w_i shape [spp, H, W], irr_img shape [N, C, spp, H, W]
+        # Bilinear interpolation
+        # (img shape [B, N, H', W'], idx_i shape [spp, H, W], w_i shape [spp, H, W], irr_img shape [N, C, spp, H, W])
         irr_img = img[..., idx_i, idx_j] * w_i * w_j
         irr_img += img[..., idx_i + 1, idx_j] * (1 - w_i) * w_j
         irr_img += img[..., idx_i, idx_j + 1] * w_i * (1 - w_j)
         irr_img += img[..., idx_i + 1, idx_j + 1] * (1 - w_i) * (1 - w_j)
 
-        image = torch.sum(irr_img * ray.ra, -3) / (
-            torch.sum(ray.ra, -3) + EPSILON
-        )  # no vignetting
+        # Computation image
+        if not vignetting:
+            image = torch.sum(irr_img * ray.ra, -3) / (torch.sum(ray.ra, -3) + EPSILON)
+        else:
+            image = torch.sum(irr_img * ray.ra, -3) / torch.numel(ray.ra)
 
         return image
+
+    @torch.no_grad()
+    def analysis_rendering(
+        self,
+        img_org,
+        depth=DEPTH,
+        spp=64,
+        unwarp=False,
+        save_name=None,
+        noise=0.0,
+        method="raytracing",
+    ):
+        """Render a single image for visualization and analysis. This function is designed to be non-differentiable. If want to use differentiable rendering, call self.render() function.
+
+        Args:
+            img_org (tensor): [H, W, 3] shape image.
+            depth (float, optional): depth of object image. Defaults to DEPTH.
+            spp (int, optional): sample per pixel. Defaults to 64.
+            unwarp (bool, optional): unwarp the image. Defaults to False.
+            save_name (str, optional): save name. Defaults to None.
+            noise (float, optional): sensor noise. Defaults to 0.0.
+            method (str, optional): rendering method. Defaults to 'raytracing'.
+        """
+        # Change sensor resolution to match the image
+        sensor_res_original = self.sensor_res
+        img = img2batch(img_org).to(self.device)
+        self.change_sensor_res(sensor_res=img.shape[-2:])
+
+        # Image rendering
+        img_render = self.render(img, depth=depth, method=method, spp=spp)
+
+        # Add noise (a very simple Gaussian noise model)
+        if noise > 0:
+            img_render = img_render + torch.randn_like(img_render) * noise
+            img_render = torch.clamp(img_render, 0, 1)
+
+        # Compute PSNR and SSIM
+        render_psnr = round(batch_psnr(img, img_render), 3)
+        render_ssim = round(batch_ssim(img, img_render), 3)
+        print(f"Rendered image: PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}")
+
+        if save_name is not None:
+            save_image(img_render, f"{save_name}.png")
+
+        # Unwarp to correct geometry distortion
+        if unwarp:
+            img_render = self.unwarp(img_render, depth)
+
+            # Compute PSNR and SSIM
+            render_psnr = round(batch_psnr(img, img_render), 3)
+            render_ssim = round(batch_ssim(img, img_render), 3)
+            print(f"Rendered image: PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}")
+
+            if save_name is not None:
+                save_image(img_render, f"{save_name}_unwarped.png")
+
+        # Change the sensor resolution back
+        self.change_sensor_res(sensor_res=sensor_res_original)
+
+        return img_render
 
     # ====================================================================================
     # PSF and spot diagram (incoherent ray tracing)
     # ====================================================================================
+
     @torch.no_grad()
     def psf_center(self, point, method="chief_ray"):
         """Compute reference PSF center (flipped to match the original point, green light) for given point source.
@@ -1071,7 +1023,7 @@ class GeoLens(Lens):
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray. Distortion is allowed.
-            ray = self.sample_from_points(point, spp=GEO_SPP, shrink_pupil=True)
+            ray = self.sample_from_points(point, spp=SPP_CALC, shrink_pupil=True)
             ray = self.trace2sensor(ray)
             assert (ray.ra == 1).any(), "No sampled rays is valid."
             psf_center = (ray.o * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.unsqueeze(
@@ -1091,12 +1043,12 @@ class GeoLens(Lens):
 
         return psf_center
 
-    def psf(self, points, ks=31, wvln=DEFAULT_WAVE, spp=GEO_SPP, center=True):
+    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, center=True):
         """Single wvln incoherent PSF calculation.
 
         Args:
             points (Tnesor): Normalized point source position. Shape of [N, 3], x, y in range [-1, 1], z in range [-Inf, 0].
-            kernel_size (int, optional): Output kernel size. Defaults to 7.
+            kernel_size (int, optional): Output kernel size. Defaults to 51.
             spp (int, optional): Sample per pixel. For diff ray tracing, usually kernel_size^2. Defaults to 2048.
             center (bool, optional): Use spot center as PSF center.
 
@@ -1151,38 +1103,17 @@ class GeoLens(Lens):
 
         return psf
 
-    def psf_rgb(self, points, ks=31, spp=GEO_SPP, center=True):
-        """Compute RGB point PSF. This function is differentiable.
-
-        Args:
-            point (Tensor): Shape of [N, 3], point is in object space, normalized.
-            ks (int, optional): Output kernel size. Defaults to 7.
-            spp (int, optional): Sample per pixel. Defaults to 2048.
-            center (bool, optional): Use spot center as PSF center.
-
-        Returns:
-            psf: Shape of [N, 3, ks, ks] or [3, ks, ks].
-        """
-        psfs = []
-        for wvln in WAVE_RGB:
-            psfs.append(
-                self.psf(points=points, wvln=wvln, ks=ks, spp=spp, center=center)
-            )
-
-        psf = torch.stack(psfs, dim=-3)  # shape [3, ks, ks] or [N, 3, ks, ks]
-        return psf
-
     def psf_map(
-        self, depth=DEPTH, grid=7, ks=101, spp=GEO_SPP, wvln=DEFAULT_WAVE, center=True
+        self, depth=DEPTH, grid=7, ks=PSF_KS, spp=SPP_PSF, wvln=DEFAULT_WAVE, center=True
     ):
-        """Compute PSF map at a given depth.
+        """Computes the PSF map at a specified depth. This implementation overrides the base method to improve efficiency through parallel computation.
 
         Args:
+            depth (float, optional): Depth of the point source plane. Defaults to DEPTH.
             grid (int, optional): Grid size. Defaults to 7.
             ks (int, optional): Kernel size. Defaults to 51.
-            depth (float, optional): Depth of the point source plane. Defaults to DEPTH.
-            center (bool, optional): Use spot center as PSF center. Defaults to True.
             spp (int, optional): Sample per pixel. Defaults to None.
+            center (bool, optional): Use spot center as PSF center. Defaults to True.
 
         Returns:
             psf_map: Shape of [grid*ks, grid*ks].
@@ -1198,30 +1129,6 @@ class GeoLens(Lens):
         psf_map = make_grid(psfs, nrow=grid, padding=0)[
             0, :, :
         ]  # shape [grid*ks, grid*ks]
-        return psf_map
-
-    def psf_map_rgb(self, depth=DEPTH, grid=7, ks=101, spp=GEO_SPP, center=True):
-        """Compute RGB PSF map at a given depth.
-
-            Now used for (1) rendering, (2) draw PSF map
-
-        Args:
-            grid (int, optional): Grid size. Defaults to 7.
-            ks (int, optional): Kernel size. Defaults to 51.
-            depth (float, optional): Depth of the point source plane. Defaults to DEPTH.
-            center (bool, optional): Use spot center as PSF center. Defaults to True.
-            spp (int, optional): Sample per pixel. Defaults to None.
-
-        Returns:
-            psf_map: Shape of [3, grid*ks, grid*ks].
-        """
-        psf_maps = []
-        for wvln in WAVE_RGB:
-            psf_map = self.psf_map(
-                grid=grid, ks=ks, wvln=wvln, depth=depth, spp=spp, center=center
-            )
-            psf_maps.append(psf_map)
-        psf_map = torch.stack(psf_maps, dim=0)  # shape [3, grid*ks, grid*ks]
         return psf_map
 
     @torch.no_grad()
@@ -1280,7 +1187,7 @@ class GeoLens(Lens):
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
 
         # Point center determined by green light
-        ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=DEFAULT_WAVE)
+        ray = self.sample_from_points(o=point_obj, spp=SPP_PSF, wvln=DEFAULT_WAVE)
         ray = self.trace2sensor(ray)
         pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(
             0
@@ -1290,7 +1197,7 @@ class GeoLens(Lens):
         rms = []
         for wvln in WAVE_RGB:
             # Trace rays to sensor plane
-            ray = self.sample_from_points(o=point_obj, spp=GEO_SPP, wvln=wvln)
+            ray = self.sample_from_points(o=point_obj, spp=SPP_PSF, wvln=wvln)
             ray = self.trace2sensor(ray)
 
             # Calculate RMS error for different FoVs
@@ -1314,7 +1221,8 @@ class GeoLens(Lens):
     # ====================================================================================
     # Coherent ray tracing
     # ====================================================================================
-    def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=COHERENT_SPP):
+
+    def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
         """Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing. The wavefront has the same size as image sensor.
 
             This function is differentiable.
@@ -1375,7 +1283,7 @@ class GeoLens(Lens):
 
         return wavefront, psf_center
 
-    def psf_coherent(self, point, ks=101, wvln=DEFAULT_WAVE, spp=COHERENT_SPP):
+    def psf_coherent(self, point, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
         """Single point monochromatic PSF using ray-wave model.
 
         Steps:
@@ -1569,29 +1477,36 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def calc_foc_dist(self, wvln=DEFAULT_WAVE):
-        """Compute the focus distance (object space) of the lens.
+        """Compute the focus distance (object space) of the lens. Ray starts from sensor and trace to the object space.
 
-        Rays start from sensor and trace to the object space, the focus distance is negative.
+        Returns:
+            focus_dist: Focus distance in object space. Negative value.
         """
-        # => Sample point source rays from sensor center
+        # Sample point source rays from sensor center
         o1 = torch.tensor([0, 0, self.d_sensor.item()], device=self.device).repeat(
-            GEO_SPP, 1
+            SPP_CALC, 1
         )
-        # A simple method is to sample from the first surface.
-        o2 = self.surfaces[0].surface_sample(GEO_SPP)
-        o2 *= 0.2  # Shrink sample region
+        
+        # Sample the first surface as pupil
+        o2 = self.surfaces[0].surface_sample(SPP_CALC)
+        o2 *= 0.25  # Shrink sample region to improve accuracy
         d = o2 - o1
         ray = Ray(o1, d, wvln, device=self.device)
 
-        # => Trace rays to the object space and compute focus distance
+        # Trace rays to object space
         ray, _, _ = self.trace(ray)
-        # The solution for the nearest distance.
+        
+        # Optical axis intersection
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
         focus_p = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.ra > 0].cpu().numpy()
         focus_p = focus_p[~np.isnan(focus_p) & (focus_p < 0)]
-        focus_dist = math.mean(focus_p)
+
+        if len(focus_p) > 0:
+            focus_dist = float(np.mean(focus_p))
+        else:
+            raise Exception("No valid focus distance is found.")
 
         return focus_dist
 
@@ -1600,7 +1515,7 @@ class GeoLens(Lens):
         """Calculate in-focus sensor plane."""
         # Trace rays and compute in-focus sensor position
         ray = self.sample_parallel_2D(
-            R=self.surfaces[0].r * 0.5, M=GEO_SPP, wvln=DEFAULT_WAVE
+            R=self.surfaces[0].r * 0.5, M=SPP_CALC, wvln=DEFAULT_WAVE
         )
         ray, _, _ = self.trace(ray)
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
@@ -1615,7 +1530,7 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def refocus_inf(self):
-        """Shift sensor to get the best center focusing."""
+        """Move sensor to get the infinite focusing."""
         d_sensor_new = self.foc_plane()
 
         # Update sensor position
@@ -1632,7 +1547,7 @@ class GeoLens(Lens):
         In DSLR, phase detection autofocus (PDAF) is a popular and efficient method. But here we simplify the problem by calculating the in-focus position of green light.
         """
         # Trace green light
-        o = self.surfaces[0].surface_sample(GEO_SPP)
+        o = self.surfaces[0].surface_sample(SPP_CALC)
         d = o - torch.tensor([0, 0, depth]).to(self.device)
         ray = Ray(o, d, device=self.device)
         ray, _, _ = self.trace(ray)
@@ -1666,15 +1581,15 @@ class GeoLens(Lens):
         angel, output rays should be parallel and the angle is half of fov.
         """
         # Sample rays going out from edge of sensor, shape [M, 3]
-        o1 = torch.zeros([GEO_SPP, 3])
-        o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(GEO_SPP, 1)
+        o1 = torch.zeros([SPP_CALC, 3])
+        o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
 
         # Option 1: sample second points on exit pupil
         # pupilz, pupilx = self.exit_pupil()
-        # x2 = torch.linspace(-pupilx, pupilx, GEO_SPP)
+        # x2 = torch.linspace(-pupilx, pupilx, SPP_CALC)
         # z2 = torch.full_like(x2, pupilz)
         # Option 2: sample second points on last surface
-        x2 = torch.linspace(0, self.surfaces[-1].r, GEO_SPP)
+        x2 = torch.linspace(0, self.surfaces[-1].r, SPP_CALC)
         z2 = torch.full_like(x2, self.surfaces[-1].d.item())
 
         y2 = torch.full_like(x2, 0)
@@ -1837,7 +1752,7 @@ class GeoLens(Lens):
         return self.entrance_pupil(entrance=False, shrink_pupil=shrink_pupil)
 
     @torch.no_grad()
-    def entrance_pupil(self, M=128, entrance=True, shrink_pupil=False):
+    def entrance_pupil(self, M=SPP_CALC, entrance=True, shrink_pupil=False):
         """Sample **backward** rays, return z coordinate and radius of entrance pupil. Entrance pupil: how many rays can come from object space to sensor.
 
         Reference: https://en.wikipedia.org/wiki/Entrance_pupil "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
@@ -1946,8 +1861,8 @@ class GeoLens(Lens):
         t = x[:, 1]
 
         # Calculate the intersection points using either rays
-        P_i = Oi + t.unsqueeze(-1) * Di  # Shape: [N*(N-1)/2, 2]
-        P_j = Oj + s.unsqueeze(-1) * Dj  # Shape: [N*(N-1)/2, 2]
+        P_i = Oi + s.unsqueeze(-1) * Di  # Shape: [N*(N-1)/2, 2]
+        P_j = Oj + t.unsqueeze(-1) * Dj  # Shape: [N*(N-1)/2, 2]
 
         # Take the average to mitigate numerical precision issues
         P = (P_i + P_j) / 2
@@ -2048,6 +1963,9 @@ class GeoLens(Lens):
             ray = self.sample_parallel_2D(
                 view=np.rad2deg(view), M=GEO_GRID, entrance_pupil=True
             )
+            # ray = self.sample_parallel_2D(
+            #     view=np.rad2deg(view), M=SPP_CALC, entrance_pupil=True
+            # )
 
             ps, oss = self.trace2sensor(ray=ray, record=True)
             for i in surface_range:
@@ -2155,16 +2073,28 @@ class GeoLens(Lens):
     def analysis(
         self,
         save_name="./lens",
-        render=False,
         multi_plot=False,
         plot_invalid=True,
         zmx_format=True,
         depth=DEPTH,
+        render=False,
         render_unwarp=False,
         lens_title=None,
     ):
-        """Analyze the optical lens."""
-        # Draw lens geometry and ray path
+        """Analyze the optical lens.
+        
+        Args:
+            save_name (str): save name.
+            multi_plot (bool): plot RGB seperately.
+            plot_invalid (bool): plot invalid rays.
+            zmx_format (bool): plot in Zemax format.
+            depth (float): object depth distance.
+            render (bool): whether render an image.
+            render_unwarp (bool): whether unwarp the rendered image.
+            lens_title (str): lens title
+        """
+
+        # Draw lens layout and ray path
         self.draw_layout(
             filename=save_name,
             multi_plot=multi_plot,
@@ -2189,7 +2119,7 @@ class GeoLens(Lens):
         # Render an image, compute PSNR and SSIM
         if render:
             img_org = cv.cvtColor(cv.imread("./datasets/IQ/img1.png"), cv.COLOR_BGR2RGB)
-            img_render = self.render_single_img(
+            self.analysis_rendering(
                 img_org,
                 depth=depth,
                 spp=128,
@@ -2197,12 +2127,6 @@ class GeoLens(Lens):
                 save_name=f"{save_name}_render",
                 noise=0.01,
             )
-
-            render_psnr = round(compare_psnr(img_org, img_render, data_range=255), 4)
-            render_ssim = round(
-                compare_ssim(img_org, img_render, channel_axis=2, data_range=255), 4
-            )
-            print(f"Rendered image: PSNR={render_psnr}, SSIM={render_ssim}")
 
     @torch.no_grad()
     def analysis_end2end(
@@ -2239,16 +2163,12 @@ class GeoLens(Lens):
         save_image(img_rec, f"{save_name}_rec.png")
 
         if img_gt is not None:
-            render_psnr = round(compare_psnr(img_org, img_raw, data_range=255), 4)
-            render_ssim = round(
-                compare_ssim(img_org, img_raw, channel_axis=2, data_range=255), 4
-            )
+            render_psnr = batch_psnr(img_org, img_raw)
+            render_ssim = batch_ssim(img_org, img_raw)
             print(f"Rendered image: PSNR={render_psnr}, SSIM={render_ssim}")
 
-            rec_psnr = round(compare_psnr(img_org, img_rec, data_range=255), 4)
-            rec_ssim = round(
-                compare_ssim(img_org, img_rec, channel_axis=2, data_range=255), 4
-            )
+            rec_psnr = batch_psnr(img_gt, img_rec)
+            rec_ssim = batch_ssim(img_gt, img_rec)
             print(f"Rec image: PSNR={rec_psnr}, SSIM={rec_ssim}")
 
     @torch.no_grad()
@@ -2462,7 +2382,7 @@ class GeoLens(Lens):
             # DOE
             if isinstance(s, Diffractive_GEO):
                 # DOE
-                r = torch.linspace(-s.r, s.r, s.APERTURE_SAMPLING, device=self.device)
+                r = torch.linspace(-s.r, s.r, 128, device=self.device)
                 max_offset = self.d_sensor.item() / 100
                 z = (
                     s.surface(r, torch.zeros_like(r), max_offset=max_offset)
@@ -2494,7 +2414,7 @@ class GeoLens(Lens):
             # Lens surface
             else:
                 # aperture sampling
-                r = torch.linspace(-s.r, s.r, s.APERTURE_SAMPLING, device=self.device)
+                r = torch.linspace(-s.r, s.r, 128, device=self.device)
                 z = s.surface_with_offset(
                     r, torch.zeros(len(r), device=self.device)
                 )  # draw surface
@@ -2550,7 +2470,7 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def draw_psf_radial(
-        self, M=3, depth=DEPTH, ks=51, log_scale=False, save_name="./psf_radial.png"
+        self, M=3, depth=DEPTH, ks=PSF_KS, log_scale=False, save_name="./psf_radial.png"
     ):
         """Draw radial PSF (45 deg). Will draw M PSFs, each of size ks x ks."""
         x = torch.linspace(0, 1, M)
@@ -2739,7 +2659,7 @@ class GeoLens(Lens):
         M = 15
         scale = self.calc_scale_pinhole(depth)
         ray = self.sample_point_source(
-            M=M, spp=GEO_SPP, depth=depth, R=self.sensor_size[0] / 2 * scale, pupil=True
+            M=M, spp=SPP_CALC, depth=depth, R=self.sensor_size[0] / 2 * scale, pupil=True
         )
         o1 = ray.o.detach().cpu()
         x1 = o1[0, :, :, 0] / scale
@@ -2821,6 +2741,7 @@ class GeoLens(Lens):
     # ====================================================================================
     # Loss function
     # ====================================================================================
+
     def loss_infocus(self, bound=0.005):
         """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
 
@@ -2860,7 +2781,7 @@ class GeoLens(Lens):
         for wvln in WAVE_RGB:
             ray = self.sample_point_source(
                 M=H,
-                spp=GEO_SPP,
+                spp=SPP_PSF,
                 depth=depth,
                 R=self.sensor_size[0] / 2 * scale,
                 pupil=True,
@@ -3290,9 +3211,6 @@ class GeoLens(Lens):
                                 mat2=surf_dict["mat2"],
                             )
                         else:
-                            raise Exception(
-                                "ROC not found. This case will be removed in the future."
-                            )
                             s = Aspheric(
                                 c=surf_dict["c"],
                                 r=surf_dict["r"],
@@ -3362,7 +3280,7 @@ class GeoLens(Lens):
         data["foclen"] = round(self.foclen, 4)
         data["fnum"] = round(self.fnum, 4)
         data["r_sensor"] = self.r_sensor
-        data["d_sensor"] = round(self.d_sensor.item(), 4)
+        data["(d_sensor)"] = round(self.d_sensor.item(), 4)
         data["(sensor_size)"] = [round(i, 4) for i in self.sensor_size]
         data["surfaces"] = []
         for i, s in enumerate(self.surfaces):
@@ -3526,8 +3444,9 @@ SURF 0
 
 
 # ====================================================================================
-# Other functions.
+# Useful functions
 # ====================================================================================
+
 def create_lens(
     foclen,
     fov,

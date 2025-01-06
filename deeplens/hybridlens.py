@@ -24,7 +24,8 @@ import torch.nn.functional as F
 from .geolens import GeoLens
 from .lens import Lens
 from .optics.basics import (
-    COHERENT_SPP,
+    SPP_COHERENT,
+    PSF_KS,
     DEFAULT_WAVE,
     WAVE_RGB,
 )
@@ -219,13 +220,13 @@ class HybridLens(Lens):
     # =====================================================================
     # PSF-related functions
     # =====================================================================
-    def doe_field(self, point, wvln=DEFAULT_WAVE, spp=COHERENT_SPP):
+    def doe_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
         """Compute the complex wavefront at the DOE plane using coherent ray tracing. This function reimplements geolens.pupil_field() by changing the wavefront computation position to the last surface.
 
         Args:
             point (torch.Tensor): Tensor of shape (3,) representing the point source position. Defaults to torch.tensor([0.0, 0.0, -10000.0]).
             wvln (float): Wavelength. Defaults to DEFAULT_WAVE.
-            spp (int): Samples per pixel. Must be >= 1,000,000 for accurate simulation. Defaults to COHERENT_SPP.
+            spp (int): Samples per pixel. Must be >= 1,000,000 for accurate simulation. Defaults to SPP_COHERENT.
 
         Returns:
 
@@ -282,9 +283,9 @@ class HybridLens(Lens):
     def psf(
         self,
         points=[0.0, 0.0, -10000.0],
-        ks=101,
+        ks=PSF_KS,
         wvln=DEFAULT_WAVE,
-        spp=COHERENT_SPP,
+        spp=SPP_COHERENT,
     ):
         """Single point monochromatic PSF using ray-wave model.
 
@@ -293,7 +294,7 @@ class HybridLens(Lens):
             2, propagate through DOE to sensor plane, calculate intensity PSF, crop the valid region and normalize.
 
         Args:
-            point (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).
+            points (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).
             ks (int, optional): size of the PSF patch. Defaults to 101.
             wvln (float, optional): wvln. Defaults to 0.589.
             spp (int, optional): number of rays to sample. Defaults to 1000000.

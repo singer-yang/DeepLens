@@ -27,11 +27,11 @@ class Surface(DeepObj):
 
         self.mat2 = Material(mat2)
 
+        # Surface precision +0.000/-0.010 mm is regarded as high quality by Edmund Optics. Reference: https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-specifications/?srsltid=AfmBOorBa-0zaOcOhdQpUjmytthZc07oFlmPW_2AgaiNHHQwobcAzWII
         self.NEWTONS_MAXITER = 10
-        self.NEWTONS_TOLERANCE_TIGHT = 10e-6  # in [mm], here is 10 [nm]
-        self.NEWTONS_TOLERANCE_LOOSE = 50e-6  # in [mm], here is 50 [nm]
+        self.NEWTONS_TOLERANCE_TIGHT = 25e-6  # [mm], here is 25 [nm]
+        self.NEWTONS_TOLERANCE_LOOSE = 50e-6  # [mm], here is 50 [nm]
         self.NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in Newton's iteration
-        self.APERTURE_SAMPLING = 257
 
         self.to(device)
 
@@ -40,6 +40,8 @@ class Surface(DeepObj):
     # ==============================
     def ray_reaction(self, ray, n1, n2, refraction=True):
         """Compute output ray after intersection and refraction with a surface."""
+        # ray = self.to_local_coord(ray)
+
         # Intersection
         ray = self.intersect(ray, n1)
 
@@ -50,12 +52,14 @@ class Surface(DeepObj):
             # Reflection
             ray = self.reflect(ray)
 
+        # ray = self.to_global_coord(ray)
         return ray
 
     def intersect(self, ray, n):
         """Solve ray-surface intersection and update ray position and opl.
 
         Args:
+            ray (Ray): input ray.
             n (float, optional): refractive index. Defaults to 1.0.
         """
         # Solve intersection time t by Newton's method
@@ -84,12 +88,10 @@ class Surface(DeepObj):
         """
         d_surf = self.d + self.d_perturb
 
-        # 1. inital guess of t
-        t0 = (d_surf - ray.o[..., 2]) / ray.d[
-            ..., 2
-        ]  # if the shape of aspheric surface is strange, will hit the back surface region instead
+        # 1. Inital guess of t. (If the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error)
+        t0 = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
 
-        # 2. use Newton's method to update t to find the intersection points (non-differentiable)
+        # 2. Non-differentiable Newton's method to update t and find the intersection points
         with torch.no_grad():
             it = 0
             t = t0  # initial guess of t
@@ -108,14 +110,14 @@ class Surface(DeepObj):
                 dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y)
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
-                    ft / (dfdt + 1e-9),
+                    ft / (dfdt + 1e-12),
                     -self.NEWTONS_STEP_BOUND,
                     self.NEWTONS_STEP_BOUND,
                 )
 
             t1 = t - t0
 
-        # 3. do one more Newton iteration to gain gradients
+        # 3. One more Newton iteration (differentiable) to gain gradients
         t = t0 + t1
 
         new_o = ray.o + ray.d * t.unsqueeze(-1)
@@ -130,16 +132,15 @@ class Surface(DeepObj):
             ft / (dfdt + 1e-9), -self.NEWTONS_STEP_BOUND, self.NEWTONS_STEP_BOUND
         )
 
-        # determine valid rays
+        # 4. Determine valid solutions
         with torch.no_grad():
+            # Solution within the surface boundary and ray doesn't go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.valid_within_boundary(new_x, new_y) & (ray.ra > 0)
+            valid = self.valid_within_boundary(new_x, new_y) & (ray.ra > 0) & (t > 0)
+
+            # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
-            valid = (
-                valid
-                & (torch.abs(ft.detach()) < self.NEWTONS_TOLERANCE_TIGHT)
-                & (t > 0)
-            )  # points valid & points accurate & donot go back
+            valid = valid & (torch.abs(ft) < self.NEWTONS_TOLERANCE_TIGHT)
 
         return t, valid
 
@@ -186,6 +187,7 @@ class Surface(DeepObj):
         return ray
 
     def reflect(self, ray):
+        """Calculate reflected ray."""
         # Compute normal vectors
         n = self.normal(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
@@ -200,16 +202,21 @@ class Surface(DeepObj):
         return ray
 
     def normal(self, ray):
-        """Calculate normal vector of the surface.
-
-        Normal vector points to the left by default.
-        """
+        """Calculate surface normal vector at the intersection point. Normal vector points to the left by default."""
         x, y = ray.o[..., 0], ray.o[..., 1]
         nx, ny, nz = self.dfdxyz(x, y)
         n = torch.stack((nx, ny, nz), axis=-1)
         n = F.normalize(n, p=2, dim=-1)
 
         return n
+
+    def to_local_coord(self, ray):
+        """Transform ray to local coordinate system."""
+        raise NotImplementedError()
+
+    def to_global_coord(self, ray):
+        """Transform ray to global coordinate system."""
+        raise NotImplementedError()
 
     # =================================================================================
     # Calculation-related methods
@@ -1628,6 +1635,9 @@ class Plane(Surface):
 
     def dgd(self, x, y):
         return torch.zeros_like(x), torch.zeros_like(x)
+
+    def d2gd(self, x, y):
+        return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
 
     def surf_dict(self):
         surf_dict = {
