@@ -371,6 +371,9 @@ class GeoLens(Lens):
             M (int, optional): ray number. Defaults to 9.
             entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [M, 3]
         """
         if entrance_pupil:
             pupilz, pupilx = self.entrance_pupil()
@@ -424,6 +427,9 @@ class GeoLens(Lens):
             forward (bool, optional): forward or backward rays. Defaults to True.
             pupil (bool, optional): whether to use pupil. Defaults to False.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [spp, M, M, 3]
         """
         if R is None:
             R = self.surfaces[0].r
@@ -523,6 +529,9 @@ class GeoLens(Lens):
             high_spp (bool, optional): whether to use high spp. Defaults to False.
             pupil (bool, optional): whether to use pupil. Defaults to True.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [spp, H, W, 3]
         """
         # ===> sample o1 on sensor plane
         # We use top-left point as reference in rendering, so here we should sample bottom-right point
@@ -582,6 +591,9 @@ class GeoLens(Lens):
             pupilr (float): pupil radius. Defaults to None.
             pupilz (float): pupil z position. Defaults to None.
             multiplexing (bool): whether to use multiplexing. Defaults to False.
+
+        Returns:
+            o (torch.Tensor): Ray origins. Shape [spp, res, res, 3]
         """
         H, W = res
         if pupilr is None or pupilz is None:
@@ -651,7 +663,7 @@ class GeoLens(Lens):
         Returns:
             ray_final (Ray object): ray after optical system.
             valid (boolean matrix): mask denoting valid rays.
-            oss (): position of ray on the sensor plane.
+            oss (list): list of intersection points.
         """
         is_forward = ray.d.reshape(-1, 3)[0, 2] > 0
         if lens_range is None:
@@ -682,7 +694,17 @@ class GeoLens(Lens):
         return ray
 
     def trace2sensor(self, ray, record=False, ignore_invalid=False):
-        """Trace optical rays to sensor plane."""
+        """Trace optical rays to sensor plane.
+
+        Args:
+            ray (Ray object): Ray object.
+            record (bool): record ray path or not.
+            ignore_invalid (bool): ignore invalid rays or not.
+
+        Returns:
+            p (torch.Tensor): intersection points.
+            oss (list): list of intersection points.
+        """
         if record:
             ray_out, valid, oss = self.trace(ray, record=record)
             ray_out = ray_out.propagate_to(self.d_sensor)
