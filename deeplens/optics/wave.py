@@ -445,16 +445,16 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
     # TF or IR method
     # Computational fourier optics. Chapter 5, section 5.1.
     if TF is None:
-        if ps > wvln * np.abs(z) / (Wimg * ps):
+        if ps > wvln_mm * np.abs(z) / (Wimg * ps):
             TF = True
         else:
             TF = False
 
     if TF:
-        H = np.sqrt(n) * torch.exp(-1j * np.pi * wvln * z * (fx**2 + fy**2) / n)
+        H = np.sqrt(n) * torch.exp(-1j * np.pi * wvln_mm * z * (fx**2 + fy**2) / n)
         H = fftshift(H)
     else:    
-        h = n / (1j * wvln * z) * torch.exp(1j * k / (2 * z) * (x**2 + y**2))
+        h = n / (1j * wvln_mm * z) * torch.exp(1j * k / (2 * z) * (x**2 + y**2))
         H = fft2(fftshift(h)) * ps**2
 
     # Fourier transformation
@@ -504,7 +504,7 @@ def FraunhoferDiffraction(u, z, wvln, ps, n=1.0, padding=True):
     # Computational fourier optics. Chapter 5, section 5.5.
     # Shorter propagation will not affect final results.
     k = 2 * n * np.pi / wvln_mm
-    c = n / (1j * wvln * z) * torch.exp(1j * k / (2 * z) * (x2**2 + y2**2))
+    c = n / (1j * wvln_mm * z) * torch.exp(1j * k / (2 * z) * (x2**2 + y2**2))
     u = c * ps**2 * ifftshift(fft2(fftshift(u)))
 
     # Remove padding
@@ -557,7 +557,6 @@ def RayleighSommerfeldIntegral(
     Reference:
         [1] Modeling and propagation of near-field diffraction patterns: A more complete approach. Eq (9).
         [2] https://www.mathworks.com/matlabcentral/fileexchange/75049-complete-rayleigh-sommerfeld-model-version-2
-        [3] Modeling and propagation of near-field diffraction patterns: A more complete approach. Table 1.
 
     Args:
         u1: complex amplitude of input field, shape [H1, W1]
