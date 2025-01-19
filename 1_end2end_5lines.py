@@ -122,7 +122,7 @@ def end2end_train(lens, net, args):
     )
 
     # ==> Criterion
-    cri_l2 = nn.L1Loss()
+    cri_l1 = nn.L1Loss()
 
     # ==> Log
     logging.info("Start End2End optical design.")
@@ -145,7 +145,7 @@ def end2end_train(lens, net, args):
             img_rec = net(img_render)
 
             # => Loss
-            L_rec = cri_l2(img_rec, img_org)
+            L_rec = cri_l1(img_rec, img_org)
 
             # => Back-propagation
             net_optim.zero_grad()
@@ -224,7 +224,8 @@ if __name__ == "__main__":
     # ========================================
     # Line 1: load a lens
     # ========================================
-    lens = GeoLens(filename=args["lens"]["path"], sensor_res=args["train"]["img_res"])
+    lens = GeoLens(filename=args["lens"]["path"])
+    lens.change_sensor_res(args["train"]["img_res"])
     net = UNet()
     net = net.to(lens.device)
     if args["network"]["pretrained"]:

@@ -1,4 +1,7 @@
-"""Render sensor image by PSF convolution."""
+"""PSF convolution functions.
+
+Noise: these functions do not add any noise. Noise can be added when performing image simulation.
+"""
 
 import cv2 as cv
 import numpy as np
@@ -9,8 +12,8 @@ import torch.nn.functional as F
 # ================================================
 # PSF convolution
 # ================================================
-def render_psf(img, psf, noise=None):
-    """Render an image with spatially-invariant PSF. Use the same PSF kernel for all pixels.
+def render_psf(img, psf):
+    """Render an image with a single rgb PSF kernel.
 
     Args:
         img (torch.Tensor): [B, C, H, W]
@@ -27,14 +30,10 @@ def render_psf(img, psf, noise=None):
     img_pad = F.pad(img, (padding, padding, padding, padding), mode="reflect")
     img_render = F.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
 
-    # Sensor noise
-    if noise is not None:
-        img_render += torch.randn_like(img_render) * noise
-
     return img_render
 
 
-def render_psf_map(img, psf_map, grid, noise=None):
+def render_psf_map(img, psf_map, grid):
     """Render an image with PSF map. Use the spatially-varying PSF kernels for the image.
 
     Args:
@@ -85,14 +84,10 @@ def render_psf_map(img, psf_map, grid, noise=None):
             )
             render_img[:, :, h_low:h_high, w_low:w_high] = render_patch
 
-    # Sensor noise
-    if noise is not None:
-        render_img += torch.randn_like(render_img) * noise
-
     return render_img
 
 
-def local_psf_render(input, psf, kernel_size=11, noise=None):
+def local_psf_render(input, psf, kernel_size=11):
     """Render an image with local PSF. Use the different PSF kernel for different pixels (folding approach).
 
         Application example: Blurs image with dynamic Gaussian blur.
@@ -127,16 +122,10 @@ def local_psf_render(input, psf, kernel_size=11, noise=None):
     # 5. Fold and return
     img = F.fold(y, (H, W), (1, 1))
 
-    # Sensor noise
-    if noise is not None:
-        img += torch.randn_like(img) * noise
-
     return img
 
 
-def local_psf_render_high_res(
-    input, psf, patch_size=[320, 480], kernel_size=11, noise=None
-):
+def local_psf_render_high_res(input, psf, patch_size=[320, 480], kernel_size=11):
     """Patch-based rendering with local PSF. Use the different PSF kernel for different pixels."""
     B, C, H, W = input.shape
     img_render = torch.zeros_like(input)
@@ -153,7 +142,7 @@ def local_psf_render_high_res(
             psf_patch = psf[:, low_i:up_i, low_j:up_j, :, :]
 
             img_render[:, :, low_i:up_i, low_j:up_j] = local_psf_render(
-                img_patch, psf_patch, kernel_size=kernel_size, noise=noise
+                img_patch, psf_patch, kernel_size=kernel_size
             )
 
     return img_render
@@ -197,9 +186,11 @@ def crop_psf_map(psf_map, grid, ks_crop, psf_center=None):
                 raise Exception("Not tested")
                 psf_crop = psf[
                     :,
-                    psf_center[0] - int((ks_crop - 1) / 2) : psf_center[0]
+                    psf_center[0]
+                    - int((ks_crop - 1) / 2) : psf_center[0]
                     + int((ks_crop + 1) / 2),
-                    psf_center[1] - int((ks_crop - 1) / 2) : psf_center[1]
+                    psf_center[1]
+                    - int((ks_crop - 1) / 2) : psf_center[1]
                     + int((ks_crop + 1) / 2),
                 ]
 
