@@ -7,6 +7,6 @@ In the realm of computer science, image quality evaluation is commonly conducted
 Links for high-resolution camera test chart:
 
 - https://www.bealecorner.org/red/test-patterns/
-- https://www.photographynews.co.uk/inspiration/free-lens-testing-chart-download/
+- https://www.photographynews.co.uk/learning/free-lens-testing-chart-download/
 - https://www.pointsinfocus.com/learning/cameras-lenses/testing-and-acclimating-to-a-new-camera/
-- https://colortest.page/downloads/iso-12233-test-chart-pdf/
+- https://www.graphics.cornell.edu/~westin/misc/res-chart.html

@@ -40,7 +40,6 @@ from .optics.basics import (
 )
 from .optics.materials import Material
 from .optics.monte_carlo import forward_integral
-from .optics.render_psf import render_psf_map
 from .optics.surfaces import (
     Aperture,
     Aspheric,
@@ -820,8 +819,8 @@ class GeoLens(Lens):
 
         Image simulation methods:
             [1] PSF map block convolution.
-            [2] Ray tracing-based rendering.
-            [3] ...
+            [2] PSF patch convolution.
+            [3] Ray tracing-based rendering.
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [N, C, H, W].
@@ -838,20 +837,32 @@ class GeoLens(Lens):
             self.change_sensor_res(sensor_res=(H, W))
 
         # Differentiable image simulation
-        if method == "psf":
+        if method == "psf_map":
+            # PSF based rendering - uses PSF map to render image
             if "psf_grid" in kwargs and "psf_ks" in kwargs:
                 psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
-                img_render = self.render_psf(
+                img_render = self.render_psf_map(
                     img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
                 )
             else:
-                img_render = self.render_psf(img_obj, depth=depth)
+                # Use default PSF grid and kernel size
+                img_render = self.render_psf_map(img_obj, depth=depth)
+
+        elif method == "psf_patch":
+            # PSF patch based rendering - uses a single PSF to render a patch of the image
+            if "psf_center" in kwargs and "psf_ks" in kwargs:
+                psf_center, psf_ks = kwargs["psf_center"], kwargs["psf_ks"]
+                img_render, field_channel = self.render_psf_patch(img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks)    
+            else:
+                img_render = self.render_psf_patch(img_obj, depth=depth)
 
         elif method == "raytracing":
+            # Ray tracing based rendering
             if "spp" in kwargs:
                 spp = kwargs["spp"]
                 img_render = self.render_raytracing(img_obj, depth=depth, spp=spp)
             else:
+                # Use default sample per pixel
                 img_render = self.render_raytracing(img_obj, depth=depth)
 
         else:
@@ -861,7 +872,7 @@ class GeoLens(Lens):
 
     def render_raytracing(self, img, depth=DEPTH, spp=64, vignetting=False):
         """Render RGB image using ray tracing method.
-        
+
         Args:
             img (tensor): RGB image tensor. Shape of [N, 3, H, W].
             depth (float, optional): Depth of the object. Defaults to DEPTH.
@@ -1126,7 +1137,13 @@ class GeoLens(Lens):
         return psf
 
     def psf_map(
-        self, depth=DEPTH, grid=7, ks=PSF_KS, spp=SPP_PSF, wvln=DEFAULT_WAVE, center=True
+        self,
+        depth=DEPTH,
+        grid=7,
+        ks=PSF_KS,
+        spp=SPP_PSF,
+        wvln=DEFAULT_WAVE,
+        center=True,
     ):
         """Computes the PSF map at a specified depth. This implementation overrides the base method to improve efficiency through parallel computation.
 
@@ -1508,7 +1525,7 @@ class GeoLens(Lens):
         o1 = torch.tensor([0, 0, self.d_sensor.item()], device=self.device).repeat(
             SPP_CALC, 1
         )
-        
+
         # Sample the first surface as pupil
         o2 = self.surfaces[0].surface_sample(SPP_CALC)
         o2 *= 0.25  # Shrink sample region to improve accuracy
@@ -1517,7 +1534,7 @@ class GeoLens(Lens):
 
         # Trace rays to object space
         ray, _, _ = self.trace(ray)
-        
+
         # Optical axis intersection
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
@@ -2104,7 +2121,7 @@ class GeoLens(Lens):
         lens_title=None,
     ):
         """Analyze the optical lens.
-        
+
         Args:
             save_name (str): save name.
             multi_plot (bool): plot RGB seperately.
@@ -2476,6 +2493,17 @@ class GeoLens(Lens):
             color,
         )
 
+        # Draw coordinate
+        origin = [0, -max(self.surfaces[0].r * 1.2, self.r_sensor)]
+        ax.arrow(
+            origin[0], origin[1], 1, 0, head_width=0.1, head_length=0.1, fc="k", ec="k"
+        )  # z
+        ax.text(origin[0] + 1.05, origin[1], "z", fontsize=8, ha="left", va="center")
+        ax.arrow(
+            origin[0], origin[1], 0, 1, head_width=0.1, head_length=0.1, fc="k", ec="k"
+        )  # x
+        ax.text(origin[0], origin[1] + 1.05, "y", fontsize=8, ha="center", va="bottom")
+
         # Figure size
         if fix_bound:
             ax.set_aspect("equal")
@@ -2681,7 +2709,11 @@ class GeoLens(Lens):
         M = 15
         scale = self.calc_scale_pinhole(depth)
         ray = self.sample_point_source(
-            M=M, spp=SPP_CALC, depth=depth, R=self.sensor_size[0] / 2 * scale, pupil=True
+            M=M,
+            spp=SPP_CALC,
+            depth=depth,
+            R=self.sensor_size[0] / 2 * scale,
+            pupil=True,
         )
         o1 = ray.o.detach().cpu()
         x1 = o1[0, :, :, 0] / scale
@@ -3468,6 +3500,7 @@ SURF 0
 # ====================================================================================
 # Useful functions
 # ====================================================================================
+
 
 def create_lens(
     foclen,
