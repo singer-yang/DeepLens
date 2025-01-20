@@ -20,10 +20,10 @@ from .optics import (
     DeepObj,
     init_device,
 )
-from .optics.render_psf import render_psf_map
+from .optics.render_psf import render_psf_map, render_psf
 
-# from .sensor.isp import ISP
-# from .sensor.inv_isp import INV_ISP
+from .sensor.isp import ISP
+from .sensor.inv_isp import Inv_ISP
 
 
 class Lens(DeepObj):
@@ -60,10 +60,13 @@ class Lens(DeepObj):
     def prepare_sensor(self, sensor_res=[1024, 1024]):
         """Prepare sensor."""
         raise NotImplementedError
-    
+
     def change_sensor_res(self, sensor_res):
         """Change sensor resolution."""
-        if not self.sensor_size[0] * sensor_res[1] == self.sensor_size[1] * sensor_res[0]:
+        if (
+            not self.sensor_size[0] * sensor_res[1]
+            == self.sensor_size[1] * sensor_res[0]
+        ):
             raise Exception("Given sensor resolution does not match sensor size.")
         self.sensor_res = sensor_res
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
@@ -363,7 +366,7 @@ class Lens(DeepObj):
     # ===========================================
     # Image simulation-ralated functions
     # ===========================================
-    def render(self, img_obj, depth=DEPTH, method="psf", **kwargs):
+    def render(self, img_obj, depth=DEPTH, method="psf_patch", **kwargs):
         """Differentiable image simulation. This function handles only the differentiable components of image simulation, specifically the optical aberrations. The non-differentiable components (such as noise simulation) are handled separately in the self.render_unprocess() function to ensure more accurate overall image simulation.
 
         Image simulation methods:
@@ -387,21 +390,109 @@ class Lens(DeepObj):
             self.prepare_sensor(sensor_res=[H, W])
 
         # Image simulation (in RAW space)
-        if method == "psf":
+        if method == "psf_map":
             if "psf_grid" in kwargs and "psf_ks" in kwargs:
                 psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
-                img_render = self.render_psf(
+                img_render = self.render_psf_map(
                     img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
                 )
             else:
-                img_render = self.render_psf(img_obj, depth=depth)
+                img_render = self.render_psf_map(img_obj, depth=depth)
+
+        elif method == "psf_patch":
+            if "psf_center" in kwargs and "psf_ks" in kwargs:
+                psf_center, psf_ks = kwargs["psf_center"], kwargs["psf_ks"]
+                img_render, field_channel = self.render_psf_patch(
+                    img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+                )
+            else:
+                img_render = self.render_psf_patch(img_obj, depth=depth)
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
 
         return img_render
 
-    def render_psf(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
+    def render_unprocess(self, img_obj, bit=10, depth=DEPTH, method="psf_map", **kwargs):
+        """Unprocess image to raw space for image simulation. Because PSF is defined in energy space.
+
+        Accurate image simulation:
+            (1) raw image space
+            (2) lens vignetting (shading)
+            (3) high optical ray sampling
+            (4) sensor noise and quantization
+            (5) ISP
+        """
+        # Initialize ISP and INV_ISP
+        isp, inv_isp = ISP(bit=bit), Inv_ISP(bit=bit)
+
+        # Unprocess image to linear rgb space
+        img_raw = inv_isp.inv_isp_linearRGB(img_obj)
+
+        # Lens aberration simulation
+        img_raw_render = self.render(img_raw, depth=depth, method=method, **kwargs)
+        
+        # Noise simulation
+        img_raw_noise = self.add_noise(img_raw_render, bit=bit)
+
+        # Convert linear rgb image to output image
+        img_render = isp.diff_isp(img_raw_noise)
+
+        return img_render
+
+    def render_psf(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=51):
+        """Render image patch using PSF convolution. Better not use this function to avoid confusion."""
+        return self.render_psf_patch(
+            img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+        )
+
+    def render_psf_patch(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=51):
+        """Render an image patch using PSF convolution, and return positional encoding channel.
+
+        Args:
+            img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
+            depth (float): Depth of the object.
+            psf_center (tensor): Center of the PSF patch. Shape of [2].
+            psf_ks (int): PSF kernel size.
+
+        Returns:
+            img_render: Rendered image. Shape of [B, C, H, W].
+            field_channel: Positional encoding channel. Shape of [1, H, W].
+        """
+        # Convert psf_center to tensor
+        if isinstance(psf_center, (list, tuple)):
+            points = (psf_center[0], psf_center[1], depth)
+            points = torch.tensor(points).unsqueeze(0)
+        else:
+            raise Exception("PSF center must be a list or tuple.")
+
+        # Compute PSF and perform PSF convolution
+        psf = self.psf_rgb(points=points, ks=psf_ks).squeeze(0)
+        img_render = render_psf(img_obj, psf=psf)
+
+        # Compute positional encoding channel for image patch
+        Wobj, Hobj = img_obj.shape[-1], img_obj.shape[-2]
+        ps_norm = 2 / self.sensor_res[0]
+        grid_x, grid_y = torch.meshgrid(
+            torch.linspace(
+                psf_center[0] - Wobj / 2 * ps_norm,
+                psf_center[0] + Wobj / 2 * ps_norm,
+                Wobj // 2,
+                device=self.device,
+            ),
+            torch.linspace(
+                psf_center[1] + Hobj / 2 * ps_norm,
+                psf_center[1] - Hobj / 2 * ps_norm,
+                Hobj // 2,
+                device=self.device,
+            ),
+            indexing="xy",
+        )
+        field_channel = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
+
+        return img_render #, field_channel
+
+    def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
         """Render image using PSF block convolution.
 
         Note: larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
@@ -419,50 +510,48 @@ class Lens(DeepObj):
         img_render = render_psf_map(img_obj, psf_map, grid=psf_grid)
         return img_render
 
-    # def render_unprocess(self, img_obj, isp=None, inv_isp=None, depth=DEPTH, method="psf", **kwargs):
-    #     """Unprocess image to raw space for image simulation. Because PSF is defined in energy space.
-        
-    #     Accurate image simulation:
-    #         (1) raw image space
-    #         (2) lens vignetting (shading)
-    #         (3) high optical ray sampling
-    #         (4) sensor noise and quantization
-    #     """
-    #     if isp is None and inv_isp is None:
-    #         isp, inv_isp = ISP(), INV_ISP()
-
-    #     img_raw = inv_isp.unprocess(img_obj)
-    #     img_raw_render = self.render(img_raw, depth=depth, method=method, **kwargs)
-        
-    #     img_raw_noise = self.add_noise(img_raw_render)
-    #     img_render = isp.process(img_raw_noise)
-
-    def add_noise(self, img):
-        """Add sensor read noise and shot noise.
-
-        Note: use RAW space image for accurate noise simulation.
+    def add_noise(self, img, bit=10):
+        """Add sensor read noise and shot noise to RAW space image. Shot and read noise are measured in digital counts (N bit).
 
         Args:
-            img_raw (tensor): RAW space image. Shape of [N, C, H, W].
+            img (tensor): RAW space image. Shape of [N, C, H, W]. Can be either float [0, 1] or integer [0, 2^bit - 1].
+            bit (int): Bit depth for noise simulation.
 
         Returns:
-            img: Noisy image. Shape of [N, C, H, W].
+            img: Noisy image. Shape of [N, C, H, W]. Data range [0, 2^bit - 1].
         """
+        # Convert float [0,1] to N-bit range if needed
+        if img.dtype in [torch.float32, torch.float64] and img.max() <= 1.0:
+            img_Nbit = img * (2**bit - 1)
+            is_float = True
+        else:
+            img_Nbit = img
+            is_float = False
+        
         # Noise statistics
         if not hasattr(self, "read_noise_std"):
-            self.read_noise_std = 0.0
-            raise Warning("Read noise standard deviation is not defined.")
-        if not hasattr(self, "shot_noise_alpha"):
-            self.shot_noise_alpha = 0.0
-            raise Warning("Shot noise alpha is not defined.")
-
-        read_noise_std = self.read_noise_std
-        shot_noise_alpha = self.shot_noise_alpha
+            read_noise_std = 0.0
+            print("Read noise standard deviation is not defined.")
+        else:
+            read_noise_std = self.read_noise_std
         
+        if not hasattr(self, "shot_noise_alpha"):
+            shot_noise_alpha = 0.0
+            print("Shot noise alpha is not defined.")
+        else:
+            shot_noise_alpha = self.shot_noise_alpha
+
         # Add noise to raw image
-        noise_std = torch.sqrt(img) * shot_noise_alpha + read_noise_std
-        noise = torch.randn_like(img) * noise_std
-        img = img + noise
+        noise_std = torch.sqrt(img_Nbit) * shot_noise_alpha + read_noise_std
+        noise = torch.randn_like(img_Nbit) * noise_std
+        img_Nbit = img_Nbit + noise
+        img_Nbit = torch.clamp(img_Nbit, 0, 2**bit - 1)
+
+        # Convert N-bit image to float [0, 1]
+        if is_float:
+            img = img_Nbit / (2**bit - 1)
+        else:
+            img = img_Nbit
         return img
 
     # ===========================================
