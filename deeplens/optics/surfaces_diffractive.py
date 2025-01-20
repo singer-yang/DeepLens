@@ -69,6 +69,8 @@ class DOE(DeepObj):
     def init_param_model(self, param_model="none", **kwargs):
         """Initialize DOE phase map.
 
+        Contributor: Linyark
+
         Args:
             parameterization (str, optional): DOE parameterization method. Defaults to 'fourier'.
             mode (str, optional): DOE intialization method. Defaults to 'zero'.
@@ -91,6 +93,14 @@ class DOE(DeepObj):
         elif self.param_model == "binary2":
             # Zemax binary2 phase mask
             rand_value = np.random.rand(4) * 0.01
+            self.order2 = torch.tensor(rand_value[0])
+            self.order4 = torch.tensor(rand_value[1])
+            self.order6 = torch.tensor(rand_value[2])
+            self.order8 = torch.tensor(rand_value[3])
+
+        elif self.param_model == "binary2_fast":
+            # Inverting the orders can speed up the optimization
+            rand_value = (np.random.rand(4) - 0.5) * 100.0
             self.order2 = torch.tensor(rand_value[0])
             self.order4 = torch.tensor(rand_value[1])
             self.order6 = torch.tensor(rand_value[2])
@@ -152,6 +162,18 @@ class DOE(DeepObj):
                 save_path,
             )
 
+        elif self.param_model == "binary2_fast":
+            torch.save(
+                {
+                    "param_model": self.param_model,
+                    "order2": self.order2.clone().detach().cpu(),
+                    "order4": self.order4.clone().detach().cpu(),
+                    "order6": self.order6.clone().detach().cpu(),
+                    "order8": self.order8.clone().detach().cpu(),
+                },
+                save_path,
+            )
+
         elif self.param_model == "poly1d":
             torch.save(
                 {
@@ -201,6 +223,12 @@ class DOE(DeepObj):
             self.a3 = doe_dict["a3"].to(self.device)
 
         elif self.param_model == "binary2":
+            self.order2 = doe_dict["order2"].to(self.device)
+            self.order4 = doe_dict["order4"].to(self.device)
+            self.order6 = doe_dict["order6"].to(self.device)
+            self.order8 = doe_dict["order8"].to(self.device)
+
+        elif self.param_model == "binary2_fast":
             self.order2 = doe_dict["order2"].to(self.device)
             self.order4 = doe_dict["order4"].to(self.device)
             self.order6 = doe_dict["order6"].to(self.device)
@@ -285,6 +313,13 @@ class DOE(DeepObj):
                 + self.order4 * r**4
                 + self.order6 * r**6
                 + self.order8 * r**8
+            )
+
+        elif self.param_model == "binary2_fast":
+            pmap = (
+                1 / (self.order2 + EPSILON) * r**2
+                + 1 / (self.order4 + EPSILON) * r**4
+                + 1 / (self.order6 + EPSILON) * r**6
             )
 
         elif self.param_model == "poly1d":
@@ -456,6 +491,12 @@ class DOE(DeepObj):
             self.order6.requires_grad = activate
             self.order8.requires_grad = activate
 
+        elif self.param_model == "binary2_fast":
+            self.order2.requires_grad = activate
+            self.order4.requires_grad = activate
+            self.order6.requires_grad = activate
+            self.order8.requires_grad = activate
+
         elif self.param_model == "poly1d":
             self.order2.requires_grad = activate
             self.order3.requires_grad = activate
@@ -486,7 +527,13 @@ class DOE(DeepObj):
             params.append({"params": [self.a3], "lr": lr})
 
         elif self.param_model == "binary2":
-            # We use normalized r, so we can use the same lr for all orders.
+            lr = 0.1 if lr is None else lr
+            params.append({"params": [self.order2], "lr": lr})
+            params.append({"params": [self.order4], "lr": lr})
+            params.append({"params": [self.order6], "lr": lr})
+            params.append({"params": [self.order8], "lr": lr})
+
+        elif self.param_model == "binary2_fast":
             lr = 0.1 if lr is None else lr
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
@@ -494,7 +541,6 @@ class DOE(DeepObj):
             params.append({"params": [self.order8], "lr": lr})
 
         elif self.param_model == "poly1d":
-            # We use normalized r, so we can use the same lr for all orders.
             lr = 0.1 if lr is None else lr
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order3], "lr": lr})
@@ -678,6 +724,11 @@ class DOE(DeepObj):
         elif self.param_model == "cubic":
             surf_dict["a3"] = round(self.a3.item(), 6)
         elif self.param_model == "binary2":
+            surf_dict["order2"] = round(self.order2.item(), 6)
+            surf_dict["order4"] = round(self.order4.item(), 6)
+            surf_dict["order6"] = round(self.order6.item(), 6)
+            surf_dict["order8"] = round(self.order8.item(), 6)
+        elif self.param_model == "binary2_fast":
             surf_dict["order2"] = round(self.order2.item(), 6)
             surf_dict["order4"] = round(self.order4.item(), 6)
             surf_dict["order6"] = round(self.order6.item(), 6)
