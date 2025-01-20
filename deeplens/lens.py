@@ -575,5 +575,5 @@ class Lens(DeepObj):
     def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-3]):
         """Get optimizer."""
         params = self.get_optimizer_params(lr)
-        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(params)
         return optimizer
