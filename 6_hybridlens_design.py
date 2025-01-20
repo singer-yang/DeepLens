@@ -75,12 +75,15 @@ def config():
 def main(args):
     # Create a hybrid refractive-diffractive lens
     lens = HybridLens(lens_path="./lenses/hybridlens/a489_doe.json")
+    lens.refocus(foc_dist=-1000.0)
     lens.double()
 
     # PSF optimization loop to focus blue light
     optimizer = lens.get_optimizer(doe_lr=0.1, lens_lr=[1e-4, 1e-4, 1e-1, 1e-5])
     loss_fn = PSFLoss()
-    for i in tqdm(range(100 + 1)):
+    iterations = 1000
+    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss": 0})
+    for i in range(iterations + 1):
         psf = lens.psf(points=[0.0, 0.0, -10000.0], ks=101, wvln=0.489)
 
         optimizer.zero_grad()
@@ -88,7 +91,7 @@ def main(args):
         loss.backward()
         optimizer.step()
 
-        if i % 25 == 0:
+        if i % 100 == 0:
             lens.write_lens_json(f"{args['result_dir']}/lens_iter{i}.json")
             lens.analysis(save_name=f"{args['result_dir']}/lens_iter{i}.png")
             save_image(
@@ -97,6 +100,8 @@ def main(args):
                 normalize=True,
             )
 
+        pbar.set_postfix({"loss": loss.item()})
+        pbar.update(1)
 
 if __name__ == "__main__":
     args = config()

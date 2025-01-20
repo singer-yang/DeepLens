@@ -390,18 +390,18 @@ class Lens(DeepObj):
         if method == "psf":
             if "psf_grid" in kwargs and "psf_ks" in kwargs:
                 psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
-                img_render = self.render_psf(
+                img_render = self.render_psf_map(
                     img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
                 )
             else:
-                img_render = self.render_psf(img_obj, depth=depth)
+                img_render = self.render_psf_map(img_obj, depth=depth)
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
 
         return img_render
 
-    def render_psf(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
+    def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
         """Render image using PSF block convolution.
 
         Note: larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
@@ -486,5 +486,5 @@ class Lens(DeepObj):
     def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-3]):
         """Get optimizer."""
         params = self.get_optimizer_params(lr)
-        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(params)
         return optimizer

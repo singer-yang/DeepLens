@@ -35,6 +35,10 @@ class Surface(DeepObj):
 
         self.to(device)
 
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"], surf_dict["is_square"])
+    
     # ==============================
     # Intersection and Refraction
     # ==============================
@@ -329,7 +333,7 @@ class Surface(DeepObj):
         raise NotImplementedError()
 
     def d2gd(self, x, y):
-        """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdy2) =  (g''xx, g''yy).
+        """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdxdy, d2gdy2) =  (g''xx, g''xy, g''yy).
 
         Args:
             x (tensor): x coordinate
@@ -337,6 +341,7 @@ class Surface(DeepObj):
 
         Return:
             d2gdx2 (tensor): d2g / dx2
+            d2gdxdy (tensor): d2g / dxdy
             d2gdy2 (tensor): d2g / dy2
         """
         raise NotImplementedError()
