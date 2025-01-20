@@ -26,8 +26,8 @@ class PSFLoss(nn.Module):
 
         # Concentration Loss: Minimize the spatial variance
         # Compute coordinates
-        x = torch.linspace(-1, 1, steps=width, device=psf.device)
-        y = torch.linspace(-1, 1, steps=height, device=psf.device)
+        x = torch.linspace(-1, 1, steps=width, device=psf.device, dtype=torch.float32)
+        y = torch.linspace(-1, 1, steps=height, device=psf.device, dtype=torch.float32)
         xv, yv = torch.meshgrid(x, y, indexing="ij")
         xv = xv.unsqueeze(0).unsqueeze(0)  # Shape [1, 1, H, W]
         yv = yv.unsqueeze(0).unsqueeze(0)

@@ -46,9 +46,9 @@ class DOE(DeepObj):
             int(round(self.l / self.fab_ps)),
             int(round(self.l / self.fab_ps)),
         ]  # fabrication resolution
-        assert (
-            self.res[0] % self.fab_res[0] == 0
-        ), "DOE sampling resolution (to meet Nyquist criterion) should be integer times of fabrication resolution."
+        assert self.res[0] % self.fab_res[0] == 0, (
+            "DOE sampling resolution (to meet Nyquist criterion) should be integer times of fabrication resolution."
+        )
         self.x, self.y = torch.meshgrid(
             torch.linspace(
                 -self.w / 2 + self.fab_ps / 2,
@@ -68,6 +68,8 @@ class DOE(DeepObj):
 
     def init_param_model(self, param_model="none", **kwargs):
         """Initialize DOE phase map.
+
+        Contributor: Linyark
 
         Args:
             parameterization (str, optional): DOE parameterization method. Defaults to 'fourier'.
@@ -90,7 +92,15 @@ class DOE(DeepObj):
 
         elif self.param_model == "binary2":
             # Zemax binary2 phase mask
-            rand_value = np.random.rand(4) * 0.0
+            rand_value = np.random.rand(4) * 0.01
+            self.order2 = torch.tensor(rand_value[0])
+            self.order4 = torch.tensor(rand_value[1])
+            self.order6 = torch.tensor(rand_value[2])
+            self.order8 = torch.tensor(rand_value[3])
+
+        elif self.param_model == "binary2_fast":
+            # Inverting the orders can speed up the optimization
+            rand_value = (np.random.rand(4) - 0.5) * 100.0
             self.order2 = torch.tensor(rand_value[0])
             self.order4 = torch.tensor(rand_value[1])
             self.order6 = torch.tensor(rand_value[2])
@@ -141,6 +151,18 @@ class DOE(DeepObj):
             )
 
         elif self.param_model == "binary2":
+            torch.save(
+                {
+                    "param_model": self.param_model,
+                    "order2": self.order2.clone().detach().cpu(),
+                    "order4": self.order4.clone().detach().cpu(),
+                    "order6": self.order6.clone().detach().cpu(),
+                    "order8": self.order8.clone().detach().cpu(),
+                },
+                save_path,
+            )
+
+        elif self.param_model == "binary2_fast":
             torch.save(
                 {
                     "param_model": self.param_model,
@@ -206,6 +228,12 @@ class DOE(DeepObj):
             self.order6 = doe_dict["order6"].to(self.device)
             self.order8 = doe_dict["order8"].to(self.device)
 
+        elif self.param_model == "binary2_fast":
+            self.order2 = doe_dict["order2"].to(self.device)
+            self.order4 = doe_dict["order4"].to(self.device)
+            self.order6 = doe_dict["order6"].to(self.device)
+            self.order8 = doe_dict["order8"].to(self.device)
+
         elif self.param_model == "poly1d":
             self.order2 = doe_dict["order2"].to(self.device)
             self.order3 = doe_dict["order3"].to(self.device)
@@ -235,9 +263,15 @@ class DOE(DeepObj):
         """Calculate phase map of the DOE at the given wavelength.
 
         First we should calculate the phase map at 0.55um, then calculate the phase map for the given other wavelength.
+
+        Args:
+            wvln (float): Wavelength. [um]. Defaults to 0.55.
+
+        Returns:
+            phase_map (tensor): Phase map. [1, 1, H, W], range [0, 2pi].
         """
-        phase_map0 = self.get_phase_map0()
         n = self.refractive_index(wvln)
+        phase_map0 = self.get_phase_map0()
         phase_map = phase_map0 * (self.wvln0 / wvln) * (n - 1) / (self.n0 - 1)
 
         phase_map = (
@@ -260,6 +294,7 @@ class DOE(DeepObj):
         r = torch.sqrt(x_norm**2 + y_norm**2 + 1e-12)
 
         if self.param_model == "fresnel":
+            # unit [mm]
             pmap = (
                 -2
                 * np.pi
@@ -267,18 +302,25 @@ class DOE(DeepObj):
                     (self.x**2 + self.y**2) / (2 * self.fresnel_wvln * 1e-3 * self.f0),
                     1,
                 )
-            )  # unit [mm]
+            )
 
         elif self.param_model == "cubic":
             pmap = self.a3 * (self.x**3 + self.y**3)
 
         elif self.param_model == "binary2":
-            r = torch.sqrt(self.x**2 + self.y**2) / self.r
             pmap = (
                 self.order2 * r**2
                 + self.order4 * r**4
                 + self.order6 * r**6
                 + self.order8 * r**8
+            )
+
+        elif self.param_model == "binary2_fast":
+            pmap = (
+                1 / (self.order2 + EPSILON) * r**2
+                + 1 / (self.order4 + EPSILON) * r**4
+                + 1 / (self.order6 + EPSILON) * r**6
+                + 1 / (self.order8 + EPSILON) * r**8
             )
 
         elif self.param_model == "poly1d":
@@ -300,15 +342,15 @@ class DOE(DeepObj):
         else:
             raise Exception("Unknown parameterization.")
 
-        pmap = torch.remainder(pmap, 2 * np.pi)
+        pmap = torch.remainder(pmap, 2 * torch.pi)
         return pmap
 
     def refractive_index(self, wvln=0.55):
         """Calculate refractive index of DOE. Used for phase map calculation."""
         if self.glass == "fused_silica":
-            assert (
-                wvln >= 0.4 and wvln <= 0.7
-            ), "Wavelength should be in the range of [0.4, 0.7] um."
+            assert wvln >= 0.4 and wvln <= 0.7, (
+                "Wavelength should be in the range of [0.4, 0.7] um."
+            )
             ref_wvlns = [
                 0.40,
                 0.41,
@@ -418,9 +460,7 @@ class DOE(DeepObj):
 
         # Save phase map
         if save_path is None:
-            save_path = (
-                f"./doe_fab_{fab_res}x{fab_res}_{int(self.fab_ps*1000)}um_{bits}bit.pth"
-            )
+            save_path = f"./doe_fab_{fab_res}x{fab_res}_{int(self.fab_ps * 1000)}um_{bits}bit.pth"
         self.save_ckpt(save_path=save_path)
 
         return pmap_q
@@ -447,6 +487,12 @@ class DOE(DeepObj):
             self.a3.requires_grad = activate
 
         elif self.param_model == "binary2":
+            self.order2.requires_grad = activate
+            self.order4.requires_grad = activate
+            self.order6.requires_grad = activate
+            self.order8.requires_grad = activate
+
+        elif self.param_model == "binary2_fast":
             self.order2.requires_grad = activate
             self.order4.requires_grad = activate
             self.order6.requires_grad = activate
@@ -482,7 +528,13 @@ class DOE(DeepObj):
             params.append({"params": [self.a3], "lr": lr})
 
         elif self.param_model == "binary2":
-            # We use normalized r, so we can use the same lr for all orders.
+            lr = 0.1 if lr is None else lr
+            params.append({"params": [self.order2], "lr": lr})
+            params.append({"params": [self.order4], "lr": lr})
+            params.append({"params": [self.order6], "lr": lr})
+            params.append({"params": [self.order8], "lr": lr})
+
+        elif self.param_model == "binary2_fast":
             lr = 0.1 if lr is None else lr
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
@@ -490,7 +542,6 @@ class DOE(DeepObj):
             params.append({"params": [self.order8], "lr": lr})
 
         elif self.param_model == "poly1d":
-            # We use normalized r, so we can use the same lr for all orders.
             lr = 0.1 if lr is None else lr
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order3], "lr": lr})
@@ -519,7 +570,7 @@ class DOE(DeepObj):
             lr (float, optional): Learning rate. Defaults to 1e-3.
         """
         params = self.get_optimizer_params(lr)
-        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(params)
 
         return optimizer
 
@@ -543,9 +594,9 @@ class DOE(DeepObj):
         phase_map = self.get_phase_map(
             field.wvln
         )  # recommanded to have [1, H, W] shape
-        assert (
-            self.h == field.phy_size[0]
-        ), "Wave field and DOE physical should have the same physical size."
+        assert self.h == field.phy_size[0], (
+            "Wave field and DOE physical should have the same physical size."
+        )
         if not field.u.shape[-2:] == phase_map.shape[-2:]:
             raise Exception(
                 "Field and phase map resolution should be the same. Interpolation can be done but not a desired way."
@@ -674,6 +725,11 @@ class DOE(DeepObj):
         elif self.param_model == "cubic":
             surf_dict["a3"] = round(self.a3.item(), 6)
         elif self.param_model == "binary2":
+            surf_dict["order2"] = round(self.order2.item(), 6)
+            surf_dict["order4"] = round(self.order4.item(), 6)
+            surf_dict["order6"] = round(self.order6.item(), 6)
+            surf_dict["order8"] = round(self.order8.item(), 6)
+        elif self.param_model == "binary2_fast":
             surf_dict["order2"] = round(self.order2.item(), 6)
             surf_dict["order4"] = round(self.order4.item(), 6)
             surf_dict["order6"] = round(self.order6.item(), 6)

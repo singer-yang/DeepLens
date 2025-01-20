@@ -2954,7 +2954,7 @@ class GeoLens(Lens):
 
         # Calculate distance to the sensor
         last_surf = self.surfaces[-1]
-        r = torch.linspace(0.6, 1, 20).to(self.device) * last_surf.r
+        r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface(r, 0) - last_surf.d
         loss += min(flange_bound, torch.min(z_last_surf))
 
@@ -3097,7 +3097,7 @@ class GeoLens(Lens):
             ai_decay (float, optional): _description_. Defaults to 0.2.
         """
         params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
-        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(params)
         return optimizer
 
     def optimize(

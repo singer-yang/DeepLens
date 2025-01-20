@@ -43,6 +43,9 @@ class HybridLens(Lens):
         1. Aberration of the refractive lens
         2. DOE phase modulation
     """
+    def __init__(self, lens_path):
+        super().__init__(lens_path)
+        self.double()
 
     def double(self):
         self.geolens.double()
@@ -124,6 +127,7 @@ class HybridLens(Lens):
     # =====================================================================
     def analysis(self, save_name="./test.png"):
         self.draw_layout(save_name=save_name)
+        self.doe.draw_phase_map(save_name=f"{save_name}_doe.png")
 
     def prepare_sensor(self, sensor_res):
         self.geolens.prepare_sensor(sensor_res)
@@ -214,7 +218,7 @@ class HybridLens(Lens):
         params += self.geolens.get_optimizer_params(lr=lens_lr, decay=lr_decay)
         params += self.doe.get_optimizer_params(lr=doe_lr)
 
-        optimizer = torch.optim.Adam(params, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(params)
         return optimizer
 
     # =====================================================================
