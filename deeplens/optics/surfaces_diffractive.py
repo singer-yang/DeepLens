@@ -320,6 +320,7 @@ class DOE(DeepObj):
                 1 / (self.order2 + EPSILON) * r**2
                 + 1 / (self.order4 + EPSILON) * r**4
                 + 1 / (self.order6 + EPSILON) * r**6
+                + 1 / (self.order8 + EPSILON) * r**8
             )
 
         elif self.param_model == "poly1d":
