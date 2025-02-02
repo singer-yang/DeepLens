@@ -2013,7 +2013,7 @@ class GeoLens(Lens):
                     try:
                         # because oss records the starting point at position 0, we need to ignore this.
                         # the second index 0 means x coordinate
-                        height.append(np.abs(os[i + 1][0]))
+                        height.append(os[i + 1][0].abs().item())
                     except:
                         continue
 
@@ -2048,7 +2048,7 @@ class GeoLens(Lens):
                     try:
                         # Because oss records the starting point at position 0, we need to ignore this.
                         # The second index 0 means x coordinate
-                        height.append(np.abs(os[i + 1][0]))
+                        height.append(os[i + 1][0].abs().item())
                     except:
                         continue
 
