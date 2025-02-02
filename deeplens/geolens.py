@@ -1845,8 +1845,8 @@ class GeoLens(Lens):
                 avg_pupilz = self.surfaces[-1].d.item()
                 avg_pupilx = self.surfaces[-1].r
         else:
-            avg_pupilx = intersection_points[:, 0].cpu().numpy().mean()
-            avg_pupilz = intersection_points[:, 1].cpu().numpy().mean()
+            avg_pupilx = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
         if avg_pupilx < EPSILON:
             print("Small pupil is detected, use the first surface as pupil.")
