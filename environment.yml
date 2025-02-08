@@ -125,6 +125,9 @@ dependencies:
     - psutil==6.0.0
     - pyparsing==3.1.2
     - python-dateutil==2.9.0.post0
+    - PyOpenGL==3.1.9
+    - PyOpenGL-accelerate==3.1.9
+    - PySide6==6.8.2.1
     - regex==2024.5.15
     - safetensors==0.4.3
     - scikit-image==0.24.0
