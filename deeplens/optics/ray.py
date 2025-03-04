@@ -54,13 +54,13 @@ class Ray(DeepObj):
             z (float): depth.
             n (float, optional): refractive index. Defaults to 1.
         """
-        o0 = self.o.clone()
         t = (z - self.o[..., 2]) / self.d[..., 2]
-        self.o = self.o + self.d * t[..., None]
+        new_o = self.o + self.d * t[..., None]
+        self.o = torch.where(self.ra[..., None] == 1, new_o, self.o)
 
         if self.coherent:
             if t.min() > 100 and torch.get_default_dtype() == torch.float32:
-                raise Warning("Should use float64 in coherent ray tracing.")
+                raise Warning("Should use float64 in coherent ray tracing for precision.")
             else:
                 self.opl = self.opl + n * t
 
