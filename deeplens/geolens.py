@@ -669,8 +669,6 @@ class GeoLens(Lens):
             lens_range = range(0, len(self.surfaces))
 
         if is_forward:
-            # This is a hack operation for high-precision optical path difference calculation when using single precision
-            ray.propagate_to(self.surfaces[0].d - 10.0)
             valid, ray_out, oss = self.forward_tracing(ray, lens_range, record=record)
         else:
             valid, ray_out, oss = self.backward_tracing(ray, lens_range, record=record)
