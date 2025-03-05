@@ -692,8 +692,6 @@ class GeoLens(Lens):
             lens_range = range(0, len(self.surfaces))
 
         if is_forward:
-            # This is a hack operation for high-precision optical path difference calculation when using single precision
-            ray.propagate_to(self.surfaces[0].d - 10.0)
             valid, ray_out, oss = self.forward_tracing(ray, lens_range, record=record)
         else:
             valid, ray_out, oss = self.backward_tracing(ray, lens_range, record=record)
@@ -1868,8 +1866,8 @@ class GeoLens(Lens):
                 avg_pupilz = self.surfaces[-1].d.item()
                 avg_pupilx = self.surfaces[-1].r
         else:
-            avg_pupilx = intersection_points[:, 0].cpu().numpy().mean()
-            avg_pupilz = intersection_points[:, 1].cpu().numpy().mean()
+            avg_pupilx = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
         if avg_pupilx < EPSILON:
             print("Small pupil is detected, use the first surface as pupil.")
@@ -2036,7 +2034,7 @@ class GeoLens(Lens):
                     try:
                         # because oss records the starting point at position 0, we need to ignore this.
                         # the second index 0 means x coordinate
-                        height.append(np.abs(os[i + 1][0]))
+                        height.append(os[i + 1][0].abs().item())
                     except:
                         continue
 
@@ -2071,7 +2069,7 @@ class GeoLens(Lens):
                     try:
                         # Because oss records the starting point at position 0, we need to ignore this.
                         # The second index 0 means x coordinate
-                        height.append(np.abs(os[i + 1][0]))
+                        height.append(os[i + 1][0].abs().item())
                     except:
                         continue
 

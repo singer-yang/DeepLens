@@ -59,7 +59,7 @@ class Surface(DeepObj):
         # ray = self.to_global_coord(ray)
         return ray
 
-    def intersect(self, ray, n):
+    def intersect(self, ray, n=1.0):
         """Solve ray-surface intersection and update ray position and opl.
 
         Args:
@@ -90,7 +90,10 @@ class Surface(DeepObj):
 
         This function will only update valid rays.
         """
-        d_surf = self.d + self.d_perturb
+        if hasattr(self, "d_perturb"):
+            d_surf = self.d + self.d_perturb
+        else:
+            d_surf = self.d
 
         # 1. Inital guess of t. (If the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error)
         t0 = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
@@ -196,13 +199,18 @@ class Surface(DeepObj):
         n = self.normal(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
         if forward:
-            n = -n
+            n = - n
 
         # Reflect
         cos_alpha = -(n * ray.d).sum(-1)
-        ray.d = ray.d + 2 * cos_alpha[..., None] * n
-        ray.d = F.normalize(ray.d, p=2, dim=-1)
-
+        new_d = ray.d + 2 * cos_alpha.unsqueeze(-1) * n
+        new_d = F.normalize(new_d, p=2, dim=-1)
+        
+        # Update valid rays
+        valid = (ray.ra > 0)
+        new_d[~valid] = ray.d[~valid]
+        ray.d = new_d
+        
         return ray
 
     def normal(self, ray):
@@ -360,7 +368,7 @@ class Surface(DeepObj):
                 & (torch.abs(y) <= self.h / 2)
             )
         else:
-            valid = self.valid(x, y) & ((x**2 + y**2) <= self.r**2)
+            valid = ((x**2 + y**2) < self.r**2) & self.valid(x, y)
 
         return valid
 
@@ -1840,10 +1848,9 @@ class ThinLens(Surface):
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
             ray.ra > 0
         )
-
-        # Update rays
+        
+        # Update ray position
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-
         new_o[~valid] = ray.o[~valid]
         ray.o = new_o
         ray.ra = ray.ra * valid
@@ -1916,3 +1923,15 @@ class ThinLens(Surface):
         d = self.d.item()
         r = self.r
         ax.annotate("", xy=(d, r), xytext=(d, -r), arrowprops=dict(arrowstyle="<->", color=color, linestyle=linestyle, linewidth=0.75),)
+
+    def surf_dict(self):
+        surf_dict = {
+            "type": "ThinLens",
+            "f": round(self.f.item(), 4),
+            "r": round(self.r, 4),
+            "(d)": round(self.d.item(), 4),
+            "mat2": "air",
+        }
+
+        return surf_dict
+
