@@ -513,6 +513,10 @@ class Lens(DeepObj):
     def add_noise(self, img, bit=10):
         """Add sensor read noise and shot noise to RAW space image. Shot and read noise are measured in digital counts (N bit).
 
+        Reference:
+            [1] "Unprocessing Images for Learned Raw Denoising."
+            [2] https://github.com/timothybrooks/unprocessing
+
         Args:
             img (tensor): RAW space image. Shape of [N, C, H, W]. Can be either float [0, 1] or integer [0, 2^bit - 1].
             bit (int): Bit depth for noise simulation.

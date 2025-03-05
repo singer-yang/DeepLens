@@ -30,11 +30,11 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from .lens import Lens
-from .optics import DEPTH, EPSILON, SELLMEIER_TABLE, SPP_CALC, SPP_PSF, Ray, PSF_KS
+from .optics import DEPTH, EPSILON, PSF_KS, SELLMEIER_TABLE, SPP_CALC, SPP_PSF, Ray
 from .optics.basics import (
-    SPP_COHERENT,
     DEFAULT_WAVE,
     GEO_GRID,
+    SPP_COHERENT,
     WAVE_RGB,
     init_device,
 )
@@ -157,10 +157,33 @@ class GeoLens(Lens):
         avg_pupilz, avg_pupilx = self.entrance_pupil()
         self.fnum = self.foclen / avg_pupilx / 2
 
-        if self.r_sensor < 8.0:
+        # Constraints for lens design
+        if self.r_sensor < 12.0:
             self.is_cellphone = True
+
+            self.dist_min = 0.1
+            self.dist_max = 0.6 #float("inf")
+            self.thickness_min = 0.3
+            self.thickness_max = 1.5
+            self.flange_min = 0.5
+            self.flange_max = float("inf")
+
+            self.sag_max = 0.8
+            self.grad_max = 1.0
+            self.grad2_max = 100.0
         else:
             self.is_cellphone = False
+
+            self.dist_min = 0.1
+            self.dist_max = float("inf")
+            self.thickness_min = 0.3
+            self.thickness_max = float("inf")
+            self.flange_min = 0.5
+            self.flange_max = float("inf")
+
+            self.sag_max = 8.0
+            self.grad_max = 1.0
+            self.grad2_max = 100.0
 
     def find_aperture(self):
         """Find aperture. If the lens has no aperture, use the surface with the smallest radius."""
@@ -300,7 +323,7 @@ class GeoLens(Lens):
                 )
             elif sampling == "radial":
                 r2 = torch.rand((M, M)) * pupilr**2
-                theta = torch.rand((M, M)) * 2 * math.pi
+                theta = torch.rand((M, M)) * 2 * torch.pi
                 x = torch.sqrt(r2) * torch.cos(theta)
                 y = torch.sqrt(r2) * torch.sin(theta)
             else:
@@ -320,7 +343,7 @@ class GeoLens(Lens):
                 )
             elif sampling == "radial":
                 r2 = torch.rand((M, M)) * R**2
-                theta = torch.rand((M, M)) * 2 * math.pi
+                theta = torch.rand((M, M)) * 2 * torch.pi
                 x = torch.sqrt(r2) * torch.cos(theta)
                 y = torch.sqrt(r2) * torch.sin(theta)
             else:
@@ -497,7 +520,7 @@ class GeoLens(Lens):
 
         # Sample pupil and compute d
         pupilz, pupilr = self.entrance_pupil(shrink_pupil=shrink_pupil)
-        theta = torch.rand(spp) * 2 * math.pi
+        theta = torch.rand(spp) * 2 * torch.pi
         r = torch.sqrt(torch.rand(spp) * pupilr**2 + EPSILON)
         x2 = r * torch.cos(theta)
         y2 = r * torch.sin(theta)
@@ -600,7 +623,7 @@ class GeoLens(Lens):
 
         # => Naive implementation
         if spp % num_angle != 0 or spp >= 10000:
-            theta = torch.rand((spp, H, W), device=self.device) * 2 * math.pi
+            theta = torch.rand((spp, H, W), device=self.device) * 2 * torch.pi
             r2 = torch.rand((spp, H, W), device=self.device) * pupilr**2
             r = torch.sqrt(r2 + EPSILON)
 
@@ -619,10 +642,10 @@ class GeoLens(Lens):
                     delta_theta = (
                         torch.rand((1, *res), device=self.device)
                         * 2
-                        * math.pi
+                        * torch.pi
                         / num_angle
                     )
-                    theta = delta_theta + i * 2 * math.pi / num_angle
+                    theta = delta_theta + i * 2 * torch.pi / num_angle
 
                     delta_r2 = (
                         torch.rand((1, *res), device=self.device)
@@ -2379,39 +2402,6 @@ class GeoLens(Lens):
     ):
         """Draw lens layout in 2D."""
 
-        def plot(ax, z, x, color, linestyle="-"):
-            p = torch.stack((x, torch.zeros_like(x), z), axis=-1)
-            p = p.cpu().detach().numpy()
-            ax.plot(
-                p[..., 2], p[..., 0], color=color, linestyle=linestyle, linewidth=0.8
-            )
-
-        def draw_aperture(ax, surface, color):
-            N = 3
-            d = surface.d
-            R = surface.r
-            APERTURE_WEDGE_LENGTH = 0.05 * R  # [mm]
-            APERTURE_WEDGE_HEIGHT = 0.15 * R  # [mm]
-
-            # wedge length
-            z = torch.linspace(
-                d.item() - APERTURE_WEDGE_LENGTH,
-                d.item() + APERTURE_WEDGE_LENGTH,
-                N,
-                device=self.device,
-            )
-            x = -R * torch.ones(N, device=self.device)
-            plot(ax, z, x, color)
-            x = R * torch.ones(N, device=self.device)
-            plot(ax, z, x, color)
-
-            # wedge height
-            z = d * torch.ones(N, device=self.device)
-            x = torch.linspace(R, R + APERTURE_WEDGE_HEIGHT, N, device=self.device)
-            plot(ax, z, x, color)
-            x = torch.linspace(-R - APERTURE_WEDGE_HEIGHT, -R, N, device=self.device)
-            plot(ax, z, x, color)
-
         # If no ax is given, generate a new one.
         if ax is None and fig is None:
             fig, ax = plt.subplots(figsize=(5, 5))
@@ -2420,44 +2410,19 @@ class GeoLens(Lens):
         for i, s in enumerate(self.surfaces):
             # DOE
             if isinstance(s, Diffractive_GEO):
-                # DOE
-                r = torch.linspace(-s.r, s.r, 128, device=self.device)
-                max_offset = self.d_sensor.item() / 100
-                z = (
-                    s.surface(r, torch.zeros_like(r), max_offset=max_offset)
-                    + s.d
-                    - max_offset
-                )
-                plot(ax, z, r, color)
-
-                # Draw DOE base
-                z_bound = torch.tensor(
-                    [z[0], z[0] - max_offset, z[0] - max_offset, z[-1]]
-                )
-                x = torch.tensor([-s.r, -s.r, s.r, s.r])
-                plot(ax, z_bound, x, color)
+                s.draw_widget(ax, color="black")
 
             # Thin lens
             elif isinstance(s, ThinLens):
-                ax.annotate(
-                    "",
-                    xy=(s.d, s.r),
-                    xytext=(s.d, -s.r),
-                    arrowprops=dict(arrowstyle="<->", color="black"),
-                )
+                s.draw_widget(ax, color="black")
 
             # Aperture
             elif isinstance(s, Aperture):
-                draw_aperture(ax, s, color="orange")
-
+                s.draw_widget(ax, color="orange")
+            
             # Lens surface
             else:
-                # aperture sampling
-                r = torch.linspace(-s.r, s.r, 128, device=self.device)
-                z = s.surface_with_offset(
-                    r, torch.zeros(len(r), device=self.device)
-                )  # draw surface
-                plot(ax, z, r, color, linestyle)
+                s.draw_widget(ax, color="black")
 
         # Connect two surfaces
         for i in range(len(self.surfaces)):
@@ -2465,25 +2430,24 @@ class GeoLens(Lens):
                 s_prev = self.surfaces[i]
                 s = self.surfaces[i + 1]
 
-                r_prev = s_prev.r
-                r = s.r
-                sag_prev = s_prev.surface_with_offset(r_prev, 0.0)
-                sag = s.surface_with_offset(r, 0.0)
+                r_prev = float(s_prev.r)
+                r = float(s.r)
+                sag_prev = s_prev.surface_with_offset(r_prev, 0.0).item()
+                sag = s.surface_with_offset(r, 0.0).item()
 
                 if zmx_format:
                     if r > r_prev:
-                        z = torch.tensor((sag_prev, sag_prev, sag))
-                        x = torch.tensor([r_prev, r, r])
+                        z = np.array([sag_prev, sag_prev, sag])
+                        x = np.array([r_prev, r, r])
                     else:
-                        z = torch.tensor((sag_prev, sag, sag))
-                        x = torch.tensor([r_prev, r_prev, r])
-
+                        z = np.array([sag_prev, sag, sag])
+                        x = np.array([r_prev, r, r])
                 else:
-                    z = torch.tensor([sag_prev, sag])
-                    x = torch.tensor([r_prev, r])
+                    z = np.array([sag_prev, sag])
+                    x = np.array([r_prev, r])
 
-                plot(ax, z, x, color)
-                plot(ax, z, -x, color)
+                ax.plot(z, -x, color, linewidth=0.75)
+                ax.plot(z, x, color, linewidth=0.75)
                 s_prev = s
 
         # Draw sensor
@@ -2493,16 +2457,6 @@ class GeoLens(Lens):
             color,
         )
 
-        # Draw coordinate
-        origin = [0, -max(self.surfaces[0].r * 1.2, self.r_sensor)]
-        ax.arrow(
-            origin[0], origin[1], 1, 0, head_width=0.1, head_length=0.1, fc="k", ec="k"
-        )  # z
-        ax.text(origin[0] + 1.05, origin[1], "z", fontsize=8, ha="left", va="center")
-        ax.arrow(
-            origin[0], origin[1], 0, 1, head_width=0.1, head_length=0.1, fc="k", ec="k"
-        )  # x
-        ax.text(origin[0], origin[1] + 1.05, "y", fontsize=8, ha="center", va="bottom")
 
         # Figure size
         if fix_bound:
@@ -2902,8 +2856,12 @@ class GeoLens(Lens):
         ).abs()
         return loss
 
-    def loss_surface(self, sag_bound=1.0, grad_bound=1.0, grad2_bound=10.0):
-        """Penalize large sag values"""
+    def loss_surface(self):
+        """Penalize large sag, first-order derivative, and second-order derivative to prevent surface from being too curved."""
+        sag_max = self.sag_max
+        grad_max = self.grad_max
+        grad2_max = self.grad2_max
+
         loss = 0.0
         for i in self.find_diff_surf():
             x_ls = torch.linspace(0.0, 1.0, 20).to(self.device) * self.surfaces[i].r
@@ -2911,33 +2869,32 @@ class GeoLens(Lens):
 
             # Sag
             sag_ls = self.surfaces[i].sag(x_ls, y_ls)
-            loss += max(sag_ls.max() - sag_ls.min(), sag_bound)
+            loss += max(sag_ls.max() - sag_ls.min(), sag_max)
 
             # 1st-order derivative
             grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
-            loss += 10 * max(grad_ls.abs().max(), grad_bound)
+            loss += 10 * max(grad_ls.abs().max(), grad_max)
 
             # 2nd-order derivative
             grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
-            loss += 10 * max(grad2_ls.abs().max(), grad2_bound)
+            loss += 10 * max(grad2_ls.abs().max(), grad2_max)
 
         return loss
 
-    def loss_self_intersec(self, dist_bound=0.2, thickness_bound=0.4, flange_bound=0.6):
+    def loss_self_intersec(self):
         """Loss function to avoid self-intersection. Loss is designed by the distance to the next surfaces.
-
-        Args:
-            dist_bound (float): distance bound.
-            thickness_bound (float): thickness bound.
-
-        Parameter settings:
-            For cellphone lens: dist_bound=0.1, thickness_bound=0.4
-            For camera lens: dist_bound=1.0, thickness_bound=1.0
-            General: dist_bound=thickness_bound=0.5 * (total_thickness_of_lens / lens_element_number / 2)
         """
-        loss = 0.0
+        dist_min = self.dist_min
+        dist_max = self.dist_max
+        thickness_min = self.thickness_min
+        thickness_max = self.thickness_max
+        flange_min = self.flange_min
+        flange_max = self.flange_max
 
-        # Calculate distance between surfaces
+        loss_min = 0.0
+        loss_max = 0.0
+        
+        # Constraints for distance/thickness between surfaces
         for i in range(len(self.surfaces) - 1):
             current_surf = self.surfaces[i]
             next_surf = self.surfaces[i + 1]
@@ -2945,20 +2902,29 @@ class GeoLens(Lens):
             r = torch.linspace(0.0, 1.0, 20).to(self.device) * current_surf.r
             z_front = current_surf.surface(r, 0) + current_surf.d
             z_next = next_surf.surface(r, 0) + next_surf.d
+            
+            # Minimum distance between surfaces
             dist_min = torch.min(z_next - z_front)
-
             if self.surfaces[i].mat2.name != "air":
-                loss += min(thickness_bound, dist_min)
+                loss_min += min(thickness_min, dist_min)
             else:
-                loss += min(dist_bound, dist_min)
+                loss_min += min(dist_min, dist_min)
 
-        # Calculate distance to the sensor
+            # Maximum distance between surfaces
+            dist_max = torch.max(z_next - z_front)
+            if self.surfaces[i].mat2.name != "air":
+                pass
+            else:
+                loss_max += max(thickness_max, dist_max)
+
+        # Constraints for distance to the sensor (flange distance)
         last_surf = self.surfaces[-1]
         r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface(r, 0) - last_surf.d
-        loss += min(flange_bound, torch.min(z_last_surf))
+        loss_min += min(flange_min, torch.min(z_last_surf))
+        loss_max += max(flange_max, torch.min(z_last_surf))
 
-        return -loss
+        return loss_max - loss_min
 
     def loss_ray_angle(self, target=0.5, depth=DEPTH):
         """Loss function designed to penalize large incident angle rays.
@@ -2990,12 +2956,8 @@ class GeoLens(Lens):
         loss_focus = self.loss_infocus()
 
         if self.is_cellphone:
-            loss_intersec = self.loss_self_intersec(
-                dist_bound=0.1, thickness_bound=0.3, flange_bound=0.5
-            )
-            loss_surf = self.loss_surface(
-                sag_bound=0.8, grad_bound=1.0, grad2_bound=100.0
-            )
+            loss_intersec = self.loss_self_intersec()
+            loss_surf = self.loss_surface()
             loss_angle = self.loss_ray_angle()
 
             w_focus = 2.0 if w_focus is None else w_focus
@@ -3003,13 +2965,11 @@ class GeoLens(Lens):
                 w_focus * loss_focus
                 + 1.0 * loss_intersec
                 + 1.0 * loss_surf
-                + 0.05 * loss_angle
+                + 0.1 * loss_angle
             )
         else:
-            loss_intersec = self.loss_self_intersec(
-                dist_bound=0.1, thickness_bound=3.0, flange_bound=10.0
-            )
-            loss_surf = self.loss_surface(sag_bound=7.0, grad_bound=1.0)
+            loss_intersec = self.loss_self_intersec()
+            loss_surf = self.loss_surface()
             loss_angle = self.loss_ray_angle()
 
             w_focus = 5.0 if w_focus is None else w_focus
@@ -3025,17 +2985,6 @@ class GeoLens(Lens):
     # ====================================================================================
     # Optimization
     # ====================================================================================
-
-    def activate_surf(self, activate=True, diff_surf_range=None):
-        """Activate gradient for each surface."""
-        if diff_surf_range is None:
-            diff_surf_range = range(len(self.surfaces))
-            if self.aper_idx is not None:
-                del diff_surf_range[self.aper_idx]
-
-        for i in diff_surf_range:
-            self.surfaces[i].activate_grad(activate)
-
     def get_optimizer_params(
         self,
         lr=[1e-4, 1e-4, 1e-1, 1e-3],
@@ -3072,16 +3021,25 @@ class GeoLens(Lens):
                 )
 
             elif isinstance(surf, Diffractive_GEO):
-                params += surf.get_optimizer_params(lr=lr[2])
+                params += surf.get_optimizer_params(lr=lr[3])
+
+            # elif isinstance(surf, GaussianRBF):
+            #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
+
+            # elif isinstance(surf, NURBS):
+            #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
 
             elif isinstance(surf, Plane):
                 pass
+
+            # elif isinstance(surf, PolyEven):
+            #     params += surf.get_optimizer_params(lr=lr, optim_mat=optim_mat)
 
             elif isinstance(surf, Spheric):
                 params += surf.get_optimizer_params(lr=lr[:2], optim_mat=optim_mat)
 
             else:
-                raise Exception("Surface type not supported yet.")
+                raise Exception(f"Surface type {surf.__class__.__name__} is not supported for optimization yet.")
 
         self.d_sensor.requires_grad = True
         params += [{"params": self.d_sensor, "lr": lr[1]}]
@@ -3110,6 +3068,7 @@ class GeoLens(Lens):
         importance_sampling=False,
         optim_mat=False,
         match_mat=False,
+        shape_control=True,
         result_dir="./results",
     ):
         """Optimize the lens by minimizing rms errors.
@@ -3126,7 +3085,6 @@ class GeoLens(Lens):
         num_grid = 31
         spp = 1024
 
-        shape_control = True
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
         result_dir = (
@@ -3250,73 +3208,43 @@ class GeoLens(Lens):
             data = json.load(f)
             d = 0.0
             for surf_dict in data["surfaces"]:
+                surf_dict["d"] = d
+                
                 if surf_dict["type"] == "Aperture":
-                    s = Aperture(r=surf_dict["r"], d=d)
+                    s = Aperture.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Aspheric":
-                    if "ai" in surf_dict:
-                        if "roc" in surf_dict:
-                            s = Aspheric(
-                                c=1 / surf_dict["roc"],
-                                r=surf_dict["r"],
-                                d=d,
-                                k=surf_dict["k"],
-                                ai=surf_dict["ai"],
-                                mat2=surf_dict["mat2"],
-                            )
-                        else:
-                            s = Aspheric(
-                                c=surf_dict["c"],
-                                r=surf_dict["r"],
-                                d=d,
-                                k=surf_dict["k"],
-                                ai=surf_dict["ai"],
-                                mat2=surf_dict["mat2"],
-                            )
-                    else:
-                        s = Aspheric(
-                            c=1 / surf_dict["roc"],
-                            r=surf_dict["r"],
-                            d=d,
-                            k=surf_dict["k"] if "k" in surf_dict else 0.001,
-                            mat2=surf_dict["mat2"],
-                        )
-                        s.init_ai(ai_degree=6)
-
-                # elif surf_dict['type'] == 'AspheCubic':
-                #     s = AspheCubic(c=1/surf_dict['roc'], r=surf_dict['r'], d=d, k=surf_dict['k'], ai=surf_dict['ai'], b=surf_dict['b'], mat2=surf_dict['mat2'])
+                    s = Aspheric.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Cubic":
-                    s = Cubic(
-                        r=surf_dict["r"], d=d, b=surf_dict["b"], mat2=surf_dict["mat2"]
-                    )
+                    s = Cubic.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Diffractive_GEO":
-                    s = Diffractive_GEO(l=surf_dict["l"], d=d, glass=surf_dict["glass"])
+                    s = Diffractive_GEO.init_from_dict(surf_dict)
+
+                # elif surf_dict["type"] == "GaussianRBF":
+                #     s = GaussianRBF.init_from_dict(surf_dict)
+
+                # elif surf_dict["type"] == "NURBS":
+                #     s = NURBS.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Plane":
-                    s = Plane(r=surf_dict["r"], d=d, mat2=surf_dict["mat2"])
+                    s = Plane.init_from_dict(surf_dict)
+
+                # elif surf_dict["type"] == "PolyEven":
+                #     s = PolyEven.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Stop":
-                    s = Aperture(r=surf_dict["r"], d=d)
+                    s = Aperture.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Spheric":
-                    if "roc" in surf_dict:
-                        c = 1 / surf_dict["roc"] if surf_dict["roc"] != 0 else 0
-                        s = Spheric(c=c, r=surf_dict["r"], d=d, mat2=surf_dict["mat2"])
-                    else:
-                        s = Spheric(
-                            c=surf_dict["c"],
-                            r=surf_dict["r"],
-                            d=d,
-                            mat2=surf_dict["mat2"],
-                        )
+                    s = Spheric.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "ThinLens":
-                    s = ThinLens(f=surf_dict["f"], r=surf_dict["r"], d=d)
+                    s = ThinLens.init_from_dict(surf_dict)
 
                 else:
-                    raise Exception("Surface type not implemented.")
+                    raise Exception(f"Surface type {surf_dict['type']} is not implemented in GeoLens.read_lens_json().")
 
                 self.surfaces.append(s)
                 d += surf_dict["d_next"]
@@ -3544,13 +3472,13 @@ def create_lens(
     d_total = 0.0
     for elem_type in lens_type:
         if elem_type == "Aperture":
-            d_next = np.random.rand(1).astype(np.float32) + 0.5
+            d_next = (torch.rand(1) + 0.5).item()  # Replace numpy with torch
             surfaces.append(Aperture(r=aper_r, d=d_total))
             d_total += d_next
 
         elif isinstance(elem_type, list):
             if len(elem_type) == 1 and elem_type[0] == "Aperture":
-                d_next = np.random.rand(1).astype(np.float32) + 0.5
+                d_next = (torch.rand(1) + 0.5).item()
                 surfaces.append(Aperture(r=aper_r, d=d_total))
                 d_total += d_next
 
@@ -3558,10 +3486,10 @@ def create_lens(
                 for i, surface_type in enumerate(elem_type):
                     if i == len(elem_type) - 1:
                         mat = "air"
-                        d_next = np.random.rand(1).astype(np.float32) + 0.5
+                        d_next = (torch.rand(1) + 0.5).item()
                     else:
                         mat = random.choice(mat_names)
-                        d_next = np.random.rand(1).astype(np.float32) + 1.0
+                        d_next = (torch.rand(1) + 1.0).item()
 
                     surfaces.append(
                         create_surface(surface_type, d_total, aper_r, imgh, mat)
