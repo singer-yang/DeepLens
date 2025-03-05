@@ -37,7 +37,7 @@ class Surface(DeepObj):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"], surf_dict["is_square"])
+        raise NotImplementedError(f"Surface.init_from_dict is not implemented for {cls.__name__}.")
     
     # ==============================
     # Intersection and Refraction
@@ -335,6 +335,8 @@ class Surface(DeepObj):
     def d2gd(self, x, y):
         """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdxdy, d2gdy2) =  (g''xx, g''xy, g''yy).
 
+        As the second-order derivatives are not commonly used in the lens design, we just return zeros.
+
         Args:
             x (tensor): x coordinate
             y (tensor): y coordinate
@@ -344,7 +346,7 @@ class Surface(DeepObj):
             d2gdxdy (tensor): d2g / dxdy
             d2gdy2 (tensor): d2g / dy2
         """
-        raise NotImplementedError()
+        return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
 
     def is_valid(self, p):
         return (self.sdf_approx(p) < 0.0).bool()
@@ -369,7 +371,7 @@ class Surface(DeepObj):
     def surface_sample(self, N=1000):
         """Sample uniform points on the surface."""
         r_max = self.r
-        theta = torch.rand(N) * 2 * np.pi
+        theta = torch.rand(N) * 2 * torch.pi
         r = torch.sqrt(torch.rand(N) * r_max**2)
         x2 = r * torch.cos(theta)
         y2 = r * torch.sin(theta)
@@ -402,9 +404,6 @@ class Surface(DeepObj):
     # =========================================
     # Optimization-related methods
     # =========================================
-    def activate_grad(self, activate=True):
-        raise NotImplementedError()
-
     def get_optimizer_params(self, lr, optim_mat=False):
         raise NotImplementedError()
 
@@ -412,6 +411,9 @@ class Surface(DeepObj):
         params = self.get_optimizer_params(lr, optim_mat=optim_mat)
         return torch.optim.Adam(params)
 
+    # =========================================
+    # Utils methods
+    # =========================================
     def surf_dict(self):
         surf_dict = {
             "type": self.__class__.__name__,
@@ -426,6 +428,12 @@ class Surface(DeepObj):
     def zmx_str(self, surf_idx, d_next):
         """Return Zemax surface string."""
         raise NotImplementedError()
+
+    def draw_widget(self, ax, color="black", linestyle="solid"):
+        """Draw wedge for the surface on the plot."""
+        r = torch.linspace(-self.r, self.r, 128, device=self.device)
+        z = self.surface_with_offset(r, torch.zeros(len(r), device=self.device))
+        ax.plot(z.cpu().detach().numpy(), r.cpu().detach().numpy(), color=color, linestyle=linestyle, linewidth=0.75)
 
     @torch.no_grad()
     def perturb(self, d_precision=0.0005, r_precision=0.001):
@@ -443,6 +451,14 @@ class Aperture(Surface):
         Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
         self.diffraction = diffraction
         self.to(device)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        if "diffraction" in surf_dict:
+            diffraction = surf_dict["diffraction"]
+        else:
+            diffraction = False
+        return cls(surf_dict["r"], surf_dict["d"], diffraction)
 
     def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
         """Compute output ray after intersection and refraction.
@@ -480,6 +496,26 @@ class Aperture(Surface):
     def g(self, x, y):
         """Compute surface height."""
         return torch.zeros_like(x)
+    
+    def draw_widget(self, ax, color="black", linestyle="solid"):
+        """Draw aperture wedge on the figure."""
+        d = self.d.item()
+        aper_wedge_l = 0.05 * self.r  # [mm]
+        aper_wedge_h = 0.15 * self.r  # [mm]
+
+        # Parallel edges
+        z = np.linspace(d - aper_wedge_l, d + aper_wedge_l, 3)
+        x = - self.r * np.ones(3)
+        ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
+        x = self.r * np.ones(3)
+        ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
+
+        # Vertical edges
+        z = d * np.ones(3)
+        x = np.linspace(self.r, self.r + aper_wedge_h, 3)
+        ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
+        x = np.linspace(-self.r - aper_wedge_h, -self.r, 3)
+        ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
 
     def surf_dict(self):
         """Return a dict of surface."""
@@ -561,63 +597,20 @@ class Aspheric(Surface):
 
         self.to(device)
 
-    def init(self, ai_degree=6):
-        """Initialize all parameters."""
-        self.init_c()
-        self.init_k()
-        self.init_ai(ai_degree=ai_degree)
-        self.init_d()
-
-    def init_c(self, c_bound=0.0002):
-        """Initialize lens surface c parameters by small values between [-0.05, 0.05],
-        which means roc should be (-inf, 20) or (20, inf)
-        """
-        self.c = c_bound * (torch.rand(1) - 0.5).to(self.device)
-
-    def init_ai(self, ai_degree=3):
-        """If ai is None, set to random value.
-        For different length, create a new initilized value and set original ai.
-        """
-        old_ai_degree = self.ai_degree
-        self.ai_degree = ai_degree
-        if old_ai_degree == 0:
-            if ai_degree == 4:
-                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-            elif ai_degree == 5:
-                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai10 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-            elif ai_degree == 6:
-                self.ai2 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai4 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai6 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai8 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai10 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-                self.ai12 = (torch.rand(1, device=self.device) - 0.5) * 1e-30
-            else:
-                for i in range(1, self.ai_degree + 1):
-                    exec(
-                        f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * 1e-30"
-                    )
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        if "roc" in surf_dict:
+            c = 1 / surf_dict["roc"]
         else:
-            for i in range(old_ai_degree + 1, self.ai_degree + 1):
-                exec(
-                    f"self.ai{2 * i} = (torch.rand(1, device=self.device)-0.5) * 1e-30"
-                )
+            c = surf_dict["c"]
+        
+        if "ai" in surf_dict:
+            ai = surf_dict["ai"]
+        else:
+            ai = torch.rand(6) * 1e-30
 
-    def init_k(self, bound=1):
-        """When k is 0, set to a random value."""
-        if self.k == 0:
-            k = torch.rand(1) * bound
-            self.k = k.to(self.device)
+        return cls(surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"])
 
-    def init_d(self, bound=0.1):
-        pass
 
     def g(self, x, y):
         """Compute surface height."""
@@ -985,6 +978,10 @@ class Cubic(Surface):
         self.rotate_angle = 0.0
         self.to(device)
 
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        return cls(surf_dict["r"], surf_dict["d"], surf_dict["b"], surf_dict["mat2"])
+
     def g(self, x, y):
         """Compute surface height z(x, y)."""
         if self.rotate_angle != 0:
@@ -1111,7 +1108,7 @@ class Diffractive_GEO(Surface):
     """
 
     def __init__(
-        self, l, d, thickness=0.5, glass="test", param_model="binary2", device="cpu"
+        self, l, d, glass="test", param_model="binary2", thickness=0.5, device="cpu"
     ):
         Surface.__init__(
             self, l / np.sqrt(2), d, mat2="air", is_square=True, device=device
@@ -1131,6 +1128,18 @@ class Diffractive_GEO(Surface):
 
         self.to(device)
         self.init_param_model(param_model)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        if "glass" in surf_dict:
+            glass = surf_dict["glass"]
+        else:
+            glass = "test"
+        if "thickness" in surf_dict:
+            thickness = surf_dict["thickness"]
+        else:
+            thickness = 0.5
+        return cls(surf_dict["l"], surf_dict["d"], glass, surf_dict["param_model"], thickness)
 
     def init_param_model(self, param_model="binary2"):
         self.param_model = param_model
@@ -1246,7 +1255,7 @@ class Diffractive_GEO(Surface):
 
         if self.param_model == "fresnel":
             phi = (
-                -2 * np.pi * torch.fmod((x**2 + y**2) / (2 * 0.55e-3 * self.f0), 1)
+                -2 * torch.pi * torch.fmod((x**2 + y**2) / (2 * 0.55e-3 * self.f0), 1)
             )  # unit [mm]
 
         elif self.param_model == "binary2":
@@ -1369,31 +1378,15 @@ class Diffractive_GEO(Surface):
     # ==============================
     # Optimization and other functions
     # ==============================
-    def activate_grad(self, activate=True):
-        """Activate gradient for all parameters."""
-        if self.param_model == "binary2":
-            self.order2.requires_grad = activate
-            self.order4.requires_grad = activate
-            self.order6.requires_grad = activate
-        elif self.param_model == "poly1d":
-            self.order2.requires_grad = activate
-            self.order3.requires_grad = activate
-            self.order4.requires_grad = activate
-            self.order5.requires_grad = activate
-            self.order6.requires_grad = activate
-            self.order7.requires_grad = activate
-        elif self.param_model == "grating":
-            self.theta.requires_grad = activate
-            self.alpha.requires_grad = activate
-        else:
-            raise NotImplementedError
-
     def get_optimizer_params(self, lr=None):
         """Generate optimizer parameters."""
-        self.activate_grad()
         params = []
         if self.param_model == "binary2":
             lr = 0.001 if lr is None else lr
+            self.order2.requires_grad = True
+            self.order4.requires_grad = True
+            self.order6.requires_grad = True
+            self.order8.requires_grad = True
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
             params.append({"params": [self.order6], "lr": lr})
@@ -1401,6 +1394,12 @@ class Diffractive_GEO(Surface):
 
         elif self.param_model == "poly1d":
             lr = 0.001 if lr is None else lr
+            self.order2.requires_grad = True
+            self.order3.requires_grad = True
+            self.order4.requires_grad = True
+            self.order5.requires_grad = True
+            self.order6.requires_grad = True
+            self.order7.requires_grad = True
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order3], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
@@ -1410,6 +1409,8 @@ class Diffractive_GEO(Surface):
 
         elif self.param_model == "grating":
             lr = 0.1 if lr is None else lr
+            self.theta.requires_grad = True
+            self.alpha.requires_grad = True
             params.append({"params": [self.theta], "lr": lr})
             params.append({"params": [self.alpha], "lr": lr})
 
@@ -1491,6 +1492,27 @@ class Diffractive_GEO(Surface):
             self.alpha = ckpt["alpha"].to(self.device)
         else:
             raise Exception("Unknown parameterization.")
+        
+
+    def draw_widget(self, ax, color="black", linestyle="-"):
+        """Draw DOE as a two-side surface."""
+        max_offset = self.d.item() / 100
+        d = self.d.item()
+        
+        # Draw DOE
+        roc = self.l
+        x = np.linspace(-self.r, self.r, 128)
+        y = np.zeros_like(x)
+        r = np.sqrt(x**2 + y**2 + EPSILON)
+        sag = roc * (1 - np.sqrt(1 - r**2 / roc**2))
+        sag = max_offset - np.fmod(sag, max_offset)
+        ax.plot(d + sag, x, color=color, linestyle=linestyle, linewidth=0.75)
+
+        # Draw DOE base
+        z_bound = [d + sag[0], d + sag[0] + max_offset, d + sag[0] + max_offset, d + sag[-1]]
+        x_bound = [-self.r, -self.r, self.r, self.r]
+        ax.plot(z_bound, x_bound, color=color, linestyle=linestyle, linewidth=0.75)
+
 
     def surf_dict(self):
         """Return surface parameters."""
@@ -1549,7 +1571,6 @@ class Diffractive_GEO(Surface):
 
         return surf_dict
 
-
 class Mirror(Surface):
     def __init__(self, l, d, device="cpu"):
         """Mirror surface."""
@@ -1557,6 +1578,10 @@ class Mirror(Surface):
             self, l / np.sqrt(2), d, mat2="air", is_square=True, device=device
         )
         self.l = l
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        return cls(surf_dict["l"], surf_dict["d"], surf_dict["mat2"])
 
     def intersect(self, ray, **kwargs):
         # Solve intersection
@@ -1598,6 +1623,10 @@ class Plane(Surface):
         """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
         Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
         self.l = r * np.sqrt(2)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
 
     def intersect(self, ray, n=1.0):
         """Solve ray-surface intersection and update ray data."""
@@ -1659,7 +1688,6 @@ class Plane(Surface):
 
 class Spheric(Surface):
     """Spheric surface."""
-
     def __init__(self, c, r, d, mat2, device="cpu"):
         super(Spheric, self).__init__(r, d, mat2, is_square=False, device=device)
         self.c = torch.tensor(c)
@@ -1667,6 +1695,14 @@ class Spheric(Surface):
         self.c_perturb = 0.0
         self.d_perturb = 0.0
         self.to(device)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        if "roc" in surf_dict:
+            c = 1 / surf_dict["roc"]
+        else:
+            c = surf_dict["c"]
+        return cls(c, surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
 
     def g(self, x, y):
         """Compute surfaces sag z = r**2 * c / (1 - sqrt(1 - r**2 * c**2))"""
@@ -1792,6 +1828,10 @@ class ThinLens(Surface):
         Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
         self.f = torch.tensor(f)
 
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        return cls(surf_dict["f"], surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
+
     def intersect(self, ray, n=1.0):
         """Solve ray-surface intersection and update rays."""
         # Solve intersection
@@ -1871,3 +1911,8 @@ class ThinLens(Surface):
 
     def dgd(self, x, y):
         return torch.zeros_like(x), torch.zeros_like(x)
+
+    def draw_widget(self, ax, color="black", linestyle="-"):
+        d = self.d.item()
+        r = self.r
+        ax.annotate("", xy=(d, r), xytext=(d, -r), arrowprops=dict(arrowstyle="<->", color=color, linestyle=linestyle, linewidth=0.75),)

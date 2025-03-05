@@ -32,7 +32,7 @@ class DOE(DeepObj):
         # DOE geometry
         self.d = torch.tensor([d]) if not isinstance(d, torch.Tensor) else d
         self.l = l
-        self.r = l / 2 * np.sqrt(2)
+        self.r = l / 2 * math.sqrt(2)
         self.w = self.l
         self.h = self.l
 
@@ -297,7 +297,7 @@ class DOE(DeepObj):
             # unit [mm]
             pmap = (
                 -2
-                * np.pi
+                * math.pi
                 * torch.fmod(
                     (self.x**2 + self.y**2) / (2 * self.fresnel_wvln * 1e-3 * self.f0),
                     1,
@@ -862,10 +862,10 @@ class Sensor(DeepObj):
             raise Exception("Either r or l should be specified.")
         if r is not None:
             self.r = r
-            self.l = r * np.sqrt(2)
+            self.l = r * math.sqrt(2)
         if l is not None:
             self.l = l
-            self.r = l / 2 * np.sqrt(2)
+            self.r = l / 2 * math.sqrt(2)
 
         self.res = res
         self.ps = self.l / self.res[0]  # pixel size
@@ -1009,7 +1009,7 @@ def Zernike(z_coeff, grid=256):
     )
 
     # Mask out
-    mask = (x**2 + y**2) > 1
+    mask = torch.gt(x**2 + y**2, 1)
     ZW[mask] = 0.0
 
     return ZW
