@@ -1,7 +1,4 @@
-"""Diffractive optical surfaces and related functions.
-
-Diffractive surfaces: the input and output of each surface is a complex wave field.
-"""
+"""Diffractive optical surfaces. The input and output of each surface is a complex wave field."""
 
 import math
 

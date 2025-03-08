@@ -54,7 +54,7 @@ def config():
 
     # Log
     set_logger(result_dir)
-    logging.info(f'EXP: {args["EXP_NAME"]}')
+    logging.info(f"EXP: {args['EXP_NAME']}")
 
     # Device
     num_gpus = torch.cuda.device_count()
@@ -145,11 +145,9 @@ def curriculum_design(
                 rays_backup = []
                 for wv in WAVE_RGB:
                     ray = self.sample_point_source(
-                        M=num_grid,
-                        R=self.sensor_size[0] / 2 * scale,
                         depth=depth,
-                        spp=spp,
-                        pupil=True,
+                        num_rays=spp,
+                        num_grid=num_grid,
                         wvln=wv,
                         importance_sampling=importance_sampling,
                     )
@@ -157,29 +155,33 @@ def curriculum_design(
 
                 # Calculate ray centers
                 if centroid:
-                    center_p = -self.psf_center(point=ray.o[0, ...], method="chief_ray")
+                    center_p = -self.psf_center(
+                        point=ray.o[:, :, 0, :], method="chief_ray"
+                    )
+                    center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
                 else:
-                    center_p = -self.psf_center(point=ray.o[0, ...], method="pinhole")
+                    center_p = -self.psf_center(
+                        point=ray.o[:, :, 0, :], method="pinhole"
+                    )
+                    center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =====> Optimize lens by minimizing rms
         loss_rms = []
         for j, wv in enumerate(WAVE_RGB):
             # Ray tracing
             ray = rays_backup[j].clone()
-            ray, _, _ = self.trace(ray)
+            ray, _ = self.trace(ray)
             xy = ray.project_to(self.d_sensor)
             xy_norm = (xy - center_p) * ray.ra.unsqueeze(-1)
 
-            # Weighted loss
-            weight_mask = (xy_norm.clone().detach() ** 2).sum([0, -1]) / (
-                ray.ra.sum([0]) + EPSILON
-            )  # Use L2 error as weight mask
+            # Weight mask (L2 error)
+            weight_mask = (xy_norm.clone().detach() ** 2).sum([-1, -2]) / (
+                ray.ra.sum([-1]) + EPSILON
+            )
             weight_mask /= weight_mask.mean()  # shape of [M, M]
 
-            l_rms = torch.sqrt(
-                torch.sum((xy_norm**2 + EPSILON).sum(-1) * weight_mask)
-                / (torch.sum(ray.ra) + EPSILON)
-            )  # weighted L2 loss
+            # Weighted L2 loss
+            l_rms = torch.mean(xy_norm.abs().sum(-1).sum(-1) / (ray.ra.sum(-1) + EPSILON) * weight_mask)  
             loss_rms.append(l_rms)
 
         loss_rms = sum(loss_rms) / len(loss_rms)
@@ -224,7 +226,7 @@ if __name__ == "__main__":
         fnum=args["fnum"],
     )
     logging.info(
-        f'==> Design target: focal length {round(args["foclen"], 2)}, diagonal FoV {args["fov"]}deg, F/{args["fnum"]}'
+        f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}"
     )
 
     # =====> 2. Curriculum learning with RMS errors
@@ -238,17 +240,17 @@ if __name__ == "__main__":
         result_dir=args["result_dir"],
     )
 
-    # # Need to train more for the best optical performance
-    # lens.optimize(
-    #     lrs=[float(lr) for lr in args["lrs"]],
-    #     decay=float(args["decay"]),
-    #     iterations=5000,
-    #     centroid=False,
-    #     importance_sampling=True,
-    #     optim_mat=True,
-    #     match_mat=False,
-    #     result_dir=args["result_dir"],
-    # )
+    # Need to train more for the best optical performance
+    lens.optimize(
+        lrs=[float(lr) for lr in args["lrs"]],
+        decay=float(args["decay"]),
+        iterations=5000,
+        centroid=False,
+        importance_sampling=True,
+        optim_mat=True,
+        match_mat=False,
+        result_dir=args["result_dir"],
+    )
 
     # =====> 3. Analyze final result
     lens.prune_surf(expand_surf=0.02)

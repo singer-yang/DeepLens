@@ -1,7 +1,6 @@
-"""Geometric surfaces for ray tracing."""
+"""Refractive and reflective optical surfaces. Use ray tracing to compute intersection and refraction/reflection."""
 
 import math
-import random
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -37,8 +36,11 @@ class Surface(DeepObj):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        raise NotImplementedError(f"Surface.init_from_dict is not implemented for {cls.__name__}.")
-    
+        """Initialize surface from a dict."""
+        raise NotImplementedError(
+            f"Surface.init_from_dict is not implemented for {cls.__name__}."
+        )
+
     # ==============================
     # Intersection and Refraction
     # ==============================
@@ -76,9 +78,9 @@ class Surface(DeepObj):
         ray.ra = ray.ra * valid
 
         if ray.coherent:
-            assert (
-                t.min() < 100
-            ), "Precision problem caused by long propagation distance."
+            assert t.min() < 100, (
+                "Precision problem caused by long propagation distance."
+            )
             new_opl = ray.opl + n * t
             new_opl[~valid] = ray.opl[~valid]
             ray.opl = new_opl
@@ -110,11 +112,11 @@ class Surface(DeepObj):
 
                 new_o = ray.o + ray.d * t.unsqueeze(-1)
                 new_x, new_y = new_o[..., 0], new_o[..., 1]
-                valid = self.valid(new_x, new_y) & (ray.ra > 0)
+                valid = self.valid_data(new_x, new_y) & (ray.ra > 0)
 
                 ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
                 dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
-                dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y)
+                dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
                     ft / (dfdt + 1e-12),
@@ -133,7 +135,7 @@ class Surface(DeepObj):
 
         ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
-        dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y)
+        dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
         t = t - torch.clamp(
             ft / (dfdt + 1e-9), -self.NEWTONS_STEP_BOUND, self.NEWTONS_STEP_BOUND
@@ -143,7 +145,7 @@ class Surface(DeepObj):
         with torch.no_grad():
             # Solution within the surface boundary and ray doesn't go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.valid_within_boundary(new_x, new_y) & (ray.ra > 0) & (t > 0)
+            valid = self.valid(new_x, new_y) & (ray.ra > 0) & (t > 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
@@ -155,8 +157,8 @@ class Surface(DeepObj):
         """Calculate refractive ray according to Snell's law.
 
         Snell's law (surface normal n defined along the positive z axis):
-            https://physics.stackexchange.com/a/436252/104805
-            https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
+            [1] https://physics.stackexchange.com/a/436252/104805
+            [2] https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
             We follow the first link and normal vector should have the same direction with incident ray(veci), but by default it points to left. We use the second link to check.
 
             veci: incident ray
@@ -172,7 +174,7 @@ class Surface(DeepObj):
         # Compute refraction according to Snell's law
         cosi = torch.sum(ray.d * n, axis=-1)  # n * i
 
-        # TIR
+        # Total internal reflection
         valid = (eta**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
 
         sr = torch.sqrt(
@@ -181,36 +183,39 @@ class Surface(DeepObj):
 
         # First term: vertical. Second term: parallel. Already normalized if both n and ray.d are normalized.
         new_d = sr * n + eta * (ray.d - cosi.unsqueeze(-1) * n)
-        new_d[~valid] = ray.d[~valid]
 
+        # Update ray direction
+        new_d[~valid] = ray.d[~valid]
+        ray.d = new_d
+
+        # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1)
         new_obliq[~valid] = ray.obliq[~valid]
-
-        # Update valid rays
-        ray.d = new_d
         ray.obliq = new_obliq
+
+        # Update ray ra
         ray.ra = ray.ra * valid
 
         return ray
 
     def reflect(self, ray):
         """Calculate reflected ray."""
-        # Compute normal vectors
+        # Compute surface normal vectors
         n = self.normal(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
         if forward:
-            n = - n
+            n = -n
 
         # Reflect
         cos_alpha = -(n * ray.d).sum(-1)
         new_d = ray.d + 2 * cos_alpha.unsqueeze(-1) * n
         new_d = F.normalize(new_d, p=2, dim=-1)
-        
+
         # Update valid rays
         valid = (ray.ra > 0)
         new_d[~valid] = ray.d[~valid]
         ray.d = new_d
-        
+
         return ray
 
     def normal(self, ray):
@@ -245,7 +250,7 @@ class Surface(DeepObj):
             z (tensor): z = sag(x, y)
         """
         if valid is None:
-            valid = self.valid(x, y)
+            valid = self.valid_data(x, y)
 
         x, y = x * valid, y * valid
         return self.g(x, y)
@@ -290,7 +295,7 @@ class Surface(DeepObj):
             d2fdz2 (tensor): ∂²f/∂z² (zero tensor)
         """
         if valid is None:
-            valid = self.valid(x, y)
+            valid = self.valid_data(x, y)
 
         x, y = x * valid, y * valid
 
@@ -356,24 +361,20 @@ class Surface(DeepObj):
         """
         return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
 
-    def is_valid(self, p):
-        return (self.sdf_approx(p) < 0.0).bool()
+    def valid(self, x, y):
+        return self.valid_data(x, y) & self.valid_within_boundary(x, y)
 
     def valid_within_boundary(self, x, y):
         """Valid points within the boundary of the surface."""
         if self.is_square:
-            valid = (
-                self.valid(x, y)
-                & (torch.abs(x) <= self.w / 2)
-                & (torch.abs(y) <= self.h / 2)
-            )
+            valid = (torch.abs(x) < self.w / 2) & (torch.abs(y) < self.h / 2)
         else:
-            valid = ((x**2 + y**2) < self.r**2) & self.valid(x, y)
+            valid = (x**2 + y**2) < self.r**2
 
         return valid
 
-    def valid(self, x, y):
-        """Valid points NOT considering the boundary of the surface."""
+    def valid_data(self, x, y):
+        """Valid points inside the data region of the sag function."""
         return torch.ones_like(x, dtype=torch.bool)
 
     def surface_sample(self, N=1000):
@@ -420,6 +421,15 @@ class Surface(DeepObj):
         return torch.optim.Adam(params)
 
     # =========================================
+    # Perturbation-related methods
+    # =========================================
+    @torch.no_grad()
+    def perturb(self, d_precision=0.0005, r_precision=0.001):
+        """Randomly perturb surface parameters to simulate manufacturing errors."""
+        self.r_perturb = self.r.item() * np.random.randn() * r_precision
+        self.d_perturb = float(torch.randn() * d_precision)
+
+    # =========================================
     # Utils methods
     # =========================================
     def surf_dict(self):
@@ -441,21 +451,73 @@ class Surface(DeepObj):
         """Draw wedge for the surface on the plot."""
         r = torch.linspace(-self.r, self.r, 128, device=self.device)
         z = self.surface_with_offset(r, torch.zeros(len(r), device=self.device))
-        ax.plot(z.cpu().detach().numpy(), r.cpu().detach().numpy(), color=color, linestyle=linestyle, linewidth=0.75)
+        ax.plot(
+            z.cpu().detach().numpy(),
+            r.cpu().detach().numpy(),
+            color=color,
+            linestyle=linestyle,
+            linewidth=0.75,
+        )
 
-    @torch.no_grad()
-    def perturb(self, d_precision=0.0005, r_precision=0.001):
-        """Randomly perturb surface parameters to simulate manufacturing errors."""
-        self.r_perturb = self.r.item() * np.random.randn() * r_precision
-        self.d_perturb = float(torch.randn() * d_precision)
+    def draw_widget3D(self, ax, color="lightblue"):
+        """Draw the surface in a 3D plot."""
+        resolution = 128
+
+        # Create a grid of x, y coordinates
+        x = torch.linspace(-self.r, self.r, resolution, device=self.device)
+        y = torch.linspace(-self.r, self.r, resolution, device=self.device)
+        X, Y = torch.meshgrid(x, y, indexing="ij")
+
+        # Calculate z coordinates (surface height)
+        valid = self.valid_within_boundary(X, Y)
+        Z = self.surface_with_offset(X, Y)
+
+        # Convert to numpy for plotting
+        X_np = X.cpu().detach().numpy()
+        Y_np = Y.cpu().detach().numpy()
+        Z_np = Z.cpu().detach().numpy()
+
+        # Mask out invalid points
+        mask = valid.cpu().detach().numpy()
+        X_np = np.where(mask, X_np, np.nan)
+        Y_np = np.where(mask, Y_np, np.nan)
+        Z_np = np.where(mask, Z_np, np.nan)
+
+        # Plot the surface
+        surf = ax.plot_surface(
+            Z_np,
+            X_np,
+            Y_np,
+            alpha=0.5,
+            color=color,
+            edgecolor="none",
+            rcount=resolution,
+            ccount=resolution,
+            antialiased=True,
+        )
+
+        # Draw the edge circle
+        theta = np.linspace(0, 2 * np.pi, 100)
+        edge_x = self.r * np.cos(theta)
+        edge_y = self.r * np.sin(theta)
+        edge_z = np.array(
+            [
+                self.surface_with_offset(
+                    torch.tensor(edge_x[i], device=self.device),
+                    torch.tensor(edge_y[i], device=self.device),
+                ).item()
+                for i in range(len(theta))
+            ]
+        )
+
+        ax.plot(edge_z, edge_x, edge_y, color="lightblue", linewidth=1.0, alpha=1.0)
+
+        return surf
 
 
 class Aperture(Surface):
     def __init__(self, r, d, diffraction=False, device="cpu"):
-        """Aperture, can be circle or rectangle.
-        For geo optics, it works as a binary mask.
-        For wave optics, it works as a diffractive plane.
-        """
+        """Aperture surface."""
         Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
         self.diffraction = diffraction
         self.to(device)
@@ -469,43 +531,36 @@ class Aperture(Surface):
         return cls(surf_dict["r"], surf_dict["d"], diffraction)
 
     def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
-        """Compute output ray after intersection and refraction.
-
-        In each step, first get a guess of new o and d, then compute valid and only update valid rays.
-        """
-        # -------------------------------------
+        """Compute output ray after intersection and refraction."""
         # Intersection
-        # -------------------------------------
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
             ray.ra > 0
         )
 
-        # => Update position
+        # Update position
         new_o[~valid] = ray.o[~valid]
         ray.o = new_o
         ray.ra = ray.ra * valid
 
-        # => Update phase
+        # Update phase
         if ray.coherent:
             new_opl = ray.opl + t
             new_opl[~valid] = ray.opl[~valid]
             ray.opl = new_opl
 
-        # -------------------------------------
         # Diffraction
-        # -------------------------------------
         if self.diffraction:
-            raise Exception("Unimplemented diffraction method.")
+            raise Exception("Diffraction method is not implemented for aperture.")
 
         return ray
 
     def g(self, x, y):
-        """Compute surface height."""
+        """Compute surface height (always zero for aperture)."""
         return torch.zeros_like(x)
-    
-    def draw_widget(self, ax, color="black", linestyle="solid"):
+
+    def draw_widget(self, ax, color="orange", linestyle="solid"):
         """Draw aperture wedge on the figure."""
         d = self.d.item()
         aper_wedge_l = 0.05 * self.r  # [mm]
@@ -513,7 +568,7 @@ class Aperture(Surface):
 
         # Parallel edges
         z = np.linspace(d - aper_wedge_l, d + aper_wedge_l, 3)
-        x = - self.r * np.ones(3)
+        x = -self.r * np.ones(3)
         ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
         x = self.r * np.ones(3)
         ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
@@ -525,8 +580,21 @@ class Aperture(Surface):
         x = np.linspace(-self.r - aper_wedge_h, -self.r, 3)
         ax.plot(z, x, color=color, linestyle=linestyle, linewidth=0.8)
 
+    def draw_widget3D(self, ax, color="black"):
+        """Draw the aperture as a circle in a 3D plot."""
+        # Draw the edge circle
+        theta = np.linspace(0, 2 * np.pi, 100)
+        edge_x = self.r * np.cos(theta)
+        edge_y = self.r * np.sin(theta)
+        edge_z = np.full_like(edge_x, self.d.item())  # Constant z at aperture position
+
+        # Plot the edge circle
+        line = ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.5)
+
+        return line
+
     def surf_dict(self):
-        """Return a dict of surface."""
+        """Dict of surface parameters."""
         surf_dict = {
             "type": "Aperture",
             "r": round(self.r, 4),
@@ -538,6 +606,7 @@ class Aperture(Surface):
         return surf_dict
 
     def zmx_str(self, surf_idx, d_next):
+        """Zemax surface string."""
         zmx_str = f"""SURF {surf_idx}
     STOP
     TYPE STANDARD
@@ -548,16 +617,11 @@ class Aperture(Surface):
 
 
 class Aspheric(Surface):
-    """This class can represent plane, spheric and aspheric surfaces.
+    """Aspheric surface.
 
-    Aspheric surface: https://en.wikipedia.org/wiki/Aspheric_lens.
-
-    Three kinds of surfaces:
-        1. flat: always use round
-        2. spheric:
-        3. aspheric:
+    Reference:
+        [1] https://en.wikipedia.org/wiki/Aspheric_lens.
     """
-
     def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, device="cpu"):
         """Initialize aspheric surface.
 
@@ -567,9 +631,7 @@ class Aspheric(Surface):
             c (tensor): curvature of the surface
             k (tensor): conic constant
             ai (list of tensors): aspheric coefficients
-            mat1 (Material): material of the first medium
             mat2 (Material): material of the second medium
-            is_square (bool): whether the surface is square
             device (torch.device): device to store the tensor
         """
         Surface.__init__(self, r, d, mat2, is_square=False, device=device)
@@ -598,7 +660,7 @@ class Aspheric(Surface):
                 self.ai12 = torch.tensor(ai[5])
             else:
                 for i, a in enumerate(ai):
-                    exec(f"self.ai{2*i+2} = torch.tensor({a})")
+                    exec(f"self.ai{2 * i + 2} = torch.tensor({a})")
         else:
             self.ai = None
             self.ai_degree = 0
@@ -611,14 +673,15 @@ class Aspheric(Surface):
             c = 1 / surf_dict["roc"]
         else:
             c = surf_dict["c"]
-        
+
         if "ai" in surf_dict:
             ai = surf_dict["ai"]
         else:
             ai = torch.rand(6) * 1e-30
 
-        return cls(surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"])
-
+        return cls(
+            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"]
+        )
 
     def g(self, x, y):
         """Compute surface height."""
@@ -657,7 +720,7 @@ class Aspheric(Surface):
                 )
             else:
                 for i in range(1, self.ai_degree + 1):
-                    exec(f"total_surface += self.ai{2*i} * r2 ** {i}")
+                    exec(f"total_surface += self.ai{2 * i} * r2 ** {i}")
 
         return total_surface
 
@@ -699,7 +762,7 @@ class Aspheric(Surface):
                 )
             else:
                 for i in range(1, self.ai_degree + 1):
-                    exec(f"dsdr2 += {i} * self.ai{2*i} * r2 ** {i-1}")
+                    exec(f"dsdr2 += {i} * self.ai{2 * i} * r2 ** {i - 1}")
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
 
@@ -717,10 +780,8 @@ class Aspheric(Surface):
         ddsdr2_dr2 = (
             ((1 + k) * c**2 / (2 * sf)) + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
         ) * c / (1 + sf) ** 2 - 2 * dsdr2 * (
-            (1 + sf + (1 + k) * r2 * c**2 / (2 * sf))
-        ) / (
-            1 + sf
-        )
+            1 + sf + (1 + k) * r2 * c**2 / (2 * sf)
+        ) / (1 + sf)
 
         if self.ai_degree > 0:
             if self.ai_degree == 4:
@@ -773,7 +834,7 @@ class Aspheric(Surface):
                 )
             else:
                 for i in range(1, self.ai_degree + 1):
-                    ai_coeff = getattr(self, f"ai{2*i}")
+                    ai_coeff = getattr(self, f"ai{2 * i}")
                     dsdr2 += i * ai_coeff * r2 ** (i - 1)
                     if i > 1:
                         ddsdr2_dr2 += i * (i - 1) * ai_coeff * r2 ** (i - 2)
@@ -787,7 +848,7 @@ class Aspheric(Surface):
 
         return d2g_dx2, d2g_dxdy, d2g_dy2
 
-    def valid(self, x, y):
+    def valid_data(self, x, y):
         """Invalid when shape is non-defined."""
         if self.k > -1:
             valid = (x**2 + y**2) < 1 / self.c**2 / (1 + self.k)
@@ -866,9 +927,9 @@ class Aspheric(Surface):
                 params.append({"params": [self.ai12], "lr": lr[3] * decay**5})
             else:
                 for i in range(1, self.ai_degree + 1):
-                    exec(f"self.ai{2*i}.requires_grad_(True)")
+                    exec(f"self.ai{2 * i}.requires_grad_(True)")
                     exec(
-                        f"params.append({{'params': [self.ai{2*i}], 'lr': lr[3] * decay**{i-1}}})"
+                        f"params.append({{'params': [self.ai{2 * i}], 'lr': lr[3] * decay**{i - 1}}})"
                     )
 
         if optim_mat and self.mat2.get_name() != "air":
@@ -895,7 +956,7 @@ class Aspheric(Surface):
         if self.k != 0:
             self.k *= 1 + np.random.randn() * ratio
         for i in range(1, self.ai_degree + 1):
-            exec(f"self.ai{2*i} *= 1 + np.random.randn() * ratio")
+            exec(f"self.ai{2 * i} *= 1 + np.random.randn() * ratio")
 
     def surf_dict(self):
         """Return a dict of surface."""
@@ -913,19 +974,21 @@ class Aspheric(Surface):
         #     exec(f"surf_dict['(ai{2*i})'] = self.ai{2*i}.item()")
         #     surf_dict["ai"].append(eval(f"self.ai{2*i}.item()"))
         for i in range(1, self.ai_degree + 1):
-            exec(f"surf_dict['(ai{2*i})'] = float(format(self.ai{2*i}.item(), '.6e'))")
-            surf_dict["ai"].append(float(format(eval(f"self.ai{2*i}.item()"), ".6e")))
+            exec(
+                f"surf_dict['(ai{2 * i})'] = float(format(self.ai{2 * i}.item(), '.6e'))"
+            )
+            surf_dict["ai"].append(float(format(eval(f"self.ai{2 * i}.item()"), ".6e")))
 
         return surf_dict
 
     def zmx_str(self, surf_idx, d_next):
         """Return Zemax surface string."""
-        assert (
-            self.c.item() != 0
-        ), "Aperture surface is re-implemented in Aperture class."
-        assert (
-            self.ai is not None or self.k != 0
-        ), "Spheric surface is re-implemented in Spheric class."
+        assert self.c.item() != 0, (
+            "Aperture surface is re-implemented in Aperture class."
+        )
+        assert self.ai is not None or self.k != 0, (
+            "Spheric surface is re-implemented in Spheric class."
+        )
         if self.mat2.get_name() == "air":
             zmx_str = f"""SURF {surf_idx} 
     TYPE EVENASPH
@@ -1147,7 +1210,9 @@ class Diffractive_GEO(Surface):
             thickness = surf_dict["thickness"]
         else:
             thickness = 0.5
-        return cls(surf_dict["l"], surf_dict["d"], glass, surf_dict["param_model"], thickness)
+        return cls(
+            surf_dict["l"], surf_dict["d"], glass, surf_dict["param_model"], thickness
+        )
 
     def init_param_model(self, param_model="binary2"):
         self.param_model = param_model
@@ -1500,13 +1565,12 @@ class Diffractive_GEO(Surface):
             self.alpha = ckpt["alpha"].to(self.device)
         else:
             raise Exception("Unknown parameterization.")
-        
 
     def draw_widget(self, ax, color="black", linestyle="-"):
         """Draw DOE as a two-side surface."""
         max_offset = self.d.item() / 100
         d = self.d.item()
-        
+
         # Draw DOE
         roc = self.l
         x = np.linspace(-self.r, self.r, 128)
@@ -1517,10 +1581,14 @@ class Diffractive_GEO(Surface):
         ax.plot(d + sag, x, color=color, linestyle=linestyle, linewidth=0.75)
 
         # Draw DOE base
-        z_bound = [d + sag[0], d + sag[0] + max_offset, d + sag[0] + max_offset, d + sag[-1]]
+        z_bound = [
+            d + sag[0],
+            d + sag[0] + max_offset,
+            d + sag[0] + max_offset,
+            d + sag[-1],
+        ]
         x_bound = [-self.r, -self.r, self.r, self.r]
         ax.plot(z_bound, x_bound, color=color, linestyle=linestyle, linewidth=0.75)
-
 
     def surf_dict(self):
         """Return surface parameters."""
@@ -1625,7 +1693,6 @@ class Mirror(Surface):
 
         return ray
 
-
 class Plane(Surface):
     def __init__(self, r, d, mat2, is_square=False, device="cpu"):
         """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
@@ -1693,7 +1760,6 @@ class Plane(Surface):
 
         return surf_dict
 
-
 class Spheric(Surface):
     """Spheric surface."""
     def __init__(self, c, r, d, mat2, device="cpu"):
@@ -1758,7 +1824,7 @@ class Spheric(Surface):
 
         return d2g_dx2, d2g_dxdy, d2g_dy2
 
-    def valid(self, x, y):
+    def valid_data(self, x, y):
         """Invalid when shape is non-defined."""
         c = self.c + self.c_perturb
 
@@ -1817,7 +1883,7 @@ class Spheric(Surface):
     TYPE STANDARD 
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
-    DIAM {self.r*2}
+    DIAM {self.r * 2}
 """
         else:
             zmx_str = f"""SURF {surf_idx} 
@@ -1825,7 +1891,7 @@ class Spheric(Surface):
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
     GLAS {self.mat2.get_name().upper()} 0 0 {self.mat2.n} {self.mat2.V}
-    DIAM {self.r*2}
+    DIAM {self.r * 2}
 """
         return zmx_str
 
@@ -1848,7 +1914,7 @@ class ThinLens(Surface):
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
             ray.ra > 0
         )
-        
+
         # Update ray position
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_o[~valid] = ray.o[~valid]
@@ -1892,7 +1958,7 @@ class ThinLens(Surface):
         new_d = F.normalize(new_d, p=2, dim=-1)
         ray.d = new_d
 
-        # OPL change
+        # Optical path length change
         if ray.coherent:
             if forward:
                 ray.opl = (
@@ -1922,7 +1988,14 @@ class ThinLens(Surface):
     def draw_widget(self, ax, color="black", linestyle="-"):
         d = self.d.item()
         r = self.r
-        ax.annotate("", xy=(d, r), xytext=(d, -r), arrowprops=dict(arrowstyle="<->", color=color, linestyle=linestyle, linewidth=0.75),)
+        ax.annotate(
+            "",
+            xy=(d, r),
+            xytext=(d, -r),
+            arrowprops=dict(
+                arrowstyle="<->", color=color, linestyle=linestyle, linewidth=0.75
+            ),
+        )
 
     def surf_dict(self):
         surf_dict = {
@@ -1934,4 +2007,3 @@ class ThinLens(Surface):
         }
 
         return surf_dict
-
