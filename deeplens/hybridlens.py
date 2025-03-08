@@ -154,40 +154,31 @@ class HybridLens(Lens):
         color_list = ["#CC0000", "#006600", "#0066CC"]
         views = [0, np.rad2deg(geolens.hfov) * 0.707, np.rad2deg(geolens.hfov) * 0.99]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
+        num_rays = 5
         for i, view in enumerate(views):
             # Draw ray tracing
             ray = geolens.sample_point_source_2D(
-                depth=depth, view=view, M=5, entrance_pupil=True, wvln=WAVE_RGB[2 - i]
+                depth=depth, fov=view, num_rays=num_rays, entrance_pupil=True, wvln=WAVE_RGB[2 - i]
             )
-            ray, _, oss = geolens.trace(ray=ray, record=True)
+            ray, ray_o_record = geolens.trace(ray=ray, record=True)
             ax, fig = geolens.plot_raytraces(
-                oss, ax=ax, fig=fig, color=color_list[i], ra=ray.ra
+                ray_o_record, ax=ax, fig=fig, color=color_list[i]
             )
 
             # Draw wave propagation
-            ray.prop_to(geolens.d_sensor)
+            ray.prop_to(geolens.d_sensor) # shape [num_rays, 3]
             arc_center = (ray.o[:, 0] * ray.ra).sum() / ray.ra.sum()
             arc_center = arc_center.item()
             # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
             arc_radi = geolens.d_sensor.item() - self.doe.d.item()
-            theta1 = (
-                np.rad2deg(
+            chief_theta = np.rad2deg(
                     np.arctan2(
-                        ray.o[0, 0].item() - oss[-1][-1][0],
-                        ray.o[0, 2].item() - oss[-1][-1][2],
-                    )
+                        ray.o[0, 0].item() - ray_o_record[-1][num_rays//2, 0].item(),
+                        ray.o[0, 2].item() - ray_o_record[-1][num_rays//2, 2].item(),
                 )
-                - 4
             )
-            theta2 = (
-                np.rad2deg(
-                    np.arctan2(
-                        ray.o[0, 0].item() - oss[0][-1][0],
-                        ray.o[0, 2].item() - oss[0][-1][2],
-                    )
-                )
-                + 4
-            )
+            theta1 = chief_theta - 10
+            theta2 = chief_theta + 10
 
             for j in arc_radi_list:
                 arc_radi_j = arc_radi * j
@@ -249,6 +240,7 @@ class HybridLens(Lens):
 
         if point.dim() == 1:
             point = point.unsqueeze(0)
+        point = point.to(self.device)
 
         # Calculate ray origin in the object space
         scale = geolens.calc_scale_ray(point[:, 2].item())
@@ -260,9 +252,9 @@ class HybridLens(Lens):
         pointc_chief_ray = geolens.psf_center(point_obj)[0]  # shape [2]
 
         # Ray tracing
-        ray = geolens.sample_from_points(o=point_obj, spp=spp, wvln=wvln)
+        ray = geolens.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
         ray.coherent = True
-        ray, _, _ = geolens.trace(ray)
+        ray, _ = geolens.trace(ray)
         ray = ray.prop_to(doe.d)
 
         # Calculate full-resolution complex field for exit-pupil diffraction
@@ -270,7 +262,7 @@ class HybridLens(Lens):
             ray,
             ps=doe.ps,
             ks=doe.res[0],
-            pointc_ref=torch.zeros_like(point[:, :2]),
+            pointc=torch.zeros_like(point[:, :2]),
             coherent=True,
         ).squeeze(
             0

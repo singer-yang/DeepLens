@@ -286,7 +286,7 @@ def train(args, lens, net):
 
             # Loss
             L_classi = cri_classi(labels_pred, labels)
-            L_reg = lens.loss_self_intersec()  # + lens.loss_ray_angle()
+            L_reg = lens.loss_self_intersec()
 
             L = L_classi + 0.02 * L_reg
 
