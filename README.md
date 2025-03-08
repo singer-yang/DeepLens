@@ -2,11 +2,11 @@
     <img src="imgs/logo.png"/>
 </div>
 
-**DeepLens** is an open-source differentiable ray tracer for optical design, optics-network co-design, and optics-aware rendering.
-
-Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the baseline. We can provide code assistance if you plan to use DeepLens in your research, please contact Xinge Yang (xinge.yang@kaust.edu.sa) for more information. Manufacturing service for both refractive and diffractive elements is also avaliable via collaboration!
+**DeepLens** is an open-source differentiable ray tracing framework for automated optical design, end-to-end optics-network co-design, and computational photography. DeepLens enables researchers and engineers to build custom optical systems and end-to-end imaging pipelines with fully differentiable optimization.
 
 ## News
+
+Please contact Xinge Yang (xinge.yang@kaust.edu.sa) for any questions, assistance, or collaboration.
 
 * We now have a slack group. Welcome to join the discussion via [this link](https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw).
 * DeepLens is finall published on Nature Communications, check it [here](https://www.nature.com/articles/s41467-024-50835-7)!
@@ -14,24 +14,26 @@ Welcome to use DeepLens to (1) build your own pipeline or (2) compare as the bas
 
 ## What is DeepLens
 
-**Deep learning + lens design**
+DeepLens aims to combines **deep learning** and **optical design** to create:
 
-1. More powerful **lens design software** with deep learning.
-2. Next-generation **computational cameras** (optical encoding + deep learning decoding).
+1. More powerful **optical design algorithms** enhanced by deep learning.
+2. Next-generation **computational cameras** integrating optical encoding with deep learning decoding.
 
-**Key features**
+## Key Features
 
-1. **Open-source** ray tracer with similar accuracy as Zemax.
-2. **Optimization** power. Automated lens design from scratch!
-3. **Render** camera captured image and start optics-network co-design with 5 lines of code!
-4. **Memory-efficient** ray-tracing, millions of rays on a desk-machine.
-5. **Neural representation**, represent a camera lens as a network.
-6. More features can be obtained via request or collaboration:
-   1. Hybrid ray-tracing-wave-propagation imaging model.
-   2. Non-sequential ray-tracing.
-   3. Polarization ray-tracing.
-   4. Multi-GPU parallelization for billion-level ray-tracing.
-   5. Illumination and display system optimization.
+DeepLens differs from others in the following aspects:
+
+1. **Open-source** ray tracer with accuracy aligned with commercial software.
+2. **Differentiable** optimization providing outstanding design capabilities.
+3. **Image simulation** for camera sensors and image signal processing (ISP), enabling end-to-end optics-network co-design.
+
+Additional features available via request or collaboration:
+
+1. **Memory-efficient** ray-tracing capable of handling millions of rays on a desktop machine, with strategies to scale up further.
+2. **Physical optics** simulation including phase and polarization tracing.
+3. **Neural representation** to represent camera lenses as networks.
+4. **Complex optical systems** including non-sequential and non-coaxial optical models.
+5. **Large-scale** optimization with multi-GPU parallelization.
 
 ## Applications
 
@@ -80,7 +82,7 @@ Design hybrid refractive-diffractive lenses with a new ray-wave model.
 
 Here are two methods to use deeplens in your research:
 
-#### Method 1
+#### Method 1 (recommended)
 
 Clone this repo and write your code inside it.
 
