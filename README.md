@@ -90,7 +90,25 @@ Clone this repo and write your code inside it.
 git clone deeplens
 cd deeplens
 python 0_hello_deeplens.py
-python your_code.py
+python your_optical_design_pipeline.py
+```
+
+#### Directory
+
+```
+deeplens/
+│
+├── deeplens/
+│   ├── optics/ (core functions for optical components)
+|   ├── network/ (image restoration and implicit representation networks)
+|   ├── geolens.py (refractive lensgroup using ray tracing)
+|   ├── diffraclens.py (diffractive lensgroup using wave propagation)
+|   └── your_own_optical_system.py (your own optical system)
+│
+├── ... (other files)
+├── 0_hello_deeplens.py (main scripts)
+└── your_optical_design_pipeline.py (your own optical design pipeline)
+
 ```
 
 #### Method 2
@@ -107,25 +125,6 @@ Then in your code:
 ```
 import deeplens
 lens = deeplens.GeoLens(filename='./lenses/cellphone80deg.json')
-```
-
-#### Directory
-
-```
-deeplens/
-│
-├── deeplens/
-│   ├── optics/ (contain core functions for optical components)
-|   ├── network/ (contain network architectures for image reconstruction and implicit representation)
-|   ├── geolens (lensgroup using ray tracing)
-│   └── diffraclens (lensgroup using wave propagation)
-│
-├── README.md
-├── LICENSE
-├── setup.py
-├── requirements.txt
-└── 0_hello_deeplens.py (main scripts)
-
 ```
 
 ## Reference
