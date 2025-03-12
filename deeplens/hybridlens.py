@@ -145,7 +145,7 @@ class HybridLens(Lens):
 
         # Draw lens layout
         if ax is None:
-            ax, fig = geolens.plot_setup2D()
+            ax, fig = geolens.draw_setup_2d()
             save_fig = True
         else:
             save_fig = False
@@ -161,7 +161,7 @@ class HybridLens(Lens):
                 depth=depth, fov=view, num_rays=num_rays, entrance_pupil=True, wvln=WAVE_RGB[2 - i]
             )
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
-            ax, fig = geolens.plot_raytraces(
+            ax, fig = geolens.draw_raytraces_2d(
                 ray_o_record, ax=ax, fig=fig, color=color_list[i]
             )
 
