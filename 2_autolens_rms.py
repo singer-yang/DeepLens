@@ -10,25 +10,26 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
     # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
-import torch
-import os
 import logging
-import numpy as np
-import yaml
+import os
 import random
 import string
 from datetime import datetime
+
+import torch
+import yaml
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
+
 from deeplens import (
-    GeoLens,
     DEPTH,
-    WAVE_RGB,
     EPSILON,
-    set_logger,
-    set_seed,
+    WAVE_RGB,
+    GeoLens,
     create_lens,
     create_video_from_images,
+    set_logger,
+    set_seed,
 )
 
 
@@ -80,21 +81,19 @@ def curriculum_design(
     decay=0.02,
     iterations=5000,
     test_per_iter=100,
-    importance_sampling=True,
     optim_mat=False,
     match_mat=False,
+    shape_control=True,
+    importance_sampling=True,
     result_dir="./results",
 ):
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
     num_grid = 15
-    spp = 512
+    spp = 1024
 
-    shape_control = True
-    centroid = False
-    sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
-    aper_start = self.surfaces[self.aper_idx].r * 0.4
+    aper_start = self.surfaces[self.aper_idx].r * 0.3
     aper_final = self.surfaces[self.aper_idx].r
 
     if not logging.getLogger().hasHandlers():
@@ -105,15 +104,17 @@ def curriculum_design(
 
     optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
     scheduler = get_cosine_schedule_with_warmup(
-        optimizer, num_warmup_steps=iterations // 10, num_training_steps=iterations
+        optimizer, num_warmup_steps=200, num_training_steps=iterations
     )
 
     # Training
-    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"rms": 0})
+    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss_rms": 0})
     for i in range(iterations + 1):
-        # =====> Evaluate the lens
+        # =======================================
+        # Evaluate the lens
+        # =======================================
         if i % test_per_iter == 0:
-            # Change aperture, curriculum learning
+            # Curriculum learning: change aperture size
             aper_r = min(
                 (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
                 aper_final,
@@ -121,7 +122,7 @@ def curriculum_design(
             self.surfaces[self.aper_idx].r = aper_r
             self.fnum = self.foclen / aper_r / 2
 
-            # Correct shape and evaluate
+            # Correct lens shape and evaluate current design
             if i > 0:
                 if shape_control:
                     self.correct_shape()
@@ -137,56 +138,58 @@ def curriculum_design(
                 multi_plot=False,
             )
 
-        # =====> Compute centriod and sample new rays
-        if i % sample_rays_per_iter == 0:
-            with torch.no_grad():
-                # Sample rays
-                scale = self.calc_scale_pinhole(depth)
-                rays_backup = []
-                for wv in WAVE_RGB:
-                    ray = self.sample_point_source(
-                        depth=depth,
-                        num_rays=spp,
-                        num_grid=num_grid,
-                        wvln=wv,
-                        importance_sampling=importance_sampling,
-                    )
-                    rays_backup.append(ray)
+            # Sample new rays and calculate target centers
+            rays_backup = []
+            for wv in WAVE_RGB:
+                ray = self.sample_point_source(
+                    depth=depth,
+                    num_rays=spp,
+                    num_grid=num_grid,
+                    wvln=wv,
+                    importance_sampling=importance_sampling,
+                )
+                rays_backup.append(ray)
 
-                # Calculate ray centers
-                if centroid:
-                    center_p = -self.psf_center(
-                        point=ray.o[:, :, 0, :], method="chief_ray"
-                    )
-                    center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
-                else:
-                    center_p = -self.psf_center(
-                        point=ray.o[:, :, 0, :], method="pinhole"
-                    )
-                    center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
+            center_p = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+            center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
 
-        # =====> Optimize lens by minimizing rms
+        # =======================================
+        # Optimize lens by minimizing rms
+        # =======================================
         loss_rms = []
         for j, wv in enumerate(WAVE_RGB):
-            # Ray tracing
+            # Ray tracing to sensor
             ray = rays_backup[j].clone()
-            ray, _ = self.trace(ray)
-            xy = ray.project_to(self.d_sensor)
-            xy_norm = (xy - center_p) * ray.ra.unsqueeze(-1)
+            ray = self.trace2sensor(ray)
+            xy = ray.o[..., :2]  # [h, w, spp, 2]
+            ra = ray.ra.clone().detach()  # [h, w, spp]
+            xy_norm = (xy - center_p) * ra.unsqueeze(-1)
 
-            # Weight mask (L2 error)
-            weight_mask = (xy_norm.clone().detach() ** 2).sum([-1, -2]) / (
-                ray.ra.sum([-1]) + EPSILON
-            )
-            weight_mask /= weight_mask.mean()  # shape of [M, M]
+            # Use only quater of rays
+            xy_norm = xy_norm[num_grid // 2 :, num_grid // 2 :, :, :]
+            ra = ra[num_grid // 2 :, num_grid // 2 :, :]  # [h/2, w/2, spp]
+
+            # Weight mask (L2 error map)
+            with torch.no_grad():
+                weight_mask = (xy_norm.clone().detach() ** 2).sum(-1).sqrt().sum(-1) / (
+                    ra.sum([-1]) + EPSILON
+                )
+                weight_mask /= weight_mask.mean()  # shape of [M, M]
 
             # Weighted L2 loss
-            l_rms = torch.mean(xy_norm.abs().sum(-1).sum(-1) / (ray.ra.sum(-1) + EPSILON) * weight_mask)  
+            l_rms = torch.mean(
+                (
+                    (xy_norm**2 + EPSILON).sum(-1).sqrt().sum(-1)
+                    / (ra.sum([-1]) + EPSILON)
+                    * weight_mask
+                )
+            )
             loss_rms.append(l_rms)
 
+        # RMS loss for all wavelengths
         loss_rms = sum(loss_rms) / len(loss_rms)
 
-        # Regularization
+        # Lens design constraint
         loss_reg = self.loss_reg()
         w_reg = 0.1
         L_total = loss_rms + w_reg * loss_reg
@@ -197,7 +200,7 @@ def curriculum_design(
         optimizer.step()
         scheduler.step()
 
-        pbar.set_postfix(rms=loss_rms.item())
+        pbar.set_postfix(loss_rms=loss_rms.item())
         pbar.update(1)
 
     pbar.close()
@@ -237,6 +240,7 @@ if __name__ == "__main__":
         test_per_iter=50,
         optim_mat=True,
         match_mat=False,
+        shape_control=True,
         result_dir=args["result_dir"],
     )
 
@@ -249,6 +253,7 @@ if __name__ == "__main__":
         importance_sampling=True,
         optim_mat=True,
         match_mat=False,
+        shape_control=True,
         result_dir=args["result_dir"],
     )
 
