@@ -134,7 +134,6 @@ def curriculum_design(
             self.analysis(
                 f"{result_dir}/iter{i}",
                 zmx_format=True,
-                plot_invalid=True,
                 multi_plot=False,
             )
 
