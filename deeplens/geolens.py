@@ -28,6 +28,8 @@ import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
+import LstsqConvert
+LstsqConvert.register_op()
 
 from .lens import Lens
 from .optics.basics import (
@@ -1061,7 +1063,7 @@ class GeoLens(Lens):
         assert spp >= 1000000, (
             "Coherent ray tracing spp is too small, will cause inaccurate simulation."
         )
-        assert torch.get_default_dtype() == torch.float64, (
+        assert torch.get_default_dtype() == torch.float64 or torch.backends.mps.is_available(), (
             "Please set the default dtype to float64 for accurate phase calculation."
         )
 
@@ -1866,6 +1868,7 @@ class GeoLens(Lens):
         x, _ = torch.linalg.lstsq(
             A,
             b.unsqueeze(-1),
+            driver='gelsd'
         )[:2]
         x = x.squeeze(-1)  # Shape: [N*(N-1)/2, 2]
         s = x[:, 0]
@@ -3550,5 +3553,7 @@ def create_surface(surface_type, d_total, aper_r, imgh, mat):
         ai = np.random.randn(7).astype(np.float32) * 1e-30
         k = np.random.randn(1).astype(np.float32) * 0.001
         return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
+    elif surface_type == "Plane":
+        return Plane(r=r, d=d_total, mat2=mat)
     else:
         raise Exception("Surface type not supported yet.")

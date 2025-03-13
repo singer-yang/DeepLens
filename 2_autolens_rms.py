@@ -58,11 +58,11 @@ def config():
     logging.info(f"EXP: {args['EXP_NAME']}")
 
     # Device
-    num_gpus = torch.cuda.device_count()
+    num_gpus = 1 #torch.cuda.device_count()
     args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    #logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
 
     # ==> Save config and original code
     with open(f"{result_dir}/config.yml", "w") as f:

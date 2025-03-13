@@ -45,11 +45,13 @@ class HybridLens(Lens):
     """
     def __init__(self, lens_path):
         super().__init__(lens_path)
-        self.double()
+        if not torch.backends.mps.is_available():
+            self.double()
 
     def double(self):
-        self.geolens.double()
-        self.doe.double()
+        if not torch.backends.mps.is_available():
+            self.geolens.double()
+            self.doe.double()
 
     def read_lens_json(self, lens_path):
         """Read the lens from .json file."""
@@ -233,7 +235,7 @@ class HybridLens(Lens):
             "which may lead to inaccurate simulation."
         )
         assert (
-            torch.get_default_dtype() == torch.float64
+            torch.get_default_dtype() == torch.float64 or torch.backends.mps.is_available()
         ), "Default dtype must be set to float64 for accurate phase tracing."
 
         geolens, doe = self.geolens, self.doe
@@ -299,7 +301,7 @@ class HybridLens(Lens):
             psf_out (torch.Tensor): PSF patch. Normalized to sum to 1. Shape [ks, ks]
         """
         # Check double precision
-        if not torch.get_default_dtype() == torch.float64:
+        if not torch.get_default_dtype() == torch.float64 and not torch.backends.mps.is_available():
             raise ValueError(
                 "Please call HybridLens.double() to set the default dtype to float64 for accurate phase tracing."
             )

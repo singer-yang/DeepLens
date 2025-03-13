@@ -17,10 +17,39 @@ from deeplens import GeoLens
 
 
 def main():
-    lens = GeoLens(filename="./lenses/camera/ef35mm_f2.0.json")
+    lens = GeoLens(filename="./lenses/camera/iter17500.json")
     # lens = GeoLens(filename='./lenses/cellphone/cellphone80deg.json')
     # lens = GeoLens(filename='./lenses/zemax_double_gaussian.zmx')
-    lens.analysis(render=True)
+    lens.analysis(
+        f"./initial_lens",
+        zmx_format=True,
+        plot_invalid=True,
+        multi_plot=False,
+    )
+    lens.optimize(
+         lrs=[5e-4, 1e-4, 0.1, 1e-4],
+         decay=0.02,
+         iterations=5000,
+         centroid=False,
+         importance_sampling=True,
+         optim_mat=True,
+         match_mat=False,
+         result_dir="./result",
+    )
+
+    # =====> 3. Analyze final result
+    lens.prune_surf(expand_surf=0.02)
+    lens.post_computation()
+
+    logging.info(
+        f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
+    )
+    lens.write_lens_json(f"{result_dir}/final_lens.json")
+    lens.analysis(save_name=f"{result_dir}/final_lens", zmx_format=True)
+
+    # =====> 4. Create video
+    create_video_from_images(f"{result_dir}", f"{result_dir}/autolens.mp4", fps=10)
+
 
 
 if __name__ == "__main__":

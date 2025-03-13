@@ -1,0 +1,63 @@
+{
+    "info": "None",
+    "foclen": 65.4282,
+    "fnum": 1.7318,
+    "r_sensor": 35,
+    "(d_sensor)": 103.302,
+    "(sensor_size)": [
+        49.4975,
+        49.4975
+    ],
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Plane",
+            "(l)": 37.47665940288702,
+            "r": 26.5,
+            "(d)": 0.0,
+            "is_square": true,
+            "mat2": "n-sf10",
+            "d_next": 6.7349
+        },
+        {
+            "idx": 2,
+            "type": "Spheric",
+            "r": 26.5,
+            "(c)": 0.012,
+            "roc": 83.2257,
+            "(d)": 6.7349,
+            "mat2": "air",
+            "d_next": 15.6651
+        },
+        {
+            "idx": 3,
+            "type": "Aperture",
+            "r": 24.5,
+            "(d)": 22.4,
+            "mat2": "air",
+            "is_square": false,
+            "diffraction": false,
+            "d_next": 0.0933
+        },
+        {
+            "idx": 4,
+            "type": "Spheric",
+            "r": 17.5,
+            "(c)": 0.0217,
+            "roc": 46.1792,
+            "(d)": 22.4933,
+            "mat2": "1.7285/28.63",
+            "d_next": 4.0267
+        },
+        {
+            "idx": 5,
+            "type": "Spheric",
+            "r": 17.5,
+            "(c)": -0.0029,
+            "roc": -344.4112,
+            "(d)": 26.5201,
+            "mat2": "air",
+            "d_next": 76.782
+        }
+    ]
+}

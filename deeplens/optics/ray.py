@@ -62,7 +62,7 @@ class Ray(DeepObj):
         self.o = torch.where(self.ra[..., None] == 1, new_o, self.o)
 
         if self.coherent:
-            if t.min() > 100 and torch.get_default_dtype() == torch.float32:
+            if t.min() > 100 and torch.get_default_dtype() == torch.float32 and not torch.backends.mps.is_available():
                 raise Warning("Should use float64 in coherent ray tracing for precision.")
             else:
                 self.opl = self.opl + n * t
