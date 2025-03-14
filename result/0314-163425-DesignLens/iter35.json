@@ -1,0 +1,67 @@
+{
+    "info": "None",
+    "foclen": 88.6115,
+    "fnum": 4.6764,
+    "r_sensor": 21.6,
+    "(d_sensor)": 109.2503,
+    "(sensor_size)": [
+        30.547,
+        30.547
+    ],
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Plane",
+            "(l)": 37.47665940288702,
+            "r": 9.179420471191406,
+            "(d)": 0.0,
+            "is_square": true,
+            "mat2": "n-sf10",
+            "d_next": 6.4325
+        },
+        {
+            "idx": 2,
+            "type": "Anamorphic",
+            "r": 8.0173,
+            "cx": 0.0253,
+            "roc_x": 39.5704,
+            "cy": 0.0,
+            "roc_y": 1000000028.2819,
+            "d": 6.4325,
+            "mat2": "air",
+            "d_next": 18.3635
+        },
+        {
+            "idx": 3,
+            "type": "Anamorphic",
+            "r": 11.7257,
+            "cx": 0.0215,
+            "roc_x": 46.5921,
+            "cy": 0.0,
+            "roc_y": 1000000028.2819,
+            "d": 24.796,
+            "mat2": "1.7283/28.53",
+            "d_next": 3.704
+        },
+        {
+            "idx": 4,
+            "type": "Plane",
+            "(l)": 24.748737341529164,
+            "r": 11.98721809387207,
+            "(d)": 28.5,
+            "is_square": true,
+            "mat2": "air",
+            "d_next": 2.0
+        },
+        {
+            "idx": 5,
+            "type": "Aperture",
+            "r": 17.5,
+            "(d)": 30.5,
+            "mat2": "air",
+            "is_square": false,
+            "diffraction": false,
+            "d_next": 78.7503
+        }
+    ]
+}

@@ -17,23 +17,23 @@ from deeplens import GeoLens
 
 
 def main():
-    lens = GeoLens(filename="./lenses/camera/iter17500.json")
+    lens = GeoLens(filename="./lenses/camera/anamorphic_custom_f2.0.json")
     # lens = GeoLens(filename='./lenses/cellphone/cellphone80deg.json')
     # lens = GeoLens(filename='./lenses/zemax_double_gaussian.zmx')
     lens.analysis(
         f"./initial_lens",
         zmx_format=True,
-        plot_invalid=True,
         multi_plot=False,
     )
     lens.optimize(
          lrs=[5e-4, 1e-4, 0.1, 1e-4],
          decay=0.02,
          iterations=5000,
-         centroid=False,
+         centroid=True,
          importance_sampling=True,
          optim_mat=True,
-         match_mat=False,
+         shape_control=True,
+         test_per_iter=5,
          result_dir="./result",
     )
 

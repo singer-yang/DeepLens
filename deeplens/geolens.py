@@ -49,6 +49,7 @@ from .optics.materials import SELLMEIER_TABLE, Material
 from .optics.monte_carlo import forward_integral
 from .optics.ray import Ray
 from .optics.surfaces import (
+    Anamorphic,
     Aperture,
     Aspheric,
     Cubic,
@@ -1836,6 +1837,39 @@ class GeoLens(Lens):
         return avg_pupilz, avg_pupilx
 
     @staticmethod
+    def filter_parallel_lines(Di, Dj, threshold=1e-3):
+        """
+        Identify line pairs that are nearly parallel by computing the cosine of the angle
+        between their directions. If |cos(theta)| ~ 1, they're parallel or anti-parallel.
+
+        Args:
+            Di (torch.Tensor): Direction vectors for line i, shape [M, 2].
+        Dj (torch.Tensor): Direction vectors for line j, shape [M, 2].
+        threshold (float): If 1 - |cos(theta)| < threshold, we consider lines nearly parallel.
+
+        Returns:
+            torch.BoolTensor: A mask of shape [M], where True means "not parallel."
+        """
+        # Dot product for each pair
+        dot_ij = (Di * Dj).sum(dim=-1)  # shape [M]
+        # Norms for each pair
+        norm_i = Di.norm(dim=-1)
+        norm_j = Dj.norm(dim=-1)
+
+        # Avoid division by zero
+        denom = (norm_i * norm_j).clamp_min(1e-12)
+
+        # cos(theta) for each pair
+        cos_theta = dot_ij / denom  # shape [M]
+
+        # Lines are "near parallel" if |cos(theta)| is extremely close to 1
+        # i.e., if 1 - |cos(theta)| < threshold
+        parallel_mask = (1.0 - cos_theta.abs()) < threshold
+
+        # We return the inverse: True means "keep" (not parallel)
+        return ~parallel_mask
+
+    @staticmethod
     def compute_intersection_points_2d(origins, directions):
         """Compute the intersection points of 2D lines.
 
@@ -1847,6 +1881,9 @@ class GeoLens(Lens):
             torch.Tensor: Intersection points. Shape: [N*(N-1)/2, 2]
         """
         N = origins.shape[0]
+        if N < 2:
+            # Not enough lines to intersect
+            return torch.empty(0, 2, device=origins.device)
 
         # Create pairwise combinations of indices
         idx = torch.arange(N)
@@ -1857,6 +1894,20 @@ class GeoLens(Lens):
         Di = directions[idx_i]  # Shape: [N*(N-1)/2, 2]
         Dj = directions[idx_j]  # Shape: [N*(N-1)/2, 2]
 
+        # 1) Filter out nearly parallel lines
+        not_parallel_mask = GeoLens.filter_parallel_lines(Di, Dj, threshold=1e-3)
+
+        # Keep only the pairs that aren't parallel
+        Oi = Oi[not_parallel_mask]
+        Oj = Oj[not_parallel_mask]
+        Di = Di[not_parallel_mask]
+        Dj = Dj[not_parallel_mask]
+
+        # If everything got filtered out, return empty
+        if Oi.shape[0] == 0:
+            return torch.empty(0, 2, device=origins.device)
+
+        # 2) Construct the system A x = b
         # Vector from Oi to Oj
         b = Oj - Oi  # Shape: [N*(N-1)/2, 2]
 
@@ -1867,9 +1918,10 @@ class GeoLens(Lens):
         # Using least squares to handle the case of no exact solution
         x, _ = torch.linalg.lstsq(
             A,
-            b.unsqueeze(-1),
-            driver='gelsd'
+            b.unsqueeze(-1)
         )[:2]
+        if x.dim() == 2:  # If only one system was solved, add a batch dimension.
+            x = x.unsqueeze(0)
         x = x.squeeze(-1)  # Shape: [N*(N-1)/2, 2]
         s = x[:, 0]
         t = x[:, 1]
@@ -1882,6 +1934,121 @@ class GeoLens(Lens):
         P = (P_i + P_j) / 2
 
         return P
+
+    def sample_point_source_with_offset(self, depth, num_rays, num_grid, wvln, offset):
+        """
+        Wraps self.sample_point_source to apply a manual offset to the ray source.
+        
+        Args:
+            depth: The object depth.
+            num_rays: Number of rays to sample.
+            num_grid: Grid resolution for sampling.
+            wvln: Wavelength.
+            offset: A tuple (dx, dy) specifying the offset in object space.
+        
+        Returns:
+            A list or batch of rays with modified source positions.
+        """
+        ray = self.sample_point_source(depth=depth, num_rays=num_rays, num_grid=num_grid, wvln=wvln, importance_sampling=True)
+    
+        # Apply offset to ray's origin (or object coordinates).
+        ray.o[..., 0:2] += torch.tensor(offset, device=self.device)
+        return ray
+
+    def get_cached_rays(self, depth, wvln, offset):
+        """
+        Retrieve rays sampled at a given depth and wavelength. If not already cached,
+        call sample_point_source once and store the result.
+        
+        Args:
+            depth: The object depth.
+            wvln: Wavelength.
+            offset: A direction specifying the offset in object space. 'c', 'h' or 'v'
+        
+        Returns:
+            A list or batch of rays with modified source positions.
+        """
+        # Create a key based on depth and wavelength
+        key = (depth, wvln, offset)
+        if not hasattr(self, "_cached_rays"):
+            self._cached_rays = {}
+        if key not in self._cached_rays:
+            # Sample rays once and store them
+            if offset == 'c':
+                self._cached_rays[key] = self.sample_point_source(
+                    depth=depth,
+                    num_rays=1024,
+                    num_grid=15,
+                    wvln=wvln
+                )
+            elif offset == 'h':
+                self._cached_rays[key] = self.sample_point_source_with_offset(
+                    depth=depth,
+                    num_rays=1024,
+                    num_grid=15,
+                    wvln=wvln,
+                    offset=(1e-3, 0.0)
+                )
+            elif offset == 'v':
+                self._cached_rays[key] = self.sample_point_source_with_offset(
+                    depth=depth,
+                    num_rays=1024,
+                    num_grid=15,
+                    wvln=wvln,
+                    offset=(0.0, 1e-3)
+                )
+        return self._cached_rays[key].clone()
+
+    def compute_effective_horizontal_and_vertical_magnification(self, depth):
+        """
+        Compute the effective horizontal and vertical magnification of the full lens system.
+        This is done by sampling rays from a point source with and without a small
+        horizontal and vertical offset and then comparing the sensor positions.
+    
+        Args:
+            depth (float): The object depth for ray sampling.
+    
+        Returns:
+            torch.Tensor: The computed horizontal and vertical magnification.
+        """
+        delta = 1e-3  # Small horizontal offset in object space.
+        M_x_list = []
+        M_y_list = []
+        for wvln in WAVE_RGB:
+            # Sample a central ray (no offset)
+            ray_central = self.get_cached_rays(
+                depth=depth,
+                wvln=wvln,
+                offset='c'
+            )
+            ray_central, _ = self.trace(ray_central)
+            sensor_central = ray_central.project_to(self.d_sensor)
+
+            # Sample a ray with a small horizontal offset (delta, 0)
+            ray_offset_h = self.get_cached_rays(
+                depth=depth,
+                wvln=wvln,
+                offset='h'
+            )
+            ray_offset_h, _ = self.trace(ray_offset_h)
+            sensor_offset_h = ray_offset_h.project_to(self.d_sensor)
+
+            # Sample a ray with a small vertical offset (0, delta)
+            ray_offset_v = self.get_cached_rays(
+                depth=depth,
+                wvln=wvln,
+                offset='v'
+            )
+            ray_offset_v, _ = self.trace(ray_offset_v)
+            sensor_offset_v = ray_offset_v.project_to(self.d_sensor)
+
+            # Compute horizontal magnification: (difference in sensor x) / delta.
+            M_x = torch.abs((sensor_offset_h[..., 0] - sensor_central[..., 0]) / delta)
+            # Compute vertical magnification: (difference in sensor y) / delta.
+            M_y = torch.abs((sensor_offset_v[..., 1] - sensor_central[..., 1]) / delta)
+            M_x_list.append(M_x)
+            M_y_list.append(M_y)
+        return torch.mean(torch.stack(M_x_list)), torch.mean(torch.stack(M_y_list))
 
     # ====================================================================================
     # Lens operation
@@ -2772,11 +2939,11 @@ class GeoLens(Lens):
             self.is_cellphone = False
 
             self.dist_min = 0.1
-            self.dist_max = float("inf")
+            self.dist_max = 230.0 # float("inf")
             self.thickness_min = 0.3
-            self.thickness_max = float("inf")
+            self.thickness_max = 200.0 # float("inf")
             self.flange_min = 0.5
-            self.flange_max = float("inf")
+            self.flange_max = 30.0 # float("inf")
 
             self.sag_max = 8.0
             self.grad_max = 1.0
@@ -2810,8 +2977,75 @@ class GeoLens(Lens):
                 + 1.0 * loss_surf
                 + 0.05 * loss_angle
             )
+            print(f"Losses in loss_reg: {loss_focus}, {loss_intersec}, {loss_surf}, {loss_angle}")
 
         return loss_reg
+
+    def loss_anamorphic(self, depth, target_local_squeeze, target_global_squeeze):
+        """
+        Compute a combined loss for anamorphic surfaces that includes:
+          - Local penalties on sag, 1st-, and 2nd-order derivatives.
+          - A local squeeze penalty for each anamorphic surface.
+          - A global squeeze penalty computed from ray-traced effective magnification.
+    
+        Args:
+            depth (float): The object depth from which rays are sampled.
+            target_local_squeeze (float): Target local squeeze value.
+            target_global_squeeze (float): Target global squeeze value.
+    
+        Returns:
+            torch.Tensor: Scalar loss value.
+        """
+        total_loss = torch.tensor([0.0], device=self.device)
+
+        # Local loss terms for each anamorphic surface.
+        for idx in self.find_diff_surf():
+            surface = self.surfaces[idx]
+            if not isinstance(surface, Anamorphic):
+                continue
+            # Sample 20 points along the x-axis (from 0 to the aperture radius)
+            x_vals = torch.linspace(0.0, 1.0, 20).to(self.device) * surface.r
+            y_vals = torch.zeros_like(x_vals)
+
+            # --- Sag Penalty ---
+            sag_vals = surface.sag(x_vals, y_vals)
+            # Only penalize if the sag variation exceeds sag_max.
+            sag_penalty = torch.nn.functional.relu((sag_vals.max() - sag_vals.min()) - self.sag_max)
+            total_loss += sag_penalty
+
+            # --- First-order Derivative Penalty ---
+            grad_vals = surface.dfdxyz(x_vals, y_vals)[0]
+            grad_penalty = 10.0 * torch.nn.functional.relu(grad_vals.abs().max() - self.grad_max)
+            total_loss += grad_penalty
+
+            # --- Second-order Derivative Penalty ---
+            grad2_vals = surface.d2fdxyz2(x_vals, y_vals)[0]
+            grad2_penalty = 10.0 * torch.nn.functional.relu(grad2_vals.abs().max() - self.grad2_max)
+            total_loss += grad2_penalty
+            print(f'Total loss: {total_loss}')
+
+            # --- Local Squeeze Penalty ---
+            # Define a local squeeze factor as the ratio of effective horizontal to vertical curvature.
+            effective_cx = torch.abs(surface.c_x + surface.c_x_perturb)
+            effective_cy = torch.abs(surface.c_y + surface.c_y_perturb) + 1e-8  # avoid division by zero
+            local_squeeze = effective_cx / effective_cy
+            local_squeeze_weight = 0.1
+            local_squeeze_penalty = local_squeeze_weight * (local_squeeze - target_local_squeeze)**2
+            print(f"Local Squeeze Penalty: {local_squeeze_penalty}")
+            total_loss += local_squeeze_penalty
+
+        # Global Squeeze Constraint via ray tracing.
+        horiz_mag, vert_mag = self.compute_effective_horizontal_and_vertical_magnification(depth)
+        print(f"Horizontal Magnification: {horiz_mag}")
+        print(f"Vertical Magnification: {vert_mag}")
+        global_squeeze = horiz_mag / (vert_mag + 1e-8)
+        print(f"Global Squeeze: {global_squeeze}")
+        global_squeeze_weight = 1.0 # keeping this big for now - this is a strong constraint
+        global_squeeze_penalty = global_squeeze_weight * (global_squeeze - target_global_squeeze)**2
+        print(f"Global Squeeze Penalty: {global_squeeze_penalty}")
+        total_loss += global_squeeze_penalty
+
+        return total_loss
 
     def loss_infocus(self, bound=0.005):
         """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
@@ -3059,6 +3293,9 @@ class GeoLens(Lens):
             elif isinstance(surf, Spheric):
                 params += surf.get_optimizer_params(lr=lr[:2], optim_mat=optim_mat)
 
+            elif isinstance(surf, Anamorphic):
+                params += surf.get_optimizer_params(lr=lr[:3], optim_mat=optim_mat)
+
             else:
                 raise Exception(
                     f"Surface type {surf.__class__.__name__} is not supported for optimization yet."
@@ -3264,6 +3501,9 @@ class GeoLens(Lens):
 
                 elif surf_dict["type"] == "ThinLens":
                     s = ThinLens.init_from_dict(surf_dict)
+                
+                elif surf_dict["type"] == "Anamorphic":
+                    s = Anamorphic.init_from_dict(surf_dict)
 
                 else:
                     raise Exception(
@@ -3555,5 +3795,7 @@ def create_surface(surface_type, d_total, aper_r, imgh, mat):
         return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
     elif surface_type == "Plane":
         return Plane(r=r, d=d_total, mat2=mat)
+    elif surface_type == "Anamorphic":
+        return Anamorphic(r=r, d=d_total, c_x=c, c_y=c, mat2=mat)
     else:
         raise Exception("Surface type not supported yet.")

@@ -191,7 +191,13 @@ def curriculum_design(
         # Lens design constraint
         loss_reg = self.loss_reg()
         w_reg = 0.1
-        L_total = loss_rms + w_reg * loss_reg
+        # Adding for anamorphics. 1.5x squeeze hardcoded for now
+        target_local_squeeze = 1.5
+        target_global_squeeze = 1.5
+        loss_anamorphic = self.loss_anamorphic(depth, target_local_squeeze, target_global_squeeze)
+        w_anamorphic = 1.0
+        print(f"Losses: {loss_rms}, {w_reg * loss_reg}, {w_anamorphic * loss_anamorphic}")
+        L_total = loss_rms + w_reg * loss_reg + w_anamorphic * loss_anamorphic
 
         # Gradient-based optimization
         optimizer.zero_grad()
@@ -236,7 +242,7 @@ if __name__ == "__main__":
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
         iterations=5000,
-        test_per_iter=50,
+        test_per_iter=3,
         optim_mat=True,
         match_mat=False,
         shape_control=True,
