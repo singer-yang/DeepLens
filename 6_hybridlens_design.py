@@ -55,11 +55,11 @@ def config():
         raise Exception("Add your wandb logging config here.")
 
     # ==> Device
-    num_gpus = torch.cuda.device_count()
+    num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
     args["num_gpus"] = num_gpus
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    # logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
 
     # ==> Save config
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -76,7 +76,7 @@ def main(args):
     # Create a hybrid refractive-diffractive lens
     lens = HybridLens(lens_path="./lenses/hybridlens/a489_doe.json")
     lens.refocus(foc_dist=-1000.0)
-    lens.double()
+    #lens.double()
 
     # PSF optimization loop to focus blue light
     optimizer = lens.get_optimizer(doe_lr=0.1, lens_lr=[1e-4, 1e-4, 1e-1, 1e-5])

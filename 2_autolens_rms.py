@@ -58,11 +58,11 @@ def config():
     logging.info(f"EXP: {args['EXP_NAME']}")
 
     # Device
-    num_gpus = torch.cuda.device_count()
+    num_gpus = 1 #torch.cuda.device_count()
     args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    #logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
 
     # ==> Save config and original code
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -191,7 +191,13 @@ def curriculum_design(
         # Lens design constraint
         loss_reg = self.loss_reg()
         w_reg = 0.1
-        L_total = loss_rms + w_reg * loss_reg
+        # Adding for anamorphics. 1.5x squeeze hardcoded for now
+        target_local_squeeze = 1.5
+        target_global_squeeze = 1.5
+        loss_anamorphic = self.loss_anamorphic(depth, target_local_squeeze, target_global_squeeze)
+        w_anamorphic = 1.0
+        print(f"Losses: {loss_rms}, {w_reg * loss_reg}, {w_anamorphic * loss_anamorphic}")
+        L_total = loss_rms + w_reg * loss_reg + w_anamorphic * loss_anamorphic
 
         # Gradient-based optimization
         optimizer.zero_grad()
@@ -236,7 +242,7 @@ if __name__ == "__main__":
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
         iterations=5000,
-        test_per_iter=50,
+        test_per_iter=3,
         optim_mat=True,
         match_mat=False,
         shape_control=True,
