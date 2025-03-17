@@ -20,6 +20,8 @@ def main():
     lens = GeoLens(filename="./lenses/camera/ef35mm_f2.0.json")
     # lens = GeoLens(filename='./lenses/cellphone/cellphone80deg.json')
     # lens = GeoLens(filename='./lenses/zemax_double_gaussian.zmx')
+
+    lens.draw_distortion_1D(hfov=10, plane="meridional")    # zemax中的F-Theta
     lens.analysis(render=True)
 
 
