@@ -13,7 +13,7 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
     # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
-import json
+import json,string
 import logging
 import math
 import os
@@ -110,12 +110,12 @@ class GeoLens(Lens):
     def post_computation(self):
         """After loading lens, compute foclen, fov and fnum."""
         self.find_aperture()
-
+        self.optical_parameters = self.calc_optical_parameters()
         self.hfov = self.calc_fov()
         self.foclen = self.calc_efl()
+        self.avg_pupilz, self.avg_pupilx = self.calc_entrance_pupil()
         self.fnum = self.calc_fnum()
-        self.avg_pupilz, self.avg_pupilx = self.entrance_pupil_update()
-
+        
         self.init_constraints()
 
     # ====================================================================================
@@ -1452,11 +1452,16 @@ class GeoLens(Lens):
             actual_image_height = abs(ray.o[..., 1] + ray.d[..., 1] * t)
 
         # 3.计算畸变
-        # print(f"理想像高: {float(ideal_image_height):.10f}")
-        # print(f"实际像高: {float(actual_image_height):.10f}")
         distortion = (actual_image_height - ideal_image_height) / ideal_image_height * 100
 
         return distortion
+
+    @torch.no_grad()
+    def calc_field_curvature(self, fov=0.0, wvln=DEFAULT_WAVE):
+        """计算场曲
+
+        """
+        # 基本光学系统参数初始化
 
     # ====================================================================================
     # Geometrical optics calculation
@@ -1550,8 +1555,37 @@ class GeoLens(Lens):
             except:
                 return float('inf')  # 异常情况
 
-        # 第一阶段：先尝试DLS方法
+        # 保存原始精度并切换到双精度计算
+        orig_dtype = torch.get_default_dtype()
+        try:
+            torch.set_default_dtype(torch.float64)
+            
+            # 首先尝试使用阻尼最小二乘法
+            best_position, best_distance = self._calc_chief_ray_infinite_dls(
+                fov, wvln, max_iterations, tolerance, plane, 
+                aper_z, aper_radius, initial_z, fixed_direction, 
+                evaluate_point, fov_degrees
+            )
+            
+            # 如果DLS方法失败或精度不够，切换到二分法
+            if best_distance > tolerance:
+                best_position, best_distance = self._calc_chief_ray_infinite_bisection(
+                    fov, wvln, tolerance, plane, 
+                    aper_z, aper_radius, initial_z, fixed_direction, 
+                    evaluate_point, fov_degrees, tan_fov,
+                    best_position, best_distance
+                )
+            
+            return best_position, fixed_direction
+            
+        finally:
+            # 恢复原始精度
+            torch.set_default_dtype(orig_dtype)
 
+    def _calc_chief_ray_infinite_dls(self, fov, wvln, max_iterations, tolerance, plane, 
+                                 aper_z, aper_radius, initial_z, fixed_direction, 
+                                 evaluate_point, fov_degrees):
+        """使用阻尼最小二乘法计算无限远主光线"""
         # 根据视场角大小设置适当的初始参数
         if fov_degrees < 5.0:  # 小角度
             scale_factor = 0.95
@@ -1571,7 +1605,12 @@ class GeoLens(Lens):
             min_lambda = 1e-8
             max_lambda = 1e8
             lambda_factor = 12.0
-
+        
+        # 计算初始参数
+        sin_fov = math.sin(fov)
+        cos_fov = math.cos(fov)
+        tan_fov = sin_fov / cos_fov if abs(cos_fov) > 1e-10 else 0.0
+        
         # 初始化物点
         val_estimate = tan_fov * (aper_z - initial_z) * scale_factor
 
@@ -1586,244 +1625,108 @@ class GeoLens(Lens):
 
         # 启动DLS优化
         lamb = initial_lambda
+        dp_object_point = object_point.double()
+        dp_direction = fixed_direction.double()
 
-        # 保存原始精度并切换到双精度计算
-        orig_dtype = torch.get_default_dtype()
-        try:
-            torch.set_default_dtype(torch.float64)
-            dp_object_point = object_point.double()
-            dp_direction = fixed_direction.double()
+        # 重试机制设置
+        retry_count = 0
+        max_retries = 6
+        stagnant_count = 0
+        prev_error = float('inf')
 
-            # 重试机制设置
-            retry_count = 0
-            max_retries = 6
-            stagnant_count = 0
-            prev_error = float('inf')
+        for iteration in range(max_iterations):
+            # 重试检查
+            if (lamb >= max_lambda * 0.5 or stagnant_count >= 10) and best_distance > tolerance and retry_count < max_retries:
+                retry_count += 1
+                stagnant_count = 0
 
-            for iteration in range(max_iterations):
-                # 重试检查
-                if (
-                        lamb >= max_lambda * 0.5 or stagnant_count >= 10) and best_distance > tolerance and retry_count < max_retries:
-                    retry_count += 1
-                    stagnant_count = 0
+                # 使用更保守的起点
+                if fov_degrees >= 9.0:  # 大角度使用更激进的调整
+                    scale = 0.6 - retry_count * 0.1
+                elif fov_degrees >= 5.0:  # 中等角度
+                    scale = 0.65 - retry_count * 0.07
+                else:  # 小角度
+                    scale = 0.8 - retry_count * 0.05
 
-                    # 使用更保守的起点
-                    if fov_degrees >= 9.0:  # 大角度使用更激进的调整
-                        scale = 0.6 - retry_count * 0.1
-                    elif fov_degrees >= 5.0:  # 中等角度
-                        scale = 0.65 - retry_count * 0.07
-                    else:  # 小角度
-                        scale = 0.8 - retry_count * 0.05
+                # 限制最小缩放并确保探索多个方向
+                if retry_count % 2 == 0:
+                    scale = max(scale, 0.2)
+                else:
+                    scale = -max(scale, 0.2)  # 尝试负方向
 
-                    # 限制最小缩放并确保探索多个方向
-                    if retry_count % 2 == 0:
-                        scale = max(scale, 0.2)
-                    else:
-                        scale = -max(scale, 0.2)  # 尝试负方向
+                # 生成新起点
+                new_val = tan_fov * (aper_z - initial_z) * scale
+                if plane.lower() == "sagittal":
+                    dp_object_point[0, 0] = new_val
+                else:
+                    dp_object_point[0, 1] = new_val
 
-                    # 生成新起点
-                    new_val = tan_fov * (aper_z - initial_z) * scale
+                # 重置阻尼参数
+                lamb = initial_lambda * (1.0 + retry_count * 0.2)
+
+            # 光线追踪
+            ray = Ray(dp_object_point, dp_direction, wvln=wvln, device=self.device)
+            try:
+                ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
+                if ray.ra.sum() == 0:
+                    # 光线被阻挡，进行调整
                     if plane.lower() == "sagittal":
-                        dp_object_point[0, 0] = new_val
+                        dp_object_point[0, 0] *= (0.65 if fov_degrees >= 9.0 else (0.7 if fov_degrees >= 5.0 else 0.85))
                     else:
-                        dp_object_point[0, 1] = new_val
+                        dp_object_point[0, 1] *= (0.65 if fov_degrees >= 9.0 else (0.7 if fov_degrees >= 5.0 else 0.85))
 
-                    # 重置阻尼参数
-                    lamb = initial_lambda * (1.0 + retry_count * 0.2)
-
-                # 光线追踪
-                ray = Ray(dp_object_point, dp_direction, wvln=wvln, device=self.device)
-                try:
-                    ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
-                    if ray.ra.sum() == 0:
-                        # 光线被阻挡，进行调整
-                        if plane.lower() == "sagittal":
-                            dp_object_point[0, 0] *= (
-                                0.65 if fov_degrees >= 9.0 else (0.7 if fov_degrees >= 5.0 else 0.85))
-                        else:
-                            dp_object_point[0, 1] *= (
-                                0.65 if fov_degrees >= 9.0 else (0.7 if fov_degrees >= 5.0 else 0.85))
-
-                        # 增加阻尼因子但不要过快
-                        lamb = min(max_lambda, lamb * 1.5)
-                        continue
-
-                    # 计算与光阑中心的距离
-                    t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
-                    intersection = ray.o + ray.d * t[..., None]
-                    error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
-
-                    # 跟踪停滞情况
-                    if abs(error - prev_error) < error * 1e-4:
-                        stagnant_count += 1
-                    else:
-                        stagnant_count = 0
-                    prev_error = error
-
-                    # 保存最佳结果
-                    if error < best_distance:
-                        best_distance = error
-                        best_position = dp_object_point.clone()
-
-                    # 达到精度要求后提前结束
-                    if error < tolerance:
-                        break
-
-                    # 计算雅可比矩阵 - 根据视场角和当前误差调整增量
-                    if fov_degrees < 5.0:
-                        delta = min(1e-6, error * 0.1)
-                    elif fov_degrees < 9.0:
-                        delta = min(2e-5, error * 0.3)
-                    else:
-                        delta = min(5e-5, error * 0.5)
-
-                    # 对于非常小的误差，使用更小的增量
-                    if error < 1e-7:
-                        delta *= 0.1
-
-                    # 前向差分尝试
-                    dp_test = dp_object_point.clone()
-                    if plane.lower() == "sagittal":
-                        dp_test[0, 0] += delta
-                    else:
-                        dp_test[0, 1] += delta
-
-                    try:
-                        test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
-                        test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-
-                        # 检查光线是否被阻挡
-                        if test_ray.ra.sum() == 0:
-                            # 尝试反向差分
-                            delta = -delta
-                            dp_test = dp_object_point.clone()
-                            if plane.lower() == "sagittal":
-                                dp_test[0, 0] += delta
-                            else:
-                                dp_test[0, 1] += delta
-
-                            test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
-                            test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-
-                            # 如果仍然阻挡，增加阻尼并继续
-                            if test_ray.ra.sum() == 0:
-                                lamb = min(max_lambda, lamb * lambda_factor)
-                                if plane.lower() == "sagittal":
-                                    dp_object_point[0, 0] *= 0.9
-                                else:
-                                    dp_object_point[0, 1] *= 0.9
-                                continue
-
-                        # 计算测试误差
-                        t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-                        test_intersection = test_ray.o + test_ray.d * t_test[..., None]
-                        test_error = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
-
-                        # 计算雅可比分量
-                        J = (test_error - error) / delta
-
-                        # 防止雅可比为零或过小
-                        if abs(J) < 1e-12:
-                            J = 1e-12 if J >= 0 else -1e-12
-
-                        # 计算DLS更新量
-                        JtJ = J * J
-                        dy = (-error * J) / (JtJ + lamb)
-
-                        # 动态限制更新步长
-                        if error < 1e-6:
-                            max_step = aper_radius * 0.001
-                        elif error < 1e-4:
-                            max_step = aper_radius * 0.01
-                        else:
-                            # 根据角度设置不同步长
-                            if fov_degrees < 5.0:
-                                max_step = aper_radius * 0.05
-                            elif fov_degrees < 9.0:
-                                max_step = aper_radius * 0.02
-                            else:
-                                max_step = aper_radius * 0.01
-
-                        dy = max(min(dy, max_step), -max_step)
-
-                        # 尝试更新
-                        test_point = dp_object_point.clone()
-                        if plane.lower() == "sagittal":
-                            test_point[0, 0] += dy
-                        else:
-                            test_point[0, 1] += dy
-
-                        test_ray = Ray(test_point, dp_direction, wvln=wvln, device=self.device)
-                        try:
-                            test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-                            if test_ray.ra.sum() > 0:
-                                t_new = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-                                new_intersection = test_ray.o + test_ray.d * t_new[..., None]
-                                new_error = torch.sqrt(
-                                    new_intersection[..., 0] ** 2 + new_intersection[..., 1] ** 2).item()
-
-                                if new_error < error:
-                                    # 更新成功，减小阻尼系数
-                                    dp_object_point = test_point.clone()
-                                    lamb = max(min_lambda, lamb / lambda_factor)
-
-                                    # 误差显著减小时，更激进地减小阻尼
-                                    if new_error < error * 0.1:
-                                        lamb = max(min_lambda, lamb / 2.0)
-                                else:
-                                    # 更新失败，增大阻尼系数
-                                    lamb = min(max_lambda, lamb * lambda_factor)
-                            else:
-                                # 光线被阻挡，增大阻尼系数
-                                lamb = min(max_lambda, lamb * lambda_factor)
-                        except Exception as e:
-                            # 光线追踪异常，增大阻尼系数
-                            lamb = min(max_lambda, lamb * lambda_factor)
-                    except Exception as e:
-                        # 雅可比计算失败，增大阻尼系数并调整当前位置
-                        lamb = min(max_lambda, lamb * lambda_factor)
-                        if plane.lower() == "sagittal":
-                            dp_object_point[0, 0] *= 0.95
-                        else:
-                            dp_object_point[0, 1] *= 0.95
-
-                except Exception as e:
-                    # 主光线追踪失败，调整位置继续
-                    correction_scale = 0.7 if "total internal reflection" in str(e) else 0.85
-                    if plane.lower() == "sagittal":
-                        dp_object_point[0, 0] *= correction_scale
-                    else:
-                        dp_object_point[0, 1] *= correction_scale
+                    # 增加阻尼因子但不要过快
                     lamb = min(max_lambda, lamb * 1.5)
                     continue
 
-            # DLS最终结果评估
-            if best_distance <= tolerance:
-                # 验证最佳结果
-                final_position = best_position.clone()
+                # 计算与光阑中心的距离
+                t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
+                intersection = ray.o + ray.d * t[..., None]
+                error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
 
-                # 如果DLS逼近但未达标，尝试精细优化
-                if best_distance < 1e-6:
-                    # 使用最佳位置重新初始化
-                    dp_object_point = best_position.clone()
-                    lamb = 0.01  # 使用极小阻尼进行精细优化
+                # 跟踪停滞情况
+                if abs(error - prev_error) < error * 1e-4:
+                    stagnant_count += 1
+                else:
+                    stagnant_count = 0
+                prev_error = error
 
-                    # 精细优化循环
-                    for i in range(20):
-                        ray = Ray(dp_object_point, dp_direction, wvln=wvln, device=self.device)
-                        ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
+                # 保存最佳结果
+                if error < best_distance:
+                    best_distance = error
+                    best_position = dp_object_point.clone()
 
-                        t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
-                        intersection = ray.o + ray.d * t[..., None]
-                        error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
+                # 达到精度要求后提前结束
+                if error < tolerance:
+                    break
 
-                        if error < tolerance:
-                            best_distance = error
-                            final_position = dp_object_point.clone()
-                            break
+                # 计算雅可比矩阵 - 根据视场角和当前误差调整增量
+                if fov_degrees < 5.0:
+                    delta = min(1e-6, error * 0.1)
+                elif fov_degrees < 9.0:
+                    delta = min(2e-5, error * 0.3)
+                else:
+                    delta = min(5e-5, error * 0.5)
 
-                        # 使用极小增量
-                        delta = min(1e-8, error * 0.01)
+                # 对于非常小的误差，使用更小的增量
+                if error < 1e-7:
+                    delta *= 0.1
+
+                # 前向差分尝试
+                dp_test = dp_object_point.clone()
+                if plane.lower() == "sagittal":
+                    dp_test[0, 0] += delta
+                else:
+                    dp_test[0, 1] += delta
+
+                try:
+                    test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
+                    test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
+
+                    # 检查光线是否被阻挡
+                    if test_ray.ra.sum() == 0:
+                        # 尝试反向差分
+                        delta = -delta
                         dp_test = dp_object_point.clone()
                         if plane.lower() == "sagittal":
                             dp_test[0, 0] += delta
@@ -1833,300 +1736,429 @@ class GeoLens(Lens):
                         test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
                         test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
 
-                        t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-                        test_intersection = test_ray.o + test_ray.d * t_test[..., None]
-                        test_error = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
+                        # 如果仍然阻挡，增加阻尼并继续
+                        if test_ray.ra.sum() == 0:
+                            lamb = min(max_lambda, lamb * lambda_factor)
+                            if plane.lower() == "sagittal":
+                                dp_object_point[0, 0] *= 0.9
+                            else:
+                                dp_object_point[0, 1] *= 0.9
+                            continue
 
-                        J = (test_error - error) / delta
-                        if abs(J) < 1e-15:
-                            J = 1e-15 if J >= 0 else -1e-15
+                    # 计算测试误差
+                    t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
+                    test_intersection = test_ray.o + test_ray.d * t_test[..., None]
+                    test_error = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
 
-                        # 极小阻尼更新
-                        dy = -error * J / (J * J + 1e-4)
-                        max_step = error * 0.5
-                        dy = max(min(dy, max_step), -max_step)
+                    # 计算雅可比分量
+                    J = (test_error - error) / delta
 
-                        if plane.lower() == "sagittal":
-                            dp_object_point[0, 0] += dy
-                        else:
-                            dp_object_point[0, 1] += dy
+                    # 防止雅可比为零或过小
+                    if abs(J) < 1e-12:
+                        J = 1e-12 if J >= 0 else -1e-12
 
-                        if error < best_distance:
-                            best_distance = error
-                            final_position = dp_object_point.clone()
+                    # 计算DLS更新量
+                    JtJ = J * J
+                    dy = (-error * J) / (JtJ + lamb)
 
-                    # 如果已经达到要求精度，直接返回
-                    if best_distance <= tolerance:
-                        # 最终验证
-                        final_ray = Ray(final_position, dp_direction, wvln=wvln, device=self.device)
-                        final_ray, _ = self.trace(final_ray, lens_range=range(0, self.aper_idx + 1))
-                        t_final = (aper_z - final_ray.o[..., 2]) / final_ray.d[..., 2]
-                        final_intersection = final_ray.o + final_ray.d * t_final[..., None]
-                        final_distance = torch.sqrt(
-                            final_intersection[..., 0] ** 2 + final_intersection[..., 1] ** 2).item()
-
-                        if final_distance <= tolerance:
-                            return final_position, fixed_direction
-
-            # 如果DLS方法失败或精度不够，切换到多级自适应搜索方法
-
-            # 第二阶段：使用多级自适应搜索方法
-
-            # 1. 第一阶段：超宽范围粗扫描
-            # 使用远大于原来的扩展范围和更多起始点
-            scales_wide = []
-
-            # 添加更多极端值探索
-            for s in [-2.0, -1.5, -1.0, -0.8, -0.6, -0.5, -0.4, -0.3, -0.2, -0.15, -0.1, -0.08, -0.06,
-                      -0.04, -0.02, -0.01, -0.005, 0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15,
-                      0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0]:
-                scales_wide.append(s)
-
-            # 添加随机探索点增加覆盖率
-            import random
-            for _ in range(15):
-                # 均匀分布随机值, 覆盖更极端区域
-                s = (random.random() * 4.0 - 2.0)
-                scales_wide.append(s)
-
-            valid_results = []
-
-            for scale in scales_wide:
-                val = tan_fov * (aper_z - initial_z) * scale
-                if plane.lower() == "sagittal":
-                    point_coord = val
-                else:
-                    point_coord = val
-
-                error = evaluate_point(point_coord)
-
-                if error < float('inf'):
-                    valid_results.append((point_coord, error))
-
-            # 检查是否找到任何有效点
-            if not valid_results:
-                # 如果DLS方法有返回有限误差，使用DLS的结果
-                if best_distance < float('inf'):
-                    return best_position, fixed_direction
-                else:
-                    # 使用非常保守的初始估计
-                    val_guess = tan_fov * (aper_z - initial_z) * 0.01
-                    if plane.lower() == "sagittal":
-                        return torch.tensor([[val_guess, 0.0, initial_z]], device=self.device), fixed_direction
+                    # 动态限制更新步长
+                    if error < 1e-6:
+                        max_step = aper_radius * 0.001
+                    elif error < 1e-4:
+                        max_step = aper_radius * 0.01
                     else:
-                        return torch.tensor([[0.0, val_guess, initial_z]], device=self.device), fixed_direction
+                        # 根据角度设置不同步长
+                        if fov_degrees < 5.0:
+                            max_step = aper_radius * 0.05
+                        elif fov_degrees < 9.0:
+                            max_step = aper_radius * 0.02
+                        else:
+                            max_step = aper_radius * 0.01
 
-            # 按误差排序
-            valid_results.sort(key=lambda x: x[1])
+                    dy = max(min(dy, max_step), -max_step)
 
-            # 2. 第二阶段：自适应二分搜索探索
-            best_val, best_error = valid_results[0]
+                    # 尝试更新
+                    test_point = dp_object_point.clone()
+                    if plane.lower() == "sagittal":
+                        test_point[0, 0] += dy
+                    else:
+                        test_point[0, 1] += dy
 
-            # 如果已经比DLS结果好，更新最佳值
-            if best_error < best_distance:
-                best_distance = best_error
+                    test_ray = Ray(test_point, dp_direction, wvln=wvln, device=self.device)
+                    try:
+                        test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
+                        if test_ray.ra.sum() > 0:
+                            t_new = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
+                            new_intersection = test_ray.o + test_ray.d * t_new[..., None]
+                            new_error = torch.sqrt(new_intersection[..., 0] ** 2 + new_intersection[..., 1] ** 2).item()
+
+                            if new_error < error:
+                                # 更新成功，减小阻尼系数
+                                dp_object_point = test_point.clone()
+                                lamb = max(min_lambda, lamb / lambda_factor)
+
+                                # 误差显著减小时，更激进地减小阻尼
+                                if new_error < error * 0.1:
+                                    lamb = max(min_lambda, lamb / 2.0)
+                            else:
+                                # 更新失败，增大阻尼系数
+                                lamb = min(max_lambda, lamb * lambda_factor)
+                        else:
+                            # 光线被阻挡，增大阻尼系数
+                            lamb = min(max_lambda, lamb * lambda_factor)
+                    except Exception as e:
+                        # 光线追踪异常，增大阻尼系数
+                        lamb = min(max_lambda, lamb * lambda_factor)
+                except Exception as e:
+                    # 雅可比计算失败，增大阻尼系数并调整当前位置
+                    lamb = min(max_lambda, lamb * lambda_factor)
+                    if plane.lower() == "sagittal":
+                        dp_object_point[0, 0] *= 0.95
+                    else:
+                        dp_object_point[0, 1] *= 0.95
+
+            except Exception as e:
+                # 主光线追踪失败，调整位置继续
+                correction_scale = 0.7 if "total internal reflection" in str(e) else 0.85
                 if plane.lower() == "sagittal":
-                    best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device, dtype=torch.float64)
+                    dp_object_point[0, 0] *= correction_scale
                 else:
-                    best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device, dtype=torch.float64)
+                    dp_object_point[0, 1] *= correction_scale
+                lamb = min(max_lambda, lamb * 1.5)
+                continue
 
-            # 分析有效点分布找出最有希望的区域
-            val_values = [r[0] for r in valid_results]
-            min_val = min(val_values)
-            max_val = max(val_values)
+        # DLS最终结果评估
+        if best_distance <= tolerance:
+            # 验证最佳结果
+            final_position = best_position.clone()
 
-            # 如果有效区域范围过大，缩小到最佳点附近
-            if max_val - min_val > abs(tan_fov * (aper_z - initial_z)):
-                # 选择包含前3个最佳点的区域
-                top_val_values = [r[0] for r in valid_results[:min(3, len(valid_results))]]
-                min_val = min(top_val_values) - abs(tan_fov * (aper_z - initial_z)) * 0.1
-                max_val = max(top_val_values) + abs(tan_fov * (aper_z - initial_z)) * 0.1
+            # 如果DLS逼近但未达标，尝试精细优化
+            if best_distance < 1e-6:
+                # 使用最佳位置重新初始化
+                dp_object_point = best_position.clone()
+                lamb = 0.01  # 使用极小阻尼进行精细优化
 
-            # 使用二分法进行更细致的搜索
-            depth = 0
-            max_depth = 12  # 控制二分搜索深度
+                # 精细优化循环
+                for i in range(20):
+                    ray = Ray(dp_object_point, dp_direction, wvln=wvln, device=self.device)
+                    ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
 
-            # 二分搜索过程
-            while depth < max_depth and (max_val - min_val) > tolerance * 10 and best_error > tolerance:
-                depth += 1
-                mid_val = (min_val + max_val) / 2
+                    t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
+                    intersection = ray.o + ray.d * t[..., None]
+                    error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
 
-                # 创建5个测试点
-                test_points = [
-                    min_val,
-                    min_val + (max_val - min_val) * 0.25,
-                    mid_val,
-                    min_val + (max_val - min_val) * 0.75,
-                    max_val
-                ]
+                    if error < tolerance:
+                        best_distance = error
+                        final_position = dp_object_point.clone()
+                        break
 
-                # 评估所有测试点
-                test_results = []
-                for val in test_points:
-                    error = evaluate_point(val)
-                    if error < float('inf'):
-                        test_results.append((val, error))
+                    # 使用极小增量
+                    delta = min(1e-8, error * 0.01)
+                    dp_test = dp_object_point.clone()
+                    if plane.lower() == "sagittal":
+                        dp_test[0, 0] += delta
+                    else:
+                        dp_test[0, 1] += delta
 
-                if not test_results:
-                    # 扩大搜索范围
-                    range_expansion = (max_val - min_val) * 0.5
-                    min_val = min_val - range_expansion
-                    max_val = max_val + range_expansion
-                    continue
+                    test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
+                    test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
 
-                # 更新最佳结果
-                test_results.sort(key=lambda x: x[1])
-                new_best_val, new_best_error = test_results[0]
+                    t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
+                    test_intersection = test_ray.o + test_ray.d * t_test[..., None]
+                    test_error = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
 
-                if new_best_error < best_error:
-                    best_val = new_best_val
-                    best_error = new_best_error
+                    J = (test_error - error) / delta
+                    if abs(J) < 1e-15:
+                        J = 1e-15 if J >= 0 else -1e-15
+
+                    # 极小阻尼更新
+                    dy = -error * J / (J * J + 1e-4)
+                    max_step = error * 0.5
+                    dy = max(min(dy, max_step), -max_step)
+
+                    if plane.lower() == "sagittal":
+                        dp_object_point[0, 0] += dy
+                    else:
+                        dp_object_point[0, 1] += dy
+
+                    if error < best_distance:
+                        best_distance = error
+                        final_position = dp_object_point.clone()
+
+                # 如果已经达到要求精度，直接返回最佳位置
+                if best_distance <= tolerance:
+                    # 最终验证
+                    final_ray = Ray(final_position, dp_direction, wvln=wvln, device=self.device)
+                    final_ray, _ = self.trace(final_ray, lens_range=range(0, self.aper_idx + 1))
+                    t_final = (aper_z - final_ray.o[..., 2]) / final_ray.d[..., 2]
+                    final_intersection = final_ray.o + final_ray.d * t_final[..., None]
+                    final_distance = torch.sqrt(final_intersection[..., 0] ** 2 + final_intersection[..., 1] ** 2).item()
+
+                    if final_distance <= tolerance:
+                        best_distance = final_distance
+                        best_position = final_position.clone()
+
+        return best_position, best_distance
+
+    def _calc_chief_ray_infinite_bisection(self, fov, wvln, tolerance, plane, 
+                                      aper_z, aper_radius, initial_z, fixed_direction, 
+                                      evaluate_point, fov_degrees, tan_fov,
+                                      dls_position, dls_distance):
+        """使用二分法计算无限远主光线"""
+        # 继承DLS的最佳结果
+        best_position = dls_position.clone()
+        best_distance = dls_distance
+        
+        # 1. 第一阶段：超宽范围粗扫描
+        # 使用远大于原来的扩展范围和更多起始点
+        scales_wide = []
+
+        # 添加更多极端值探索
+        for s in [-2.0, -1.5, -1.0, -0.8, -0.6, -0.5, -0.4, -0.3, -0.2, -0.15, -0.1, -0.08, -0.06,
+                -0.04, -0.02, -0.01, -0.005, 0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15,
+                0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0]:
+            scales_wide.append(s)
+
+        # 添加随机探索点增加覆盖率
+        import random
+        for _ in range(15):
+            # 均匀分布随机值, 覆盖更极端区域
+            s = (random.random() * 4.0 - 2.0)
+            scales_wide.append(s)
+
+        valid_results = []
+
+        for scale in scales_wide:
+            val = tan_fov * (aper_z - initial_z) * scale
+            if plane.lower() == "sagittal":
+                point_coord = val
+            else:
+                point_coord = val
+
+            error = evaluate_point(point_coord)
+
+            if error < float('inf'):
+                valid_results.append((point_coord, error))
+
+        # 检查是否找到任何有效点
+        if not valid_results:
+            # 如果DLS方法有返回有限误差，使用DLS的结果
+            if best_distance < float('inf'):
+                return best_position, best_distance
+            else:
+                # 使用非常保守的初始估计
+                val_guess = tan_fov * (aper_z - initial_z) * 0.01
+                if plane.lower() == "sagittal":
+                    return torch.tensor([[val_guess, 0.0, initial_z]], device=self.device), float('inf')
+                else:
+                    return torch.tensor([[0.0, val_guess, initial_z]], device=self.device), float('inf')
+
+        # 按误差排序
+        valid_results.sort(key=lambda x: x[1])
+
+        # 2. 第二阶段：自适应二分搜索探索
+        best_val, best_error = valid_results[0]
+
+        # 如果已经比DLS结果好，更新最佳值
+        if best_error < best_distance:
+            best_distance = best_error
+            if plane.lower() == "sagittal":
+                best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device, dtype=torch.float64)
+            else:
+                best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device, dtype=torch.float64)
+
+        # 分析有效点分布找出最有希望的区域
+        val_values = [r[0] for r in valid_results]
+        min_val = min(val_values)
+        max_val = max(val_values)
+
+        # 如果有效区域范围过大，缩小到最佳点附近
+        if max_val - min_val > abs(tan_fov * (aper_z - initial_z)):
+            # 选择包含前3个最佳点的区域
+            top_val_values = [r[0] for r in valid_results[:min(3, len(valid_results))]]
+            min_val = min(top_val_values) - abs(tan_fov * (aper_z - initial_z)) * 0.1
+            max_val = max(top_val_values) + abs(tan_fov * (aper_z - initial_z)) * 0.1
+
+        # 使用二分法进行更细致的搜索
+        depth = 0
+        max_depth = 12  # 控制二分搜索深度
+
+        # 二分搜索过程
+        while depth < max_depth and (max_val - min_val) > tolerance * 10 and best_error > tolerance:
+            depth += 1
+            mid_val = (min_val + max_val) / 2
+
+            # 创建5个测试点
+            test_points = [
+                min_val,
+                min_val + (max_val - min_val) * 0.25,
+                mid_val,
+                min_val + (max_val - min_val) * 0.75,
+                max_val
+            ]
+
+            # 评估所有测试点
+            test_results = []
+            for val in test_points:
+                error = evaluate_point(val)
+                if error < float('inf'):
+                    test_results.append((val, error))
+
+            if not test_results:
+                # 扩大搜索范围
+                range_expansion = (max_val - min_val) * 0.5
+                min_val = min_val - range_expansion
+                max_val = max_val + range_expansion
+                continue
+
+            # 更新最佳结果
+            test_results.sort(key=lambda x: x[1])
+            new_best_val, new_best_error = test_results[0]
+
+            if new_best_error < best_error:
+                best_val = new_best_val
+                best_error = new_best_error
+
+                # 更新全局最佳结果
+                if best_error < best_distance:
+                    best_distance = best_error
+                    if plane.lower() == "sagittal":
+                        best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
+                                                    dtype=torch.float64)
+                    else:
+                        best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
+                                                    dtype=torch.float64)
+
+            # 更新搜索范围 - 选择误差最小的区域继续
+            if len(test_results) >= 3:
+                # 找出最小误差点和次小误差点
+                best_idx = test_points.index(test_results[0][0])
+
+                # 根据最佳点位置选择新的搜索范围
+                if best_idx == 0:
+                    # 最佳点在最左边，向左扩展搜索
+                    max_val = test_points[1]
+                    min_val = min_val - (max_val - min_val) * 0.5
+                elif best_idx == len(test_points) - 1:
+                    # 最佳点在最右边，向右扩展搜索
+                    min_val = test_points[-2]
+                    max_val = max_val + (max_val - min_val) * 0.5
+                else:
+                    # 最佳点在中间，缩小范围
+                    left_neighbor = test_points[best_idx - 1]
+                    right_neighbor = test_points[best_idx + 1]
+                    min_val = left_neighbor
+                    max_val = right_neighbor
+            else:
+                # 点太少，保持当前范围继续搜索
+                pass
+
+        # 3. 第三阶段：局部精细网格搜索
+        if best_error > tolerance:
+            # 确定精细搜索范围
+            fine_range = max(abs(best_val) * 1e-5, tolerance * 100)
+            val_min = best_val - fine_range
+            val_max = best_val + fine_range
+
+            # 创建精细网格
+            num_points = 21
+            fine_grid = torch.linspace(val_min, val_max, num_points, device=self.device).double()
+
+            for val in fine_grid:
+                val_item = val.item()
+                error = evaluate_point(val_item)
+
+                if error < float('inf') and error < best_error:
+                    best_val = val_item
+                    best_error = error
 
                     # 更新全局最佳结果
                     if best_error < best_distance:
                         best_distance = best_error
                         if plane.lower() == "sagittal":
                             best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
-                                                         dtype=torch.float64)
+                                                        dtype=torch.float64)
                         else:
                             best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
-                                                         dtype=torch.float64)
+                                                        dtype=torch.float64)
 
-                # 更新搜索范围 - 选择误差最小的区域继续
-                if len(test_results) >= 3:
-                    # 找出最小误差点和次小误差点
-                    best_idx = test_points.index(test_results[0][0])
+                    if error < tolerance:
+                        break
 
-                    # 根据最佳点位置选择新的搜索范围
-                    if best_idx == 0:
-                        # 最佳点在最左边，向左扩展搜索
-                        max_val = test_points[1]
-                        min_val = min_val - (max_val - min_val) * 0.5
-                    elif best_idx == len(test_points) - 1:
-                        # 最佳点在最右边，向右扩展搜索
-                        min_val = test_points[-2]
-                        max_val = max_val + (max_val - min_val) * 0.5
-                    else:
-                        # 最佳点在中间，缩小范围
-                        left_neighbor = test_points[best_idx - 1]
-                        right_neighbor = test_points[best_idx + 1]
-                        min_val = left_neighbor
-                        max_val = right_neighbor
-                else:
-                    # 点太少，保持当前范围继续搜索
-                    pass
+        # 4. 第四阶段：最终极精细优化
+        if best_error > tolerance and best_error < 1e-6:
+            # 创建更极精细的网格
+            ultra_fine_range = max(abs(best_val) * 1e-7, tolerance)
+            val_min = best_val - ultra_fine_range
+            val_max = best_val + ultra_fine_range
 
-            # 3. 第三阶段：局部精细网格搜索
-            if best_error > tolerance:
-                # 确定精细搜索范围
-                fine_range = max(abs(best_val) * 1e-5, tolerance * 100)
-                val_min = best_val - fine_range
-                val_max = best_val + fine_range
+            # 更密集的点
+            num_points = 31
+            ultra_fine_grid = torch.linspace(val_min, val_max, num_points, device=self.device).double()
 
-                # 创建精细网格
-                num_points = 21
-                fine_grid = torch.linspace(val_min, val_max, num_points, device=self.device).double()
+            for val in ultra_fine_grid:
+                val_item = val.item()
+                error = evaluate_point(val_item)
 
-                for val in fine_grid:
-                    val_item = val.item()
-                    error = evaluate_point(val_item)
+                if error < float('inf') and error < best_error:
+                    best_val = val_item
+                    best_error = error
 
-                    if error < float('inf') and error < best_error:
-                        best_val = val_item
-                        best_error = error
-
-                        # 更新全局最佳结果
-                        if best_error < best_distance:
-                            best_distance = best_error
-                            if plane.lower() == "sagittal":
-                                best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
-                                                             dtype=torch.float64)
-                            else:
-                                best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
-                                                             dtype=torch.float64)
-
-                        if error < tolerance:
-                            break
-
-            # 4. 第四阶段：最终极精细优化
-            if best_error > tolerance and best_error < 1e-6:
-                # 创建更极精细的网格
-                ultra_fine_range = max(abs(best_val) * 1e-7, tolerance)
-                val_min = best_val - ultra_fine_range
-                val_max = best_val + ultra_fine_range
-
-                # 更密集的点
-                num_points = 31
-                ultra_fine_grid = torch.linspace(val_min, val_max, num_points, device=self.device).double()
-
-                for val in ultra_fine_grid:
-                    val_item = val.item()
-                    error = evaluate_point(val_item)
-
-                    if error < float('inf') and error < best_error:
-                        best_val = val_item
-                        best_error = error
-
-                        # 更新全局最佳结果
-                        if best_error < best_distance:
-                            best_distance = best_error
-                            if plane.lower() == "sagittal":
-                                best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
-                                                             dtype=torch.float64)
-                            else:
-                                best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
-                                                             dtype=torch.float64)
-
-                        if error < tolerance:
-                            break
-
-            # 最终验证
-            final_ray = Ray(best_position, fixed_direction, wvln=wvln, device=self.device)
-            final_ray, _ = self.trace(final_ray, lens_range=range(0, self.aper_idx + 1))
-            t_final = (aper_z - final_ray.o[..., 2]) / final_ray.d[..., 2]
-            final_intersection = final_ray.o + final_ray.d * t_final[..., None]
-            final_distance = torch.sqrt(final_intersection[..., 0] ** 2 + final_intersection[..., 1] ** 2).item()
-
-            # 输出最终结果
-            if final_distance <= tolerance:
-                return best_position, fixed_direction
-            else:
-                # 最终精度未达到要求，添加额外优化
-                for _ in range(10):
-                    current_point = best_position.clone()
-                    delta = tolerance * 0.1
-
-                    # 尝试微小的调整以满足容差
-                    for direction in [-1, 1]:
-                        test_point = current_point.clone()
+                    # 更新全局最佳结果
+                    if best_error < best_distance:
+                        best_distance = best_error
                         if plane.lower() == "sagittal":
-                            test_point[0, 0] += direction * delta
+                            best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
+                                                        dtype=torch.float64)
                         else:
-                            test_point[0, 1] += direction * delta
+                            best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
+                                                        dtype=torch.float64)
 
-                        test_ray = Ray(test_point, fixed_direction, wvln=wvln, device=self.device)
-                        test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-                        t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-                        test_intersection = test_ray.o + test_ray.d * t_test[..., None]
-                        test_distance = torch.sqrt(
-                            test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
+                    if error < tolerance:
+                        break
 
-                        if test_distance < final_distance:
-                            final_distance = test_distance
-                            best_position = test_point.clone()
+        # 最终验证
+        final_ray = Ray(best_position, fixed_direction, wvln=wvln, device=self.device)
+        final_ray, _ = self.trace(final_ray, lens_range=range(0, self.aper_idx + 1))
+        t_final = (aper_z - final_ray.o[..., 2]) / final_ray.d[..., 2]
+        final_intersection = final_ray.o + final_ray.d * t_final[..., None]
+        final_distance = torch.sqrt(final_intersection[..., 0] ** 2 + final_intersection[..., 1] ** 2).item()
 
-                            if final_distance <= tolerance:
-                                return best_position, fixed_direction
+        # 输出最终结果
+        if final_distance <= tolerance:
+            return best_position, final_distance
+        else:
+            # 最终精度未达到要求，添加额外优化
+            for _ in range(10):
+                current_point = best_position.clone()
+                delta = tolerance * 0.1
 
-                    # 减小增量继续尝试
-                    delta /= 2
+                # 尝试微小的调整以满足容差
+                for direction in [-1, 1]:
+                    test_point = current_point.clone()
+                    if plane.lower() == "sagittal":
+                        test_point[0, 0] += direction * delta
+                    else:
+                        test_point[0, 1] += direction * delta
 
-                # 即使最后的精度未达到要求也返回最佳结果
-                return best_position, fixed_direction
+                    test_ray = Ray(test_point, fixed_direction, wvln=wvln, device=self.device)
+                    test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
+                    t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
+                    test_intersection = test_ray.o + test_ray.d * t_test[..., None]
+                    test_distance = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
 
-        finally:
-            # 恢复原始精度
-            torch.set_default_dtype(orig_dtype)
+                    if test_distance < final_distance:
+                        final_distance = test_distance
+                        best_position = test_point.clone()
+
+                        if final_distance <= tolerance:
+                            return best_position, final_distance
+
+                # 减小增量继续尝试
+                delta /= 2
+
+            # 即使最后的精度未达到要求也返回最佳结果
+            return best_position, final_distance
 
     def find_aperture(self):
         """Find aperture. If the lens has no aperture, use the surface with the smallest radius."""
@@ -2188,7 +2220,7 @@ class GeoLens(Lens):
 
         EFL: Defined by FoV and sensor radius.
         """
-        return self.r_sensor / math.tan(self.hfov)
+        return self.optical_parameters["efl"]
 
     def calc_eqfl(self):
         """35mm equivalent focal length. For cellphone lens, we usually use EFL to describe the lens.
@@ -2200,8 +2232,7 @@ class GeoLens(Lens):
     @torch.no_grad()
     def calc_fnum(self):
         """Compute f-number."""
-        _, pupilr = self.calc_entrance_pupil()
-        return self.calc_efl() / (2 * pupilr)
+        return self.calc_efl() / (2 * self.avg_pupilx)
 
     @torch.no_grad()
     def calc_numerical_aperture(self):
@@ -2451,86 +2482,7 @@ class GeoLens(Lens):
         return self.calc_entrance_pupil(entrance=False, shrink_pupil=shrink_pupil)
 
     @torch.no_grad()
-    def calc_entrance_pupil(self, entrance=True, shrink_pupil=False):
-        """Sample **backward** rays, return z coordinate and radius of entrance pupil.
-
-        Args:
-            entrance (bool): whether to compute entrance pupil.
-            shrink_pupil (bool): whether to shrink the pupil.
-
-        Reference:
-            [1] Entrance pupil: how many rays can come from object space to sensor.
-            [2] https://en.wikipedia.org/wiki/Entrance_pupil: "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
-        """
-        if self.aper_idx is None or hasattr(self, "aper_idx") is False:
-            if entrance:
-                return self.surfaces[0].d.item(), self.surfaces[0].r
-            else:
-                return self.surfaces[-1].d.item(), self.surfaces[-1].r
-
-        # Sample M rays from edge of aperture to last surface.
-        aper_idx = self.aper_idx
-        aper_z = self.surfaces[aper_idx].d.item()
-        aper_r = self.surfaces[aper_idx].r
-        ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
-
-        # Sample phi ranges from [-0.5rad, 0.5rad]
-        phi = torch.linspace(-0.5, 0.5, SPP_CALC)
-        if entrance:
-            d = torch.stack(
-                (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
-            )
-        else:
-            d = torch.stack(
-                (torch.sin(phi), torch.zeros_like(phi), torch.cos(phi)), axis=-1
-            )
-
-        ray = Ray(ray_o, d, device=self.device)
-
-        # Ray tracing
-        if entrance:
-            # Trace from aperture edge to first surface
-            lens_range = range(0, self.aper_idx)
-            ray, _ = self.trace(ray, lens_range=lens_range)
-        else:
-            # Trace from aperture edge to last surface
-            lens_range = range(self.aper_idx + 1, len(self.surfaces))
-            ray, _ = self.trace(ray, lens_range=lens_range)
-
-        # Compute intersection points. o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
-        )
-        ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
-        )
-        intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
-        if len(intersection_points) == 0:
-            if entrance:
-                avg_pupilz = self.surfaces[0].d.item()
-                avg_pupilx = self.surfaces[0].r
-            else:
-                avg_pupilz = self.surfaces[-1].d.item()
-                avg_pupilx = self.surfaces[-1].r
-        else:
-            avg_pupilx = torch.mean(intersection_points[:, 0]).item()
-            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-
-        if avg_pupilx < EPSILON:
-            print("Small pupil is detected, use the first surface as pupil.")
-            if entrance:
-                avg_pupilz = self.surfaces[0].d.item()
-                avg_pupilx = self.surfaces[0].r
-            else:
-                avg_pupilz = self.surfaces[-1].d.item()
-                avg_pupilx = self.surfaces[-1].r
-
-        if shrink_pupil:
-            avg_pupilx *= 0.5
-        return avg_pupilz, avg_pupilx
-
-    @torch.no_grad()
-    def entrance_pupil_update(self, M=SPP_CALC, entrance=True, shrink_pupil=False, paraxial_method=False, match_zemax=False):
+    def calc_entrance_pupil(self, M=SPP_CALC, entrance=True, shrink_pupil=False, paraxial_method=False, match_zemax=False):
         """Sample **backward** rays, return z coordinate and radius of entrance pupil. Entrance pupil: how many rays can come from object space to sensor.
 
         Reference: https://en.wikipedia.org/wiki/Entrance_pupil "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
@@ -2552,19 +2504,48 @@ class GeoLens(Lens):
                 avg_pupilz = self.surfaces[-1].d.item()
                 return avg_pupilz, avg_pupilx
 
-        # Sample M rays from edge of aperture to last surface.
+        # 获取光圈位置参数
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
 
-        # ---------------------------
-        # 1. 主光线确定入瞳和出瞳位置（方向d为不同视场，这里计算时角度取0.01rad，近轴光线）
-        # ---------------------------
+        # 1. 计算光瞳位置
+        avg_pupilz = self.calc_pupil_position(aper_z, entrance)
+
+        # 2. 计算光瞳大小
+        avg_pupilx = self.calc_pupil_size(M, entrance, avg_pupilz, aper_z, aper_r, paraxial_method, match_zemax)
+
+        # 处理极小光瞳情况
+        if avg_pupilx < EPSILON:
+            print("Small pupil is detected, use the first surface as pupil.")
+            if entrance:
+                avg_pupilz = self.surfaces[0].d.item()
+                avg_pupilx = self.surfaces[0].r
+            else:
+                avg_pupilz = self.surfaces[-1].d.item()
+                avg_pupilx = self.surfaces[-1].r
+
+        if shrink_pupil:
+            avg_pupilx *= 0.5
+        return avg_pupilz, avg_pupilx
+
+    @torch.no_grad()
+    def calc_pupil_position(self, aper_z, entrance):
+        """计算光瞳位置（z坐标）
+        
+        参数:
+            aper_z: 光圈的z坐标
+            entrance: 是否计算入瞳（True）或出瞳（False）
+        
+        返回:
+            float: 光瞳的z坐标
+        """
+        # 使用主光线确定入瞳和出瞳位置（方向d为不同视场，这里计算时角度取0.01rad，近轴光线）
         small_M = 100
-        # chief_ray o
+        # 主光线起点
         ray_chief_o = torch.tensor([[0, 0, aper_z]]).repeat(small_M, 1)
 
-        # d
+        # 主光线方向
         phi = torch.linspace(0, 0.001, small_M)
         if entrance:
             chief_d = torch.stack(
@@ -2577,7 +2558,7 @@ class GeoLens(Lens):
 
         chief_ray = Ray(ray_chief_o, chief_d, device=self.device)
 
-        # Ray tracing
+        # 光线追踪
         if entrance:
             lens_range = range(0, self.aper_idx)
             chief_ray, _ = self.trace(chief_ray, lens_range=lens_range)
@@ -2591,11 +2572,25 @@ class GeoLens(Lens):
         new_chief_t = new_chief_o[..., 0] / new_chief_d[..., 0]
         chief_o = new_chief_o - new_chief_d * new_chief_t[..., None]
         avg_pupilz = torch.nanmean(chief_o[..., 1])
+        
+        return avg_pupilz
 
-        # ---------------------------
-        # 2. 边缘光线确定光瞳大小
-        # ---------------------------
-
+    @torch.no_grad()
+    def calc_pupil_size(self, M, entrance, avg_pupilz, aper_z, aper_r, paraxial_method=False, match_zemax=False):
+        """计算光瞳大小（半径）
+        
+        参数:
+            M: 采样光线数量
+            entrance: 是否计算入瞳（True）或出瞳（False）
+            avg_pupilz: 已计算的光瞳z坐标
+            aper_z: 光圈的z坐标
+            aper_r: 光圈的半径
+            paraxial_method: 是否使用近轴追迹
+            match_zemax: 是否匹配Zemax结果
+        
+        返回:
+            float: 光瞳的半径
+        """
         # 策略1: 重点采样光圈边缘区域
         edge_points = int(M * 0.7)  # 70%的光线采样边缘
         inner_points = M - edge_points  # 剩余光线采样内部
@@ -2703,7 +2698,7 @@ class GeoLens(Lens):
                     all_origins.append(point_origins)
                     all_directions.append(dirs)
 
-                    # 合并所有光线
+            # 合并所有光线
             ray_o = torch.cat(all_origins, dim=0)
             d = torch.cat(all_directions, dim=0)
         else:
@@ -2742,7 +2737,7 @@ class GeoLens(Lens):
 
         ray = Ray(ray_o, d, device=self.device)
 
-        # Ray tracing
+        # 光线追踪
         if entrance:
             lens_range = range(0, self.aper_idx)
             ray, _ = self.trace(ray, lens_range=lens_range, paraxial_method=paraxial_method)
@@ -2762,28 +2757,130 @@ class GeoLens(Lens):
             ray_o = ray.o[valid_rays]
             ray_d = ray.d[valid_rays]
 
-        # 计算主光线计算位置下的光瞳大小
-        edg_t = (avg_pupilz - ray_o[..., 2]) / ray_d[..., 2]
-        edg_o = ray_o + ray_d * edg_t[..., None]
+            # 计算主光线计算位置下的光瞳大小
+            edg_t = (avg_pupilz - ray_o[..., 2]) / ray_d[..., 2]
+            edg_o = ray_o + ray_d * edg_t[..., None]
 
-        # 计算每个点到光轴的径向距离
-        radial_distances = torch.sqrt(edg_o[:, 0] ** 2 + edg_o[:, 1] ** 2)
+            # 计算每个点到光轴的径向距离
+            radial_distances = torch.sqrt(edg_o[:, 0] ** 2 + edg_o[:, 1] ** 2)
 
-        # 通常RMS或90-95%分位数接近Zemax结果
-        avg_pupilx = torch.quantile(radial_distances, 0.95)
+            # 通常RMS或90-95%分位数接近Zemax结果
+            avg_pupilx = torch.quantile(radial_distances, 0.95)
 
-        if avg_pupilx < EPSILON:
-            print("Small pupil is detected, use the first surface as pupil.")
-            if entrance:
-                avg_pupilz = self.surfaces[0].d.item()
-                avg_pupilx = self.surfaces[0].r
+        return avg_pupilx
+
+    @torch.no_grad()
+    def calc_optical_parameters(self, wvln=DEFAULT_WAVE):
+        """使用ABCD矩阵计算光学系统的关键参数
+
+        参数:
+            wvln: 波长
+
+        返回:
+            dict: 包含所有光学参数的字典
+        """
+        # 设置数据类型和设备
+        dtype = torch.float64
+        finally_dtype = torch.float32
+        device = self.device
+
+        # 获取表面数据
+        num_surfaces = len(self.surfaces)
+        z_positions = [self.surfaces[i].d.item() for i in range(num_surfaces)]
+
+        # 确定光阑面
+        self.find_aperture()
+        if self.aper_idx is None:
+            self.aper_idx = 0
+        stop_position = z_positions[self.aper_idx]
+        stop_radius = self.surfaces[self.aper_idx].r
+
+        # ===== 计算系统总传递矩阵 =====
+        # 初始化系统矩阵
+        system_matrix = torch.tensor([[1, 0], [0, 1]], device=device, dtype=dtype)
+
+        # 初始折射率(物空间)
+        n_prev = Material("air").ior(wvln)
+
+        # 逐面构建系统矩阵
+        for i in range(num_surfaces):
+            # 获取当前面的曲率
+            surface = self.surfaces[i]
+            if hasattr(surface, 'c') and surface.c is not None:
+                curvature = surface.c
             else:
-                avg_pupilz = self.surfaces[-1].d.item()
-                avg_pupilx = self.surfaces[-1].r
+                curvature = 0.0  # 平面
 
-        if shrink_pupil:
-            avg_pupilx *= 0.5
-        return avg_pupilz, avg_pupilx
+            # 获取下一个介质的折射率
+            if i < num_surfaces - 1:
+                n_next = self.surfaces[i].mat2.ior(wvln)
+            else:
+                n_next = self.surfaces[-1].mat2.ior(wvln)
+
+            # 构建折射矩阵
+            refraction_matrix = torch.tensor([
+                [1.0, 0.0],
+                [(n_prev - n_next) * curvature, 1]
+            ], device=device, dtype=dtype)
+
+            # 乘入系统矩阵
+            system_matrix = torch.matmul(refraction_matrix, system_matrix)
+
+            # 如果不是最后一个面，添加传播矩阵
+            if i < num_surfaces - 1:
+                distance = z_positions[i + 1] - z_positions[i]
+
+                # 构建传播矩阵
+                propagation_matrix = torch.tensor([
+                    [1.0, distance / n_next],
+                    [0.0, 1.0]
+                ], device=device, dtype=dtype)
+
+                # 乘入系统矩阵
+                system_matrix = torch.matmul(propagation_matrix, system_matrix)
+
+            # 更新折射率
+            n_prev = n_next
+
+        # ===== 计算光学系统关键参数 =====
+        A, B, C, D = system_matrix.flatten().tolist()
+
+        # 获取端介质折射率
+        n_obj = Material("air").ior(wvln)
+        n_img = self.surfaces[-1].mat2.ior(wvln)
+
+        # 计算系统光学参数
+        # 1. 焦距：f = -1/C (考虑端介质折射率)
+        efl = -n_img / C  # 有效焦距(EFL)
+
+        # 2. 前后主平面位置
+        # 前主平面相对于第一个面的位置
+        front_pp = z_positions[0] + (D - 1) * n_obj / C
+        # 后主平面相对于最后一个面的位置
+        back_pp = z_positions[-1] - (A - 1) * n_img / C
+
+        # 3. 前后焦点位置
+        front_focus = front_pp - efl / n_obj
+        back_focus = back_pp + efl / n_img
+
+        # 4. 后焦距(BFL)和前焦距(FFL)
+        bfl = back_focus - z_positions[-1]
+        ffl = z_positions[0] - front_focus
+
+        torch.set_default_dtype(finally_dtype)
+        # 创建结果字典
+        results = {
+            'efl': efl,  # 有效焦距
+            'front_pp': front_pp,  # 前主平面位置
+            'back_pp': back_pp,  # 后主平面位置
+            'front_focus': front_focus,  # 前焦点位置
+            'back_focus': back_focus,  # 后焦点位置
+            'bfl': bfl,  # 后焦距
+            'ffl': ffl,  # 前焦距
+            'system_matrix': system_matrix.tolist()  # 系统矩阵
+        }
+
+        return results
 
     @staticmethod
     def compute_intersection_points_2d(origins, directions):
@@ -4476,6 +4573,76 @@ SURF 0
             f.writelines(lens_zmx_str)
             f.close()
 
+    def write_lens_zmx_transform(self, pupil_D):
+
+        characters = string.ascii_letters + string.digits
+        random_string = "".join(random.choice(characters) for i in range(4))
+        current_time = datetime.now().strftime("%m%d-%H%M%S")
+        exp_name = current_time + "-json_to_zmx-" + random_string
+        result_dir = f"./Transform-json/{exp_name}"
+        os.makedirs(result_dir, exist_ok=True)
+        last_part = os.path.basename(self.lens_name)
+        self.save_dir=f"{result_dir}/{last_part}.zmx"
+
+        """Write the lens into .zmx file."""
+        lens_zmx_str = ""
+        # Head string
+        head_str = f"""VERS 190513 80 123457 L123457
+    MODE SEQ
+    NAME 
+    PFIL 0 0 0
+    LANG 0
+    UNIT MM X W X CM MR CPMM
+    ENPD {pupil_D}
+    ENVD 2.0E+1 1 0
+    GFAC 0 0
+    GCAT OSAKAGASCHEMICAL MISC
+    XFLN 0. 0. 0.
+    YFLN 0.0 2 5
+    WAVL 0.4861327 0.5875618 0.6562725
+    RAIM 0 0 1 1 0 0 0 0 0
+    PUSH 0 0 0 0 0 0
+    SDMA 0 1 0
+    FTYP 0 0 3 3 0 0 0
+    ROPD 1
+    PICB 1
+    PWAV 2
+    POLS 1 0 1 0 0 1 0
+    GLRS 1 0
+    GSTD 0 100.000 100.000 100.000 100.000 100.000 100.000 0 1 1 0 0 1 1 1 1 1 1
+    NSCD 100 500 0 1.0E-3 5 1.0E-6 0 0 0 0 0 0 1000000 0 2
+    COFN QF "COATING.DAT" "SCATTER_PROFILE.DAT" "ABG_DATA.DAT" "PROFILE.GRD"
+    COFN COATING.DAT SCATTER_PROFILE.DAT ABG_DATA.DAT PROFILE.GRD
+    SURF 0
+    TYPE STANDARD
+    CURV 0.0
+    DISZ INFINITY
+    """
+        lens_zmx_str += head_str
+
+        # Surface string
+        for i, s in enumerate(self.surfaces):
+            d_next = (
+                self.surfaces[i + 1].d - self.surfaces[i].d
+                if i < len(self.surfaces) - 1
+                else self.d_sensor - self.surfaces[i].d
+            )
+            surf_str = s.zmx_str(surf_idx=i + 1, d_next=d_next)
+            lens_zmx_str += surf_str
+
+        # Sensor string
+        sensor_str = f"""SURF {i+2}
+    TYPE STANDARD
+    CURV 0.
+    DISZ 0.0
+    DIAM {self.r_sensor} 
+    """
+        lens_zmx_str += sensor_str
+
+        # Write lens zmx string into file
+        with open(self.save_dir, "w") as f:
+            f.writelines(lens_zmx_str)
+            f.close()
 
 # ====================================================================================
 # Useful functions
