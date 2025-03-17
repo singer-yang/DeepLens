@@ -12,7 +12,7 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
     # The material is provided as-is, with no warranties whatsoever.
     # If you publish any code, data, or scientific work based on this, please cite our work.
 """
-
+import math
 from deeplens import GeoLens
 
 
@@ -20,6 +20,8 @@ def main():
     lens = GeoLens(filename="./lenses/camera/ef35mm_f2.0.json")
     # lens = GeoLens(filename='./lenses/cellphone/cellphone80deg.json')
     # lens = GeoLens(filename='./lenses/zemax_double_gaussian.zmx')
+
+    lens.draw_distortion_1D(hfov=lens.hfov * (180 / math.pi), plane="meridional")    # zemax中的F-Theta
     lens.analysis(render=True)
 
 
