@@ -191,12 +191,12 @@ class Surface(DeepObj):
         new_d = sr * n + eta * (ray.d - cosi.unsqueeze(-1) * n)
 
         # Update ray direction
-        new_d[~valid] = ray.d[~valid]
+        new_d[~valid] = ray.d[~valid].to(new_d.dtype)
         ray.d = new_d
 
         # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1)
-        new_obliq[~valid] = ray.obliq[~valid]
+        new_obliq[~valid] = ray.obliq[~valid].to(new_obliq.dtype)
         ray.obliq = new_obliq
 
         # Update ray ra
@@ -1018,8 +1018,9 @@ class Aspheric(Surface):
             zmx_str = f"""SURF {surf_idx} 
     TYPE EVENASPH
     CURV {self.c.item()} 
-    DISZ {self.d.item()}
-    DIAM {self.r * 2}
+    DISZ {d_next.item()}
+    DIAM {self.r} 1 0 0 1 ""
+    CONI {self.k}
     PARM 1 {self.ai2.item()}
     PARM 2 {self.ai4.item()}
     PARM 3 {self.ai6.item()}
@@ -1032,8 +1033,9 @@ class Aspheric(Surface):
     TYPE EVENASPH 
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
-    GLAS {self.mat2.get_name().upper()} 0 0 {self.mat2.n} {self.mat2.V}
-    DIAM {self.r * 2}
+    GLAS ___BLANK 1 0 {self.mat2.n} {self.mat2.V}
+    DIAM {self.r} 1 0 0 1 ""
+    CONI {self.k}
     PARM 1 {self.ai2.item()}
     PARM 2 {self.ai4.item()}
     PARM 3 {self.ai6.item()}
@@ -1921,15 +1923,15 @@ class Spheric(Surface):
     TYPE STANDARD 
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
-    DIAM {self.r * 2}
+    DIAM {self.r} 1 0 0 1 ""
 """
         else:
             zmx_str = f"""SURF {surf_idx} 
     TYPE STANDARD 
     CURV {self.c.item()} 
     DISZ {d_next.item()} 
-    GLAS {self.mat2.get_name().upper()} 0 0 {self.mat2.n} {self.mat2.V}
-    DIAM {self.r * 2}
+    GLAS ___BLANK 1 0 {self.mat2.n} {self.mat2.V}
+    DIAM {self.r} 1 0 0 1 ""
 """
         return zmx_str
 
