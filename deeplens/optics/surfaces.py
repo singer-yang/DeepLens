@@ -148,7 +148,7 @@ class Surface(DeepObj):
         with torch.no_grad():
             # Solution within the surface boundary and ray doesn't go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.ra > 0) & (t > 0)
+            valid = self.is_valid(new_x, new_y) & (ray.ra > 0) & (t >= 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
@@ -156,7 +156,7 @@ class Surface(DeepObj):
 
         return t, valid
 
-    def refract(self, ray, eta):
+    def refract(self, ray, n):
         """Calculate refractive ray according to Snell's law.
 
         Snell's law (surface normal n defined along the positive z axis):
@@ -166,29 +166,29 @@ class Surface(DeepObj):
 
         Args:
             ray (Ray): input ray.
-            eta (float): relevant refraction coefficient, eta = eta_i / eta_t
+            n (float): relevant refraction coefficient, n = n_i / n_t
 
         Returns:
             ray (Ray): refractive ray.
         """
         # Compute normal vectors
-        n = self.normal(ray)
+        n_vec = self.normal_vec(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
         if forward:
-            n = -n
+            n_vec = -n_vec
 
         # Compute refraction according to Snell's law
-        cosi = torch.sum(ray.d * n, axis=-1)  # n * i
+        cosi = torch.sum(ray.d * n_vec, axis=-1)  # n_vec * i
 
         # Total internal reflection
-        valid = (eta**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
+        valid = (n**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
 
         sr = torch.sqrt(
-            1 - eta**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
+            1 - n**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
         )  # square root
 
         # First term: vertical. Second term: parallel. Already normalized if both n and ray.d are normalized.
-        new_d = sr * n + eta * (ray.d - cosi.unsqueeze(-1) * n)
+        new_d = sr * n_vec + n * (ray.d - cosi.unsqueeze(-1) * n_vec)
 
         # Update ray direction
         new_d[~valid] = ray.d[~valid]
@@ -214,7 +214,7 @@ class Surface(DeepObj):
             ray (Ray): reflected ray.
         """
         # Compute surface normal vectors
-        n = self.normal(ray)
+        n = self.normal_vec(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
         if forward:
             n = -n
@@ -231,7 +231,7 @@ class Surface(DeepObj):
 
         return ray
 
-    def normal(self, ray):
+    def normal_vec(self, ray):
         """Calculate surface normal vector at the intersection point. Normal vector points to the left by default.
 
         Args:
@@ -1685,6 +1685,178 @@ class Diffractive_GEO(Surface):
 
         return surf_dict
 
+
+class GaussianRBF(Surface):
+    """Gaussian RBF surface. We modified the original RBF by setting the centers to 0.0 to represent rotationally symmetric surface.
+
+    Reference:
+        [1] "Application of radial basis functions to shape description in a dual-element off-axis magnifier."
+    """
+
+    def __init__(
+        self, r, d, mat2, sigma=None, weight_params=None, is_square=False, device="cpu"
+    ):
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
+
+        # Spherical term
+
+        # Base functions parameters (can be modified)
+        self.num_rbfs = 14
+        self.centers = 0.0
+        if sigma is None:
+            self.sigma = torch.tensor(
+                [2 ** (i - self.num_rbfs // 2) for i in range(self.num_rbfs)]
+            )
+        else:
+            self.sigma = torch.tensor(sigma)
+
+        # Weight parameters
+        if weight_params is None:
+            self.weight_params = torch.randn(self.num_rbfs) * 1e-12
+            self.weight_params_scaled = self.weight_params / torch.tensor(
+                [10 ** (self.num_rbfs - i) for i in range(self.num_rbfs)]
+            )
+        else:
+            self.weight_params = torch.tensor(weight_params)
+            self.weight_params_scaled = self.weight_params / torch.tensor(
+                [10 ** (self.num_rbfs - i) for i in range(self.num_rbfs)]
+            )
+
+        self.to(device)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        is_square = False if "is_square" not in surf_dict else surf_dict["is_square"]
+        instance = cls(
+            surf_dict["r"],
+            surf_dict["d"],
+            surf_dict["mat2"],
+            surf_dict["sigma"],
+            surf_dict["weight_params"],
+            is_square,
+        )
+        return instance
+
+    def _sag(self, x, y):
+        """Compute the Gaussian RBF surface. Simplified by using unified Gaussian functions."""
+        # Compute squared Euclidean distance from origin for each input
+        if x.ndim == 1:
+            dist_sq = (
+                (x**2 + y**2).unsqueeze(-1).repeat(1, self.num_rbfs)
+            )  # Shape: (..., num_rbfs)
+        elif x.ndim == 2:
+            dist_sq = (
+                (x**2 + y**2).unsqueeze(-1).repeat(1, 1, self.num_rbfs)
+            )  # Shape: (..., num_rbfs)
+        else:
+            dist_sq = (
+                (x**2 + y**2).unsqueeze(-1).repeat(1, 1, 1, self.num_rbfs)
+            )  # Shape: (..., num_rbfs)
+
+        # Compute RBF activations
+        activations = torch.exp(
+            -dist_sq / (2 * self.sigma**2)
+        )  # Shape: (..., num_rbfs)
+
+        # Calculate weighted sum
+        weighted_sum = torch.matmul(activations, self.weight_params)  # Shape: (..., )
+
+        return weighted_sum
+
+    def _dfdxy(self, x, y):
+        """Compute first-order derivatives of the Gaussian RBF surface with respect to x and y.
+
+        Args:
+            x (torch.Tensor): x coordinates
+            y (torch.Tensor): y coordinates
+
+        Returns:
+            tuple: (dfdx, dfdy) partial derivatives at given coordinates
+        """
+        # Compute squared Euclidean distance from origin
+        if x.ndim == 1:
+            dist_sq = (
+                (x**2 + y**2).unsqueeze(-1).repeat(1, self.num_rbfs)
+            )  # Shape: (..., num_rbfs)
+        elif x.ndim == 2:
+            dist_sq = (
+                (x**2 + y**2).unsqueeze(-1).repeat(1, 1, self.num_rbfs)
+            )  # Shape: (..., num_rbfs)
+        else:
+            dist_sq = (
+                (x**2 + y**2).unsqueeze(-1).repeat(1, 1, 1, self.num_rbfs)
+            )  # Shape: (..., num_rbfs)
+
+        # Compute RBF activations
+        activations = torch.exp(
+            -dist_sq / (2 * self.sigma**2)
+        )  # Shape: (..., num_rbfs)
+
+        # Compute derivatives of RBF with respect to x and y
+        # d/dx(exp(-r²/2σ²)) = exp(-r²/2σ²) * (-2x/2σ²) = -x/σ² * exp(-r²/2σ²)
+        # d/dy(exp(-r²/2σ²)) = exp(-r²/2σ²) * (-2y/2σ²) = -y/σ² * exp(-r²/2σ²)
+
+        # For x derivative
+        if x.ndim == 1:
+            dfdx = -x.unsqueeze(-1).repeat(1, self.num_rbfs) / (
+                self.sigma**2
+            )  # Shape: (..., num_rbfs)
+        elif x.ndim == 2:
+            dfdx = -x.unsqueeze(-1).repeat(
+                1, 1, self.num_rbfs
+            )  # Shape: (..., num_rbfs)
+        else:
+            dfdx = -x.unsqueeze(-1).repeat(
+                1, 1, 1, self.num_rbfs
+            )  # Shape: (..., num_rbfs)
+        dfdx = dfdx * activations  # Apply chain rule
+        dfdx = torch.matmul(dfdx, self.weight_params)  # Weighted sum
+
+        # For y derivative
+        if y.ndim == 1:
+            dfdy = -y.unsqueeze(-1).repeat(1, self.num_rbfs) / (
+                self.sigma**2
+            )  # Shape: (..., num_rbfs)
+        elif y.ndim == 2:
+            dfdy = -y.unsqueeze(-1).repeat(
+                1, 1, self.num_rbfs
+            )  # Shape: (..., num_rbfs)
+        else:
+            dfdy = -y.unsqueeze(-1).repeat(
+                1, 1, 1, self.num_rbfs
+            )  # Shape: (..., num_rbfs)
+        dfdy = dfdy * activations  # Apply chain rule
+        dfdy = torch.matmul(dfdy, self.weight_params)  # Weighted sum
+
+        return dfdx, dfdy
+
+    def get_optimizer_params(self, lr, optim_mat=False):
+        self.weight_params.requires_grad = True
+        params = [{"params": self.weight_params, "lr": lr}]
+        if optim_mat and self.mat2.get_name() != "air":
+            params += self.mat2.get_optimizer_params()
+        return params
+
+    def draw_widget(self, ax, color="black", linestyle="solid"):
+        """Draw the Gaussian RBF surface on the given axis."""
+        x0 = torch.linspace(-self.r, self.r, self.APERTURE_SAMPLING).to(torch.float32)
+        y0 = torch.zeros_like(x0)
+        z0 = self.surface_with_offset(x0.to(self.device), y0.to(self.device)).cpu()
+        ax.plot(z0, x0, color=color, linestyle=linestyle, linewidth=1.0)
+
+    def surf_dict(self):
+        surf_dict = {
+            "type": self.__class__.__name__,
+            "r": round(self.r, 4),
+            "d": round(self.d.item(), 4),
+            "mat2": self.mat2.get_name(),
+            "weight_params": self.weight_params.tolist(),
+            # "centers": self.centers.tolist(),
+            "sigma": self.sigma.tolist(),
+        }
+        return surf_dict
+
+
 class Mirror(Surface):
     def __init__(self, l, d, device="cpu"):
         """Mirror surface."""
@@ -1731,6 +1903,268 @@ class Mirror(Surface):
 
         return ray
 
+
+class NURBS(Surface):
+    """NURBS surface.
+
+    Bezier curve -> B spline -> NURBS
+
+    Reference:
+        [1] https://en.wikipedia.org/wiki/Non-uniform_rational_B-spline
+        [2] NURBS surface for beam shaping: "Parallel ray tracing through freeform lenses with NURBS surfaces"
+        [3] Multi-level B-spline: "Differentiable design of freeform diffractive optical elements for beam shaping by representing phase distribution using multi-level B-splines"
+
+    """
+
+    def __init__(
+        self,
+        r,
+        d,
+        mat2,
+        control_points,
+        weights,
+        degree=3,
+        max_r=10.0,
+        is_square=False,
+        device="cpu",
+    ):
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
+        assert len(control_points) == len(weights), (
+            "Control points and weights must have the same length."
+        )
+        self.control_points = torch.tensor(control_points, dtype=torch.float32)
+        self.weights = torch.tensor(weights, dtype=torch.float32)
+        self.num_points = len(control_points)
+
+        self.degree = degree
+        self.max_r = max_r
+        self.knot_vector = self.create_knot_vector(len(control_points), degree)
+
+        self.to(device)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        if "control_points" in surf_dict:
+            control_points = surf_dict["control_points"]
+        else:
+            control_points = np.array(
+                [0.0, 0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
+            )
+
+        if "weights" in surf_dict:
+            weights = surf_dict["weights"]
+        else:
+            weights = np.ones(len(control_points))
+
+        degree = surf_dict["degree"] if "degree" in surf_dict else 3
+        max_r = surf_dict["max_r"] if "max_r" in surf_dict else 10.0
+        return cls(
+            surf_dict["r"],
+            surf_dict["d"],
+            surf_dict["mat2"],
+            control_points,
+            weights,
+            degree,
+            max_r,
+        )
+
+    def create_knot_vector(self, n, degree):
+        """Create a normalized knot vector for the NURBS surface."""
+        # Create clamped knot vector with multiplicity degree+1 at ends
+        knot_vector = [0] * (degree + 1)
+        for i in range(1, n - degree):
+            knot_vector.append(i / (n - degree))
+        knot_vector += [1] * (degree + 1)
+        return torch.tensor(knot_vector, dtype=torch.float32)
+
+    @staticmethod
+    def basis_func(u, i, k, knots):
+        """Computes the B-spline basis function N_{i,k}(u) (without weights)."""
+        # Base case: degree 0
+        if k == 0:
+            # 1 if knots[i] <= u < knots[i+1], else 0
+            return ((u >= knots[i]) & (u < knots[i + 1])).float()
+
+        # Recursive definition
+        denom_left = knots[i + k] - knots[i]
+        denom_right = knots[i + k + 1] - knots[i + 1]
+
+        term_left = 0.0
+        term_right = 0.0
+
+        if denom_left != 0:
+            term_left = (
+                (u - knots[i]) / denom_left * NURBS.basis_func(u, i, k - 1, knots)
+            )
+        if denom_right != 0:
+            term_right = (
+                (knots[i + k + 1] - u)
+                / denom_right
+                * NURBS.basis_func(u, i + 1, k - 1, knots)
+            )
+
+        return term_left + term_right
+
+    def _sag(self, x, y):
+        """Compute the NURBS surface height at given x,y coordinates."""
+        # assert x.max() <= self.max_r, f"x.max() = {x.max()} is out of range."
+        # assert y.max() <= self.max_r, f"y.max() = {y.max()} is out of range."
+
+        # Compute radius
+        r = torch.sqrt(x**2 + y**2)
+        r_norm = torch.clamp(r / self.max_r, 0.0, 1.0)
+
+        # Compute the B-spline basis for each control point using normalized radius
+        basis_list = []
+        for i in range(len(self.control_points)):
+            basis_list.append(self.basis_func(r_norm, i, self.degree, self.knot_vector))
+
+        # Convert basis list to a tensor of shape (..., num_ctrl)
+        # so that each element in basis_list is broadcast together
+        basis = torch.stack(basis_list, dim=-1)  # shape (..., num_ctrl)
+
+        # Multiply each basis by the corresponding weight
+        weighted_basis = basis * self.weights
+
+        # Normalized NURBS basis
+        denom = torch.sum(weighted_basis, dim=-1, keepdim=True) + 1e-8
+        N_i = weighted_basis / denom  # shape (..., num_ctrl)
+
+        # Compute z by summing over control points
+        z = torch.sum(N_i * self.control_points, dim=-1)  # shape (...)
+
+        return z
+
+    def _dfdxy(self, x, y, method="finite_diff"):
+        """Compute first-order derivatives of the NURBS surface with respect to x and y.
+
+        Args:
+            x: x coordinates
+            y: y coordinates
+            method: Method to use - "analytical" or "finite_diff" (default: "analytical")
+
+        Returns:
+            dx, dy: Partial derivatives with respect to x and y
+        """
+        if method == "finite_diff":
+            # Implementation 1: Finite difference approximation
+            h = 1e-6  # Step size for finite difference
+
+            # Compute partial derivatives using central difference
+            dfdx = (self._sag(x + h, y) - self._sag(x - h, y)) / (2 * h)
+            dfdy = (self._sag(x, y + h) - self._sag(x, y - h)) / (2 * h)
+
+            return dfdx, dfdy
+
+        else:  # analytical
+            raise NotImplementedError(
+                "Analytical derivatives for NURBS surface is not implemented."
+            )
+            # Implementation 2: Analytical derivatives
+            # Calculate radial distance and normalize to [0,1]
+            r = torch.sqrt(x**2 + y**2)
+            t = torch.clamp(r / self.max_r, 0.0, 1.0)
+
+            # Reshape t to 1D for basis function evaluation
+            original_shape = t.shape
+            t_flat = t.reshape(-1)
+
+            # Evaluate NURBS at parameter t
+            basis = torch.stack(
+                [
+                    self.basis_function(i, self.degree, t_flat)
+                    for i in range(self.num_points)
+                ],
+                dim=1,
+            )
+
+            # Calculate sag value
+            numerator = torch.sum(
+                basis * self.weights.unsqueeze(0) * self.control_points.unsqueeze(0),
+                dim=1,
+            )
+            denominator = torch.sum(basis * self.weights.unsqueeze(0), dim=1)
+
+            # Calculate derivatives of basis functions with respect to t
+            dbasis_dt = torch.zeros_like(basis)
+            for i in range(self.num_points):
+                if self.degree > 0:
+                    # Using quotient rule for derivatives of rational functions
+                    term1 = self.basis_function(i, self.degree - 1, t_flat) / (
+                        self.knot_vector[i + self.degree] - self.knot_vector[i]
+                    )
+                    term2 = self.basis_function(i + 1, self.degree - 1, t_flat) / (
+                        self.knot_vector[i + self.degree + 1] - self.knot_vector[i + 1]
+                    )
+                    dbasis_dt[:, i] = self.degree * (term1 - term2)
+
+            # Calculate derivative of NURBS with respect to t using quotient rule
+            dnumerator_dt = torch.sum(
+                dbasis_dt
+                * self.weights.unsqueeze(0)
+                * self.control_points.unsqueeze(0),
+                dim=1,
+            )
+            ddenominator_dt = torch.sum(dbasis_dt * self.weights.unsqueeze(0), dim=1)
+
+            # Apply quotient rule: d/dt(n/d) = (d*dn - n*dd)/(d^2)
+            dt_dr = 1.0 / self.max_r
+            dz_dt = (denominator * dnumerator_dt - numerator * ddenominator_dt) / (
+                denominator * denominator
+            )
+            dz_dr = dz_dt * dt_dr
+
+            # Reshape back to original dimensions
+            dz_dr = dz_dr.reshape(original_shape)
+
+            # Compute partial derivatives
+            # Handle r=0 case to avoid division by zero
+            mask = r > 0
+            dx = torch.zeros_like(x)
+            dy = torch.zeros_like(y)
+
+            dx[mask] = dz_dr[mask] * (x[mask] / r[mask])
+            dy[mask] = dz_dr[mask] * (y[mask] / r[mask])
+
+            return dx, dy
+
+    def get_optimizer_params(self, lr, optim_mat=False):
+        """Get optimizer parameters for the NURBS surface."""
+        self.control_points.requires_grad = True
+        self.weights.requires_grad = True
+
+        params = [
+            {"params": self.control_points, "lr": lr},
+            {"params": self.weights, "lr": lr * 0.1},
+        ]
+        if optim_mat and self.mat2.get_name() != "air":
+            params += self.mat2.get_optimizer_params()
+        return params
+
+    def surf_dict(self):
+        surf_dict = {
+            "type": "NURBS",
+            "control_points": self.control_points.tolist(),
+            "weights": self.weights.tolist(),
+            "degree": self.degree,
+            "max_r": self.max_r,
+        }
+        return surf_dict
+
+    def plot_cross_section(self):
+        """Plot the cross-section of the NURBS surface."""
+        x = torch.linspace(-self.max_r, self.max_r, 100).to(self.device)
+        y = torch.zeros_like(x)
+        z = self.sag(x, y)
+        plt.plot(x.cpu().numpy(), z.cpu().numpy())
+        plt.xlabel("x (mm)")
+        plt.ylabel("z (mm)")
+        plt.title("NURBS Surface Cross-section")
+        plt.grid(True)
+        plt.savefig("nurbs_cross_section.png", dpi=300)
+        plt.close()
+
+
 class Plane(Surface):
     def __init__(self, r, d, mat2, is_square=False, device="cpu"):
         """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
@@ -1771,7 +2205,7 @@ class Plane(Surface):
 
         return ray
 
-    def normal(self, ray):
+    def normal_vec(self, ray):
         """Calculate surface normal vector at intersection points."""
         n = torch.zeros_like(ray.d)
         n[..., 2] = -1
@@ -1797,6 +2231,99 @@ class Plane(Surface):
         }
 
         return surf_dict
+
+
+class PolyEven(Surface):
+    """Even-order polynomial surface with more stable optimization parameters. It can be used as freeform surface, correcting the wavefront. But it can not affect the FoV."""
+
+    def __init__(self, r, d, mat2, c, k, alpha, is_square=False, device="cpu"):
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
+        self.c = torch.tensor(c)
+        self.k = torch.tensor(k)
+
+        self.alpha_degree = len(alpha)
+        for i, a in enumerate(alpha):
+            # i = i + 2
+            exec(f"self.alpha{2 * (i + 2)} = torch.tensor({a}) / 0.1 ** {2 * (i + 2)}")
+        self.to(device)
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        c = 0.0 if "c" not in surf_dict else surf_dict["c"]
+        k = 0.0 if "k" not in surf_dict else surf_dict["k"]
+        alpha = (
+            (np.random.rand(12) * 1e-32).astype(np.float32)
+            if "alpha" not in surf_dict
+            else surf_dict["alpha"]
+        )
+        return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"], c, k, alpha)
+
+    def _sag(self, x, y):
+        r2 = x**2 + y**2
+        total_surface = (
+            r2 * self.c / (1 + torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON))
+        )
+        for i in range(2, self.alpha_degree + 1):
+            exec(f"total_surface += self.alpha{2 * i} * 0.1 ** {2 * i} * r2 ** {i}")
+        return total_surface
+
+    def _dfdxy(self, x, y):
+        r2 = x**2 + y**2
+        sf = torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON)
+        dsdr2 = (
+            (1 + sf + (1 + self.k) * r2 * self.c**2 / 2 / sf) * self.c / (1 + sf) ** 2
+        )
+        for i in range(2, self.alpha_degree + 1):
+            exec(f"dsdr2 += {i} * self.alpha{2 * i} * 0.1 ** {2 * i} * r2 ** {i - 1}")
+        return dsdr2 * 2 * x, dsdr2 * 2 * y
+
+    def get_optimizer_params(self, lr=[1e-3, 1e-2, 1e-4, 1e-1], optim_mat=False):
+        params = []
+
+        self.c.requires_grad_(True)
+        params.append({"params": [self.c], "lr": lr[0]})
+
+        self.k.requires_grad_(True)
+        params.append({"params": [self.k], "lr": lr[1]})
+
+        self.d.requires_grad_(True)
+        params.append({"params": [self.d], "lr": lr[2]})
+
+        for i in range(2, self.alpha_degree + 1):
+            exec(f"self.alpha{2 * i}.requires_grad_(True)")
+            exec(f"params.append({{'params': [self.alpha{2 * i}], 'lr': lr[3]}})")
+
+        if optim_mat and self.mat2.get_name() != "air":
+            params += self.mat2.get_optimizer_params()
+
+        return params
+
+    def max_height(self):
+        """Maximum valid height."""
+        if self.k > -1:
+            max_height = torch.sqrt(1 / (self.k + 1) / (self.c**2)).item() - 0.01
+        else:
+            max_height = float("inf")
+
+        return max_height
+
+    def surf_dict(self):
+        alpha = []
+        for i in range(2, self.alpha_degree + 1):
+            alpha0 = eval(f"self.alpha{2 * i}.item() * 0.1 ** {2 * i}")
+            alpha.append(float(format(alpha0, ".6e")))
+
+        surf_dict = {
+            "type": "PolyEven",
+            "c": self.c.item(),
+            "k": self.k.item(),
+            "r": self.r,
+            "(d)": round(self.d.item(), 4),
+            "mat2": self.mat2.get_name(),
+            "alpha": alpha,
+        }
+        return surf_dict
+
 
 class Spheric(Surface):
     """Spheric surface."""

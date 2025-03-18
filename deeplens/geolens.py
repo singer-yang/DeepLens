@@ -111,7 +111,7 @@ class GeoLens(Lens):
         """After loading lens, compute foclen, fov and fnum."""
         self.find_aperture()
 
-        self.hfov = self.calc_fov()
+        self.hfov = self.calc_hfov()
         self.foclen = self.calc_efl()
         self.fnum = self.calc_fnum()
 
@@ -1577,7 +1577,7 @@ class GeoLens(Lens):
         return infocus_sensor_d
 
     @torch.no_grad()
-    def calc_fov(self):
+    def calc_hfov(self):
         """Compute half diagonal fov. Shot rays from edge of sensor, trace them to the object space and compute output angel as the fov."""
         # Sample rays going out from edge of sensor, shape [M, 3]
         o1 = torch.zeros([SPP_CALC, 3])
@@ -1602,8 +1602,8 @@ class GeoLens(Lens):
         fov = torch.atan(torch.sum(tan_fov * ray.ra) / torch.sum(ray.ra))
 
         if torch.isnan(fov):
-            print("computed fov is NaN, use 0.5 rad instead.")
-            fov = 0.5
+            fov = float(np.arctan(self.r_sensor / self.d_sensor.item()))
+            print(f"Computing fov failed, set fov to {fov}.")
         else:
             fov = fov.item()
 
@@ -1810,6 +1810,7 @@ class GeoLens(Lens):
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
         if len(intersection_points) == 0:
+            print("No intersection points found, use the first surface as pupil.")
             if entrance:
                 avg_pupilz = self.surfaces[0].d.item()
                 avg_pupilx = self.surfaces[0].r
@@ -2056,15 +2057,19 @@ class GeoLens(Lens):
             # Filter out nan values and compute the maximum height
             valid_heights = ray_x_record[:, i + 1].abs()
             valid_heights = valid_heights[~torch.isnan(valid_heights)]
-            max_ray_height = (
-                valid_heights.max().item() if len(valid_heights) > 0 else 0.0
-            )
+            if len(valid_heights) > 0:
+                max_ray_height = valid_heights.max().item()
+            else:
+                print(f"No valid rays for surface {i}, use the maximum height of the surface.")
+                max_ray_height = self.surfaces[i].r
 
             if max_ray_height > 0:
                 max_height_value_range = self.surfaces[i].max_height()
                 self.surfaces[i].r = min(
                     max_ray_height * (1 + expand_surf), max_height_value_range
                 )
+            else:
+                print("Get max height failed, use the maximum height of the surface.")
 
     @torch.no_grad()
     def correct_shape(self, expand_surf=None):
@@ -2169,7 +2174,7 @@ class GeoLens(Lens):
             entrance_pupil=True,
             zmx_format=zmx_format,
             lens_title=lens_title,
-            depth=float("inf"),
+            depth=depth,
         )
 
         # Draw spot diagram and PSF map
@@ -3473,7 +3478,7 @@ def create_lens(
     """
     # Compute lens parameters
     aper_r = foclen / fnum / 2
-    imgh = float(2 * foclen * np.tan(fov / 2 / 57.3))
+    imgh = 2 * foclen * float(np.tan(fov / 2 / 57.3))
     if thickness is None:
         thickness = foclen + flange
     d_opt = thickness - flange
@@ -3541,14 +3546,18 @@ def create_lens(
 
 def create_surface(surface_type, d_total, aper_r, imgh, mat):
     """Create a surface object based on the surface type."""
-    c = np.random.randn(1).astype(np.float32) * 0.001
+    # Create a convex surface for to make sure the initial lens is convex
+    if mat == "air":
+        c = - np.random.rand() * 0.001
+    else:
+        c = np.random.rand() * 0.001
     r = max(imgh / 2, aper_r)
 
     if surface_type == "Spheric":
         return Spheric(r=r, d=d_total, c=c, mat2=mat)
     elif surface_type == "Aspheric":
         ai = np.random.randn(7).astype(np.float32) * 1e-30
-        k = np.random.randn(1).astype(np.float32) * 0.001
+        k = np.random.randn() * 0.001
         return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
     else:
         raise Exception("Surface type not supported yet.")

@@ -40,6 +40,77 @@ class Ray(DeepObj):
         self.to(device)
         self.d = F.normalize(self.d, p=2, dim=-1)
 
+    def init_polarization(self, mode="incoherent"):
+        """Initialize the polarization of the ray.
+
+        Polarization is a property of transverse waves. In linear polarization, the (electric) fields oscillate in a single direction. In circular or elliptical polarization, the (electric) fields rotate in a plane as the wave travels.
+
+        Difference between coherent ray tracing and polarization ray tracing: coherent ray tracing is a simpler model compared to polarization ray tracing.
+
+        We decompose the electric field into two orthogonal components, Es and Ep. When dealing with Fresnel equation, we first project Es and Ep to the plane of incidence, and then calculate the reflection and transmission (new Es and Ep).
+
+        Reference:
+            https://en.wikipedia.org/wiki/Polarization_(waves)
+        """
+        if mode == "incoherent":
+            # Incoherent states can be modeled stochastically as a weighted combination of such uncorrelated waves with some distribution of frequencies (its spectrum), phases, and polarizations.
+
+            # Random directions for the cross product
+            d_random = self.d + torch.randn_like(self.d) * 0.1
+
+            # Only initialize Es
+            Es_d = torch.cross(self.d, d_random, dim=-1)
+            self.Es_d = F.normalize(Es_d, p=2, dim=-1)
+            self.Es = torch.ones_like(self.o[..., 0]) + 0j  # Es is complex scalar
+
+            # Ep only becomes meanlingful after one Fresnel reflection/refraction
+            Ep_d = torch.cross(self.d, self.Es_d, dim=-1)
+            self.Ep_d = F.normalize(Ep_d, p=2, dim=-1)
+            self.Ep = torch.zeros_like(self.o[..., 0]) + 0j
+
+        elif mode == "linear":
+            # A random direction for the cross product
+            d_random = (
+                self.d + torch.randn(3).unsqueeze(0).broadcast_to(self.d.shape) * 0.1
+            )
+
+            # Only initialize Es
+            Es_d = torch.cross(self.d, d_random, dim=-1)
+            self.Es_d = F.normalize(Es_d, p=2, dim=-1)
+            self.Es = torch.ones_like(self.o[..., 0]) + 0j  # Es is complex scalar
+
+            # Ep only becomes meanlingful after one Fresnel reflection/refraction
+            Ep_d = torch.cross(self.d, self.Es_d, dim=-1)
+            self.Ep_d = F.normalize(Ep_d, p=2, dim=-1)
+            self.Ep = torch.zeros_like(self.o[..., 0]) + 0j
+
+        elif mode == "circular":
+            # A random direction for the cross product
+            d_random = (
+                self.d + torch.randn(3).unsqueeze(0).broadcast_to(self.d.shape) * 0.1
+            )
+
+            # Initialize Es and Ep
+            Es_d = torch.cross(self.d, d_random, dim=-1)
+            self.Es_d = F.normalize(Es_d, p=2, dim=-1)
+            self.Es = (
+                torch.ones_like(self.o[..., 0].unsqueeze(-1)) + 0j
+            )  # shape of [N, 1]
+
+            Ep_d = torch.cross(self.d, self.Es_d, dim=-1)
+            self.Ep_d = F.normalize(Ep_d, p=2, dim=-1)
+
+            # Phase difference between Es and Ep
+            self.phi_sp = torch.ones_like(self.o[..., 0].unsqueeze(-1)) * torch.pi / 2
+            self.Ep = (torch.ones_like(self.o[..., 0].unsqueeze(-1)) + 0j) * torch.exp(
+                1j * self.phi_sp
+            )
+
+            self.Es = self.Es / (self.Es + self.Ep).abs()
+            self.Ep = self.Ep / (self.Es + self.Ep).abs()
+
+        else:
+            raise NotImplementedError
 
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
@@ -79,7 +150,7 @@ class Ray(DeepObj):
             p: shape of [..., 2].
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
-        p = self.o[..., 0:2] + self.d[..., 0:2] * t[..., None]
+        p = self.o[..., :2] + self.d[..., :2] * t[..., None]
         return p
 
     def clone(self, device=None):
