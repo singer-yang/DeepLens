@@ -148,7 +148,7 @@ class Surface(DeepObj):
         with torch.no_grad():
             # Solution within the surface boundary and ray doesn't go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.ra > 0) & (t > 0)
+            valid = self.is_valid(new_x, new_y) & (ray.ra > 0) & (t >= 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
@@ -156,7 +156,7 @@ class Surface(DeepObj):
 
         return t, valid
 
-    def refract(self, ray, eta):
+    def refract(self, ray, n):
         """Calculate refractive ray according to Snell's law.
 
         Snell's law (surface normal n defined along the positive z axis):
@@ -166,29 +166,29 @@ class Surface(DeepObj):
 
         Args:
             ray (Ray): input ray.
-            eta (float): relevant refraction coefficient, eta = eta_i / eta_t
+            n (float): relevant refraction coefficient, n = n_i / n_t
 
         Returns:
             ray (Ray): refractive ray.
         """
         # Compute normal vectors
-        n = self.normal(ray)
+        n_vec = self.normal_vec(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
         if forward:
-            n = -n
+            n_vec = -n_vec
 
         # Compute refraction according to Snell's law
-        cosi = torch.sum(ray.d * n, axis=-1)  # n * i
+        cosi = torch.sum(ray.d * n_vec, axis=-1)  # n * i
 
         # Total internal reflection
-        valid = (eta**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
+        valid = (n**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
 
         sr = torch.sqrt(
-            1 - eta**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
+            1 - n**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
         )  # square root
 
         # First term: vertical. Second term: parallel. Already normalized if both n and ray.d are normalized.
-        new_d = sr * n + eta * (ray.d - cosi.unsqueeze(-1) * n)
+        new_d = sr * n_vec + n * (ray.d - cosi.unsqueeze(-1) * n_vec)
 
         # Update ray direction
         new_d[~valid] = ray.d[~valid]
@@ -214,7 +214,7 @@ class Surface(DeepObj):
             ray (Ray): reflected ray.
         """
         # Compute surface normal vectors
-        n = self.normal(ray)
+        n = self.normal_vec(ray)
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
         if forward:
             n = -n
@@ -231,7 +231,7 @@ class Surface(DeepObj):
 
         return ray
 
-    def normal(self, ray):
+    def normal_vec(self, ray):
         """Calculate surface normal vector at the intersection point. Normal vector points to the left by default.
 
         Args:
@@ -1771,7 +1771,7 @@ class Plane(Surface):
 
         return ray
 
-    def normal(self, ray):
+    def normal_vec(self, ray):
         """Calculate surface normal vector at intersection points."""
         n = torch.zeros_like(ray.d)
         n[..., 2] = -1
