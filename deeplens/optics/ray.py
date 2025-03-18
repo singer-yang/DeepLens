@@ -56,9 +56,10 @@ class Ray(DeepObj):
             z (float): depth.
             n (float, optional): refractive index. Defaults to 1.
         """
-        t = (z - self.o[..., 2]) / self.d[..., 2].clamp(min=EPSILON)
+        t = (z - self.o[..., 2]) / self.d[..., 2]
         new_o = self.o + self.d * t[..., None]
-        is_valid = self.ra > 0
+        
+        is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
         new_o[~is_valid] = self.o[~is_valid]
         self.o = new_o
 
@@ -81,9 +82,11 @@ class Ray(DeepObj):
         Return:
             p: shape of [..., 2].
         """
-        t = (z - self.o[..., 2]) / self.d[..., 2].clamp(min=EPSILON)
-        p = self.o[..., :2] + self.d[..., :2] * t[..., None]
-        return p
+        t = (z - self.o[..., 2]) / self.d[..., 2]
+        new_o = self.o + self.d * t[..., None]
+        is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
+        new_o[~is_valid] = self.o[~is_valid]
+        return new_o[..., :2]
 
     def clone(self, device=None):
         """Clone the ray.

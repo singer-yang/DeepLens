@@ -379,11 +379,11 @@ class Surface(DeepObj):
         NOTE: DELTA is used to avoid the numerical error.
         """
         if self.is_square:
-            valid = (torch.abs(x) <= self.w / 2 + DELTA) & (
-                torch.abs(y) <= self.h / 2 + DELTA
+            valid = (torch.abs(x) <= (self.w / 2)) & (
+                torch.abs(y) <= (self.h / 2)
             )
         else:
-            valid = (x**2 + y**2) <= self.r**2 + DELTA
+            valid = (x**2 + y**2).sqrt() <= self.r
 
         return valid
 
