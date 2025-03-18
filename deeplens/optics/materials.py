@@ -60,7 +60,7 @@ class Material(DeepObj):
                 + self.k2 * wvln**2 / (wvln**2 - self.l2)
                 + self.k3 * wvln**2 / (wvln**2 - self.l3)
             )
-            n = float(np.sqrt(n2))
+            n = np.sqrt(n2)
 
         elif self.dispersion == "schott":
             # High precision computation (by MATLAB), writing dispersion function seperately will introduce errors
@@ -70,7 +70,7 @@ class Material(DeepObj):
                 + self.a1 * ws
                 + (self.a2 + (self.a3 + (self.a4 + self.a5 / ws) / ws) / ws) / ws
             )
-            n = float(np.sqrt(n2))
+            n = np.sqrt(n2)
 
         elif self.dispersion == "cauchy":
             # Cauchy equation
