@@ -3392,7 +3392,7 @@ class GeoLens(Lens):
     def write_lens_zmx(self, filename="./test.zmx"):
         """Write the lens into .zmx file."""
         lens_zmx_str = ""
-
+        ENPD = self.calc_entrance_pupil()[1] * 2
         # Head string
         head_str = f"""VERS 190513 80 123457 L123457
 MODE SEQ
@@ -3400,7 +3400,7 @@ NAME
 PFIL 0 0 0
 LANG 0
 UNIT MM X W X CM MR CPMM
-ENPD {self.surfaces[0].r * 2}
+ENPD {ENPD}
 ENVD 2.0E+1 1 0
 GFAC 0 0
 GCAT OSAKAGASCHEMICAL MISC
