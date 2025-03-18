@@ -6,15 +6,14 @@
 
 ## News
 
-Please contact Xinge Yang (xinge.yang@kaust.edu.sa) for any questions, assistance, or collaboration.
-
+* Welcome to create issues and pull requests to support DeepLens! If you do not know how to start, please feel free to contact Xinge Yang (xinge.yang@kaust.edu.sa). We also look for sponsors!
 * We now have a slack group. Welcome to join the discussion via [this link](https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw).
-* DeepLens is finall published on Nature Communications, check it [here](https://www.nature.com/articles/s41467-024-50835-7)!
+* DeepLens is now published in Nature Communications, check it [here](https://www.nature.com/articles/s41467-024-50835-7)!
 * We now have a WeChat group. Please contact Xinge Yang (singeryang1999) to join the discussion!
 
 ## What is DeepLens
 
-DeepLens aims to combines **deep learning** and **optical design** to create:
+DeepLens aims to combine **deep learning** and **optical design** to create:
 
 1. More powerful **optical design algorithms** enhanced by deep learning.
 2. Next-generation **computational cameras** integrating optical encoding with deep learning decoding.
@@ -39,7 +38,7 @@ Additional features available via request or collaboration:
 
 #### 1. Automated lens design
 
-Fully automated lens design from scratch. Try it at [AutoLens](https://github.com/vccimaging/AutoLens)!
+Fully automated lens design from scratch. Try it with [AutoLens](https://github.com/vccimaging/AutoLens)!
 
 [![paper](https://img.shields.io/badge/NatComm-2024-orange)](https://www.nature.com/articles/s41467-024-50835-7) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/AutoLens)
 
@@ -139,8 +138,8 @@ DeepLens is first developed by [Dr. Congli Wang](https://congliwang.github.io/) 
 
 #### Projects built on top of DeepLens/dO
 
-(If you donot want to list your paper here, we can remove it.)
+(If you do not want to list your paper here, we can remove it.)
 
-- [SiggraphAsia 2024] End-to-end Optimization of Fluidic Lenses. [Paper](https://dl.acm.org/doi/10.1145/3680528.3687584), [BibTex](.misc/fluidiclens_bibtext.txt)
+- [SiggraphAsia 2024] End-to-end Optimization of Fluidic Lenses. [Paper](https://dl.acm.org/doi/10.1145/3680528.3687584), [BibTex](./misc/fluidiclens_bibtext.txt)
 - [TPAMI 2023] Aberration-Aware Depth-From-Focus. [Paper](https://ieeexplore.ieee.org/document/10209238), [BibTex](./misc/aatdff_bibtex.txt)
 - [Arxiv 2024] Centimeter-Scale Achromatic Hybrid Metalens Design: A New Paradigm Based on Differentiable Ray Tracing in the Visible Spectrum. [Paper](https://arxiv.org/abs/2404.03173)
