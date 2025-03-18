@@ -139,7 +139,7 @@ class HybridLens(Lens):
         """Refocus the DoeLens to a given depth. Donot move DOE because DOE is installed with geolens in the Siggraph Asia 2024 paper."""
         self.geolens.refocus(foc_dist)
 
-    def draw_layout(self, save_name="./DOELens.png", depth=-10000, ax=None, fig=None):
+    def draw_layout(self, save_name="./DOELens.png", depth=-10000.0, ax=None, fig=None):
         """Draw DOELens layout with ray-tracing and wave-propagation."""
         geolens = self.geolens
 
@@ -152,7 +152,7 @@ class HybridLens(Lens):
 
         # Draw light path
         color_list = ["#CC0000", "#006600", "#0066CC"]
-        views = [0, np.rad2deg(geolens.hfov) * 0.707, np.rad2deg(geolens.hfov) * 0.99]
+        views = [0.0, float(np.rad2deg(geolens.hfov) * 0.707), float(np.rad2deg(geolens.hfov) * 0.99)]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
         num_rays = 5
         for i, view in enumerate(views):

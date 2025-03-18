@@ -252,7 +252,7 @@ class GeoLens(Lens):
         """
         # Sample point on the object plane
         ray_o = torch.tensor(
-            [depth * np.tan(fov / 57.3), 0, depth], dtype=torch.float32
+            [depth * float(np.tan(fov / 57.3)), 0, depth]
         )
         ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
 
@@ -715,7 +715,7 @@ class GeoLens(Lens):
         img = torch.flip(img, [-2, -1])
         scale = self.calc_scale(depth=depth, method="pinhole")
         ray = self.sample_sensor(spp=spp, wvln=wvln)
-        ray = self.trace2obj(ray)
+        ray = self.trace2obj(ray, depth=depth)
         img_mono = self.render_compute_image(
             img, depth=depth, scale=scale, ray=ray, vignetting=vignetting
         )
@@ -2222,7 +2222,7 @@ class GeoLens(Lens):
         # Draw lens layout
         if not multi_plot:
             colors_list = ["#CC0000", "#006600", "#0066CC"]
-            views = np.linspace(0, np.rad2deg(self.hfov) * 0.99, num=num_views)
+            views = np.linspace(0, float(np.rad2deg(self.hfov) * 0.99), num=num_views)
             ax, fig = self.draw_setup_2d(zmx_format=zmx_format)
 
             for i, view in enumerate(views):

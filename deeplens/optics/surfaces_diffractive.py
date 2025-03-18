@@ -29,7 +29,7 @@ class DOE(DeepObj):
         # DOE geometry
         self.d = torch.tensor([d]) if not isinstance(d, torch.Tensor) else d
         self.l = l
-        self.r = l / 2 * math.sqrt(2)
+        self.r = l / 2 * float(np.sqrt(2))
         self.w = self.l
         self.h = self.l
 
@@ -89,7 +89,7 @@ class DOE(DeepObj):
 
         elif self.param_model == "binary2":
             # Zemax binary2 phase mask
-            rand_value = np.random.rand(4) * 0.01
+            rand_value = np.random.rand(4).astype(np.float32) * 0.01
             self.order2 = torch.tensor(rand_value[0])
             self.order4 = torch.tensor(rand_value[1])
             self.order6 = torch.tensor(rand_value[2])
@@ -97,7 +97,7 @@ class DOE(DeepObj):
 
         elif self.param_model == "binary2_fast":
             # Inverting the orders can speed up the optimization
-            rand_value = (np.random.rand(4) - 0.5) * 100.0
+            rand_value = (np.random.rand(4).astype(np.float32) - 0.5) * 100.0
             self.order2 = torch.tensor(rand_value[0])
             self.order4 = torch.tensor(rand_value[1])
             self.order6 = torch.tensor(rand_value[2])
@@ -105,7 +105,7 @@ class DOE(DeepObj):
 
         elif self.param_model == "poly1d":
             # Even polynomial for aberration correction, odd polynomial for EDoF.
-            rand_value = np.random.rand(6) * 0.001
+            rand_value = np.random.rand(6).astype(np.float32) * 0.001
             self.order2 = torch.tensor(rand_value[0])
             self.order3 = torch.tensor(rand_value[1])
             self.order4 = torch.tensor(rand_value[2])
@@ -435,7 +435,7 @@ class DOE(DeepObj):
     def pmap_quantize(self, bits=16):
         """Quantize phase map to bits levels."""
         pmap = self.get_phase_map0()
-        pmap_q = torch.round(pmap / (2 * np.pi / bits)) * (2 * np.pi / bits)
+        pmap_q = torch.round(pmap / (2 * float(np.pi) / bits)) * (2 * float(np.pi) / bits)
         return pmap_q
 
     def pmap_fab(self, bits=16, save_path=None):
@@ -453,7 +453,7 @@ class DOE(DeepObj):
             .squeeze(0)
             .squeeze(0)
         )
-        pmap_q = torch.round(pmap / (2 * np.pi / bits)) * (2 * np.pi / bits)
+        pmap_q = torch.round(pmap / (2 * float(np.pi) / bits)) * (2 * float(np.pi) / bits)
 
         # Save phase map
         if save_path is None:
@@ -624,12 +624,12 @@ class DOE(DeepObj):
         pmap_q = self.pmap_quantize()
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * np.pi)
+        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * float(np.pi))
         ax[0].set_title(f"Phase map ({self.wvln0}um)", fontsize=10)
         ax[0].grid(False)
         fig.colorbar(ax[0].get_images()[0])
 
-        ax[1].imshow(pmap_q.cpu().numpy(), vmin=0, vmax=2 * np.pi)
+        ax[1].imshow(pmap_q.cpu().numpy(), vmin=0, vmax=2 * float(np.pi))
         ax[1].set_title(f"Quantized phase map ({self.wvln0}um)", fontsize=10)
         ax[1].grid(False)
         fig.colorbar(ax[1].get_images()[0])
@@ -664,7 +664,7 @@ class DOE(DeepObj):
         """Draw cross section of the phase map."""
         pmap = self.get_phase_map0()
         pmap = torch.diag(pmap).cpu().numpy()
-        r = np.linspace(-self.w / 2 * np.sqrt(2), self.w / 2 * np.sqrt(2), self.res[0])
+        r = np.linspace(-self.w / 2 * float(np.sqrt(2)), self.w / 2 * float(np.sqrt(2)), self.res[0])
 
         fig, ax = plt.subplots()
         ax.plot(r, pmap)
@@ -801,7 +801,7 @@ class ThinLens(DeepObj):
         # ==> Apply phase change and aperture
         foclen = self.interp_foclen(field.wvln) if self.chromatic else self.foclen
         phi_lens = torch.fmod(
-            -field.k * (field.x**2 + field.y**2) / (2 * foclen), 2 * np.pi
+            -field.k * (field.x**2 + field.y**2) / (2 * foclen), 2 * float(np.pi)
         )
         field.u *= torch.exp(1j * phi_lens)
 
