@@ -5,7 +5,7 @@ import copy
 import torch
 import torch.nn.functional as F
 
-from .basics import DEFAULT_WAVE, DeepObj
+from .basics import DEFAULT_WAVE, EPSILON, DeepObj
 
 
 class Ray(DeepObj):
@@ -40,7 +40,6 @@ class Ray(DeepObj):
         self.to(device)
         self.d = F.normalize(self.d, p=2, dim=-1)
 
-
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
 
@@ -59,11 +58,16 @@ class Ray(DeepObj):
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
         new_o = self.o + self.d * t[..., None]
-        self.o = torch.where(self.ra[..., None] == 1, new_o, self.o)
+        
+        is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
+        new_o[~is_valid] = self.o[~is_valid]
+        self.o = new_o
 
         if self.coherent:
             if t.min() > 100 and torch.get_default_dtype() == torch.float32:
-                raise Warning("Should use float64 in coherent ray tracing for precision.")
+                raise Warning(
+                    "Should use float64 in coherent ray tracing for precision."
+                )
             else:
                 self.opl = self.opl + n * t
 
@@ -79,8 +83,10 @@ class Ray(DeepObj):
             p: shape of [..., 2].
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
-        p = self.o[..., 0:2] + self.d[..., 0:2] * t[..., None]
-        return p
+        new_o = self.o + self.d * t[..., None]
+        is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
+        new_o[~is_valid] = self.o[~is_valid]
+        return new_o[..., :2]
 
     def clone(self, device=None):
         """Clone the ray.
