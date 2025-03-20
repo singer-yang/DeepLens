@@ -191,12 +191,12 @@ class Surface(DeepObj):
         new_d = sr * n + eta * (ray.d - cosi.unsqueeze(-1) * n)
 
         # Update ray direction
-        new_d[~valid] = ray.d[~valid].to(new_d.dtype)
+        new_d[~valid] = ray.d[~valid]
         ray.d = new_d
 
         # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1)
-        new_obliq[~valid] = ray.obliq[~valid].to(new_obliq.dtype)
+        new_obliq[~valid] = ray.obliq[~valid]
         ray.obliq = new_obliq
 
         # Update ray ra
