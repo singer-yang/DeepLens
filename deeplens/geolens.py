@@ -1830,7 +1830,7 @@ class GeoLens(Lens):
                 lamb = min(max_lambda, lamb * 1.5)
                 continue
 
-        # DLS最终结果评估
+        # result
         if best_distance <= tolerance:
             # Verify best result
             final_position = best_position.clone()
