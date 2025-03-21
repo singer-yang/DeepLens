@@ -1429,6 +1429,49 @@ class GeoLens(Lens):
         distortion_grid = torch.stack((x_dist, y_dist), dim=-1)  # shape (H, W, 2)
         return distortion_grid
 
+    def calc_distortion_1D(self, hfov, plane="meridional"):
+        """Calculate distortion at a specific field angle.
+
+        Args:
+            hfov (float): view angle (degree)
+            plane (str): meridional or sagittal
+
+        Returns:
+            distortion (float): distortion at the specific field angle
+        """
+        # 1. Calculate ideal image height
+        # ========>
+        effective_foclen = self.calc_efl()
+        ideal_image_height = effective_foclen * math.tan(hfov * math.pi / 180)
+        # ========>
+
+        # 2. Calculate actual image height
+        # Calculate chief ray
+        # ========>
+        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=hfov, plane=plane)
+        ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
+        # ========>
+
+        # Trace chief ray
+        ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
+        t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
+        
+        # 3. Calculate distortion
+        if plane == "sagittal":
+            actual_image_height = abs(ray.o[..., 0] + ray.d[..., 0] * t)
+        elif plane == "meridional":
+            actual_image_height = abs(ray.o[..., 1] + ray.d[..., 1] * t)
+        else:
+            raise ValueError(f"Invalid plane: {plane}")
+
+        distortion = (actual_image_height - ideal_image_height) / ideal_image_height
+
+        # Handle the case where ideal_image_height is 0 or very close to 0
+        if abs(ideal_image_height) < EPSILON:
+            distortion = torch.tensor(0.0, device=self.device)
+
+        return distortion
+        
     # ====================================================================================
     # Geometrical optics calculation
     # ====================================================================================
@@ -1487,12 +1530,22 @@ class GeoLens(Lens):
 
         return bfl
 
-    def calc_efl(self):
-        """Compute effective focal length (EFL). Effctive focal length is also commonly used to compute F/#.
+    # def calc_efl_old(self):
+    #     """Compute effective focal length (EFL). Effctive focal length is also commonly used to compute F/#.
 
-        EFL: Defined by FoV and sensor radius.
-        """
-        return self.r_sensor / math.tan(self.hfov)
+    #     EFL: Defined by FoV and sensor radius.
+    #     """
+    #     return self.r_sensor / math.tan(self.hfov)
+    
+    def calc_efl(self):
+        """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
+        fov = 0.0001 # paraxial fov in radian
+        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=fov * 180 / math.pi)
+        ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
+        ray, _ = self.trace(ray)
+        image_height = (ray.o[..., 1] + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2])
+        eff_foclen = image_height / float(np.tan(fov))
+        return eff_foclen.mean().item()
 
     def calc_eqfl(self):
         """35mm equivalent focal length. For cellphone lens, we usually use EFL to describe the lens.
@@ -1716,8 +1769,7 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def chief_ray(self):
-        """Compute chief ray. We can use chief ray for fov, magnification.
-        Chief ray, a ray goes through center of aperture.
+        """Compute chief ray from sensor to object space. We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture.
         """
         # sample rays with shape [SPP_CALC, 3]
         pupilz, pupilx = self.calc_exit_pupil()
@@ -1740,6 +1792,70 @@ class GeoLens(Lens):
         center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)
 
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
+
+    @torch.no_grad()
+    def calc_chief_ray_infinite(self, hfov, depth=DEPTH, plane="meridional"):
+        """Compute chief ray for an incident angle.
+        
+        Args:
+            fov (float): incident angle in degree.
+            plane (str): "sagittal" or "meridional".
+            chief_ray (bool): compute chief ray or edge ray. Todo.
+            num_points (int): number of points to sample.
+        """
+
+        # Convert hfov to radian
+        hfov = hfov * np.pi / 180.0
+
+        if plane == "sagittal":
+            idx = 0
+        else:
+            idx = 1
+
+        if hfov == 0:
+            return torch.tensor([0, 0, depth], device=self.device, dtype=torch.float32), torch.tensor(
+                [0, 0, 1], device=self.device, dtype=torch.float32)
+        
+        if self.aper_idx == 0:
+            if idx == 0:
+                return torch.tensor([depth * math.tan(hfov), 0, depth], device=self.device, dtype=torch.float32), torch.tensor(
+                    [math.sin(hfov), 0, math.cos(hfov)], device=self.device, dtype=torch.float32)
+            else:
+                return torch.tensor([0, depth * math.tan(hfov), depth], device=self.device, dtype=torch.float32), torch.tensor(
+                    [0, math.sin(hfov), math.cos(hfov)], device=self.device, dtype=torch.float32)
+        
+        # Scale factor
+        # For lenses with large entrance pupil aberrations, the range can be relaxed, but ray density must be increased.
+        scale = 0.45
+        pupilz, pupilx = self.calc_entrance_pupil()
+        delta = scale * pupilx * 2
+
+        # Sample parallel rays from object space
+        y_distance = math.tan(hfov) * (depth + pupilz)
+        min_y = (-pupilx - y_distance) + delta
+        max_y = (pupilx - y_distance) - delta
+        o1 = torch.zeros([SPP_CALC, 3])
+        o1[:, idx] = torch.linspace(min_y, max_y, SPP_CALC)
+        o1[:, 2] = depth
+        
+        o2 = torch.zeros([SPP_CALC, 3])
+        o2[:, idx] = torch.linspace(-pupilx + delta, pupilx - delta, SPP_CALC)
+        o2[:, 2] = pupilz
+
+        # Trace until the aperture
+        ray = Ray(o1, o2 - o1, device=self.device)
+        inc_ray = ray.clone()
+        ray, _ = self.trace(
+            ray, lens_range=list(range(0, self.aper_idx + 1))
+        )
+
+        # Look for the ray that is closest to the optical axis
+        center_x = torch.min(torch.abs(ray.o[:, idx]))
+        center_idx = torch.where(torch.abs(ray.o[:, idx]) == center_x)[0][0].item()
+        chief_ray_o = inc_ray.o[center_idx, :]
+        chief_ray_d = torch.tensor([0, math.sin(hfov), math.cos(hfov)], device=self.device)
+
+        return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
     def calc_exit_pupil(self, shrink_pupil=False):
@@ -2747,6 +2863,82 @@ class GeoLens(Lens):
         else:
             plt.savefig(
                 f"{filename[:-4]}_distortion_{-depth}mm.png",
+                bbox_inches="tight",
+                format="png",
+                dpi=300,
+            )
+
+    def draw_distortion_1D(self, hfov, filename=None, num_points=GEO_GRID, plane="meridional"):
+        """Draw distortion.
+
+        Args:
+            hfov: view angle (degrees)
+            filename: Save filename. Defaults to None. 
+            num_points: Number of points. Defaults to GEO_GRID.
+            plane: Meridional or sagittal. Defaults to meridional.
+        """
+
+        # Sample view angles
+        hfov_samples = np.linspace(0, hfov, num_points)
+        distortions = []
+
+        # Calculate distortion
+        for fov_sample in hfov_samples:
+            distortion = self.calc_distortion_1D(hfov=fov_sample, plane=plane)
+            distortions.append(distortion)
+
+        # Handle possible NaN values and convert to percentage
+        values = [t.item() * 100 if not math.isnan(t.item()) else 0 for t in distortions]
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.set_title(f"{plane} Surface Distortion")
+
+        # Draw distortion curve
+        ax.plot(values, hfov_samples, linestyle='-', color='g', linewidth=1.5)
+
+        # Draw reference line (vertical line)
+        ax.axvline(x=0, color='k', linestyle='-', linewidth=0.8)
+
+        # Set grid
+        ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=1)
+
+        # Dynamically adjust x-axis range
+        value = max(abs(v) for v in values)
+        margin = value * 0.2  # 20% margin
+        x_min, x_max = -max(0.2, value + margin), max(0.2, value + margin)
+
+        # Set ticks
+        x_ticks = np.linspace(-value, value, 3)
+        y_ticks = np.linspace(0, hfov, 3)
+
+        ax.set_xticks(x_ticks)
+        ax.set_yticks(y_ticks)
+
+        # Format tick labels
+        x_labels = [f"{x:.1f}%" for x in x_ticks]
+        y_labels = [f"{y:.1f}" for y in y_ticks]
+
+        ax.set_xticklabels(x_labels)
+        ax.set_yticklabels(y_labels)
+
+        # Set axis labels
+        ax.set_xlabel("Distortion (%)")
+        ax.set_ylabel("Field of View (degrees)")
+
+        # Set axis range
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(0, hfov)
+        if filename is None:
+            plt.savefig(
+                f"./{plane}_distortion_infinite_mm.png",
+                bbox_inches="tight",
+                format="png",
+                dpi=300,
+            )
+        else:
+            plt.savefig(
+                f"{filename[:-4]}_{plane}_distortion_infinite_mm.png",
                 bbox_inches="tight",
                 format="png",
                 dpi=300,
