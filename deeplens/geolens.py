@@ -1429,11 +1429,11 @@ class GeoLens(Lens):
         distortion_grid = torch.stack((x_dist, y_dist), dim=-1)  # shape (H, W, 2)
         return distortion_grid
 
-    def calc_distortion_1D(self, hfov, plane="sagittal"):
+    def calc_distortion_1D(self, hfov, plane="meridional"):
         """Calculate distortion at a specific field angle.
 
         Args:
-            hfov (float): view angle (radian)
+            hfov (float): view angle (degree)
             plane (str): meridional or sagittal
 
         Returns:
@@ -1441,20 +1441,14 @@ class GeoLens(Lens):
         """
         # 1. Calculate ideal image height
         # ========>
-        # ideal_image_height_phi = self.calc_ideal_image_height(plane="meridional")
-        # ideal_image_height = ideal_image_height_phi * math.tan(hfov)
-        # ========>
         effective_foclen = self.calc_efl()
-        ideal_image_height = effective_foclen * math.tan(hfov)
+        ideal_image_height = effective_foclen * math.tan(hfov * math.pi / 180)
         # ========>
 
         # 2. Calculate actual image height
         # Calculate chief ray
         # ========>
-        # object_point, best_direction = self.calc_chief_ray_infinite(fov=hfov, max_iterations=100, plane=plane)
-        # # ray = Ray(object_point, best_direction, wvln=DEFAULT_WAVE, device=self.device)
-        # ========>
-        chief_ray_o, chief_ray_d = self.calc_chief_ray(fov=hfov*57.3, plane=plane)
+        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=hfov, plane=plane)
         ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
         # ========>
 
@@ -1481,703 +1475,6 @@ class GeoLens(Lens):
     # ====================================================================================
     # Geometrical optics calculation
     # ====================================================================================
-    # @torch.no_grad()
-    # def calc_ideal_image_height(self, phi=1e-6, plane="meridional"):
-    #     """Calculate ideal image height. FIXME: this function actually calculates the effective focal length.
-
-    #     Args:
-    #         phi: view angle
-    #         plane: meridional or sagittal
-
-    #     Returns:
-    #         ideal_image_height
-    #     """
-    #     phi = torch.tensor(phi, dtype=torch.float32)
-    #     object_point, best_direction = self.calc_chief_ray_infinite(fov=phi, max_iterations=100, plane=plane)
-    #     ideal_ray = Ray(object_point, best_direction, wvln=DEFAULT_WAVE, device=self.device)
-    #     ideal_ray, _ = self.trace(ideal_ray, lens_range=range(len(self.surfaces)))
-    #     ideal_t = (self.d_sensor - ideal_ray.o[..., 2]) / ideal_ray.d[..., 2]
-
-    #     if plane == "sagittal":
-    #         ideal_image_height = abs(ideal_ray.o[..., 0] + ideal_ray.d[..., 0] * ideal_t) / math.tan(phi)
-    #     elif plane == "meridional":
-    #         ideal_image_height = abs(ideal_ray.o[..., 1] + ideal_ray.d[..., 1] * ideal_t) / math.tan(phi)
-
-    #     return ideal_image_height
-
-    # def calc_chief_ray_infinite(self, fov=0.0, wvln=DEFAULT_WAVE, max_iterations=100, tolerance=1e-10,
-    #                             plane="meridional"):
-    #     """Calculate chief ray.
-
-    #     Args:
-    #         fov: view angle
-    #         wvln: wavelength
-    #         max_iterations: maximum iterations
-    #         tolerance: tolerance
-    #     """
-    #     # Initialize basic optical system parameters
-    #     self.find_aperture()
-    #     if self.aper_idx is None:
-    #         self.aper_idx = 0
-
-    #     # Precompute common values
-    #     aper_z = self.surfaces[self.aper_idx].d.item()
-    #     aper_radius = self.surfaces[self.aper_idx].r
-    #     initial_z = self.surfaces[0].d.item() - 10.0
-
-    #     # Precompute trigonometric values
-    #     sin_fov = math.sin(fov)
-    #     cos_fov = math.cos(fov)
-    #     tan_fov = sin_fov / cos_fov if abs(cos_fov) > 1e-10 else 0.0
-
-    #     # Set direction vector based on plane type
-    #     if plane.lower() == "sagittal":
-    #         # Sagittal ray direction [sin_fov, 0, cos_fov]
-    #         fixed_direction = torch.tensor([[
-    #             sin_fov, 0.0, cos_fov
-    #         ]], device=self.device)
-    #     else:
-    #         # Meridional ray direction [0, sin_fov, cos_fov]
-    #         fixed_direction = torch.tensor([[
-    #             0.0, sin_fov, cos_fov
-    #         ]], device=self.device)
-
-    #     fixed_direction = F.normalize(fixed_direction, p=2, dim=1)
-
-    #     # Fast path for small angles
-    #     if abs(fov) < 1e-12:
-    #         object_point = torch.tensor([[0.0, 0.0, initial_z]], device=self.device)
-    #         direction = torch.tensor([[0.0, 0.0, 1.0]], device=self.device)
-    #         return object_point, direction
-
-    #     # Determine angle range (only used for parameter adjustment, not for method selection)
-    #     fov_degrees = abs(fov) * 180 / math.pi
-
-    #     # General helper function - evaluate error of given initial point
-    #     def evaluate_point(point_val):
-    #         """Evaluate error of given initial point"""
-    #         if plane.lower() == "sagittal":
-    #             point = torch.tensor([[point_val, 0.0, initial_z]], device=self.device, dtype=torch.float64)
-    #         else:
-    #             point = torch.tensor([[0.0, point_val, initial_z]], device=self.device, dtype=torch.float64)
-
-    #         ray = Ray(point, fixed_direction.double(), wvln=wvln, device=self.device)
-
-    #         try:
-    #             ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
-    #             if ray.ra.sum() == 0:
-    #                 return float('inf')
-
-    #             t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
-    #             intersection = ray.o + ray.d * t[..., None]
-    #             error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
-    #             return error
-    #         except:
-    #             return float('inf')
-
-    #     # Save original precision and switch to double precision calculation
-    #     orig_dtype = torch.get_default_dtype()
-    #     try:
-    #         torch.set_default_dtype(torch.float64)
-            
-    #         # First try using damped least squares method
-    #         best_position, best_distance = self._calc_chief_ray_infinite_dls(
-    #             fov, wvln, max_iterations, tolerance, plane, 
-    #             aper_z, aper_radius, initial_z, fixed_direction, 
-    #             fov_degrees
-    #         )
-            
-    #         # If DLS method fails or precision is insufficient, switch to bisection method
-    #         if best_distance > tolerance:
-    #             best_position, best_distance = self._calc_chief_ray_infinite_bisection(
-    #                 wvln, tolerance, plane, aper_z, 
-    #                 initial_z, fixed_direction, 
-    #                 evaluate_point, tan_fov, 
-    #                 best_position, best_distance
-    #             )
-            
-    #         return best_position, fixed_direction
-            
-    #     finally:
-    #         # Restore original precision
-    #         torch.set_default_dtype(orig_dtype)
-
-    # def _calc_chief_ray_infinite_dls(self, fov, wvln, max_iterations, tolerance, plane, 
-    #                              aper_z, aper_radius, initial_z, fixed_direction, 
-    #                              fov_degrees):
-    #     """Calculate chief ray using damped least squares method."""
-    #     # Set appropriate initial parameters based on field angle
-    #     if fov_degrees < 5.0: 
-    #         scale_factor = 0.95
-    #         initial_lambda = 0.1
-    #         min_lambda = 1e-12
-    #         max_lambda = 1e5
-    #         lambda_factor = 5.0
-    #     elif fov_degrees < 9.0:
-    #         scale_factor = 0.85
-    #         initial_lambda = 1.0
-    #         min_lambda = 1e-8
-    #         max_lambda = 1e7
-    #         lambda_factor = 10.0
-    #     else: 
-    #         scale_factor = 0.75
-    #         initial_lambda = 2.0
-    #         min_lambda = 1e-8
-    #         max_lambda = 1e8
-    #         lambda_factor = 12.0
-        
-    #     # Calculate initial parameters
-    #     sin_fov = math.sin(fov)
-    #     cos_fov = math.cos(fov)
-    #     tan_fov = sin_fov / cos_fov if abs(cos_fov) > 1e-10 else 0.0
-        
-    #     # Initialize object point
-    #     val_estimate = tan_fov * (aper_z - initial_z) * scale_factor
-
-    #     if plane.lower() == "sagittal":
-    #         object_point = torch.tensor([[val_estimate, 0.0, initial_z]], device=self.device)
-    #     else:
-    #         object_point = torch.tensor([[0.0, val_estimate, initial_z]], device=self.device)
-
-    #     # Optimize parameters
-    #     best_distance = float('inf')
-    #     best_position = object_point.clone()
-
-    #     # Start DLS optimization
-    #     lamb = initial_lambda
-    #     dp_object_point = object_point.double()
-    #     dp_direction = fixed_direction.double()
-
-    #     # Retry mechanism setup
-    #     retry_count = 0
-    #     max_retries = 6
-    #     stagnant_count = 0
-    #     prev_error = float('inf')
-
-    #     for iteration in range(max_iterations):
-    #         # Retry check
-    #         if (lamb >= max_lambda * 0.5 or stagnant_count >= 10) and best_distance > tolerance and retry_count < max_retries:
-    #             retry_count += 1
-    #             stagnant_count = 0
-
-    #             # Use more conservative starting point
-    #             if fov_degrees >= 9.0:  # Large angle uses more aggressive adjustment
-    #                 scale = 0.6 - retry_count * 0.1
-    #             elif fov_degrees >= 5.0:  # Medium angle
-    #                 scale = 0.65 - retry_count * 0.07
-    #             else:  # Small angle
-    #                 scale = 0.8 - retry_count * 0.05
-
-    #             # Limit minimum scaling and ensure exploration of multiple directions
-    #             if retry_count % 2 == 0:
-    #                 scale = max(scale, 0.2)
-    #             else:
-    #                 scale = -max(scale, 0.2)  # Try negative direction
-
-    #             # Generate new starting point
-    #             new_val = tan_fov * (aper_z - initial_z) * scale
-    #             if plane.lower() == "sagittal":
-    #                 dp_object_point[0, 0] = new_val
-    #             else:
-    #                 dp_object_point[0, 1] = new_val
-
-    #             # Reset damping parameters
-    #             lamb = initial_lambda * (1.0 + retry_count * 0.2)
-
-    #         # Ray tracing
-    #         ray = Ray(dp_object_point, dp_direction, wvln=wvln, device=self.device)
-    #         try:
-    #             ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
-    #             if ray.ra.sum() == 0:
-    #                 # Ray is blocked, adjust
-    #                 if plane.lower() == "sagittal":
-    #                     dp_object_point[0, 0] *= (0.65 if fov_degrees >= 9.0 else (0.7 if fov_degrees >= 5.0 else 0.85))
-    #                 else:
-    #                     dp_object_point[0, 1] *= (0.65 if fov_degrees >= 9.0 else (0.7 if fov_degrees >= 5.0 else 0.85))
-
-    #                 # Increase damping factor but not too fast
-    #                 lamb = min(max_lambda, lamb * 1.5)
-    #                 continue
-
-    #             # Calculate distance to aperture center
-    #             t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
-    #             intersection = ray.o + ray.d * t[..., None]
-    #             error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
-
-    #             # Track stagnant情况
-    #             if abs(error - prev_error) < error * 1e-4:
-    #                 stagnant_count += 1
-    #             else:
-    #                 stagnant_count = 0
-    #             prev_error = error
-
-    #             # Save best result
-    #             if error < best_distance:
-    #                 best_distance = error
-    #                 best_position = dp_object_point.clone()
-
-    #             # End early if accuracy requirement is met
-    #             if error < tolerance:
-    #                 break
-
-    #             # Calculate Jacobian matrix - adjust increment based on field angle and current error
-    #             if fov_degrees < 5.0:
-    #                 delta = min(1e-6, error * 0.1)
-    #             elif fov_degrees < 9.0:
-    #                 delta = min(2e-5, error * 0.3)
-    #             else:
-    #                 delta = min(5e-5, error * 0.5)
-
-    #             # For very small errors, use a smaller increment
-    #             if error < 1e-7:
-    #                 delta *= 0.1
-
-    #             # Forward difference attempt
-    #             dp_test = dp_object_point.clone()
-    #             if plane.lower() == "sagittal":
-    #                 dp_test[0, 0] += delta
-    #             else:
-    #                 dp_test[0, 1] += delta
-
-    #             try:
-    #                 test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
-    #                 test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-
-    #                 # Check if ray is blocked
-    #                 if test_ray.ra.sum() == 0:
-    #                     # Try backward difference
-    #                     delta = -delta
-    #                     dp_test = dp_object_point.clone()
-    #                     if plane.lower() == "sagittal":
-    #                         dp_test[0, 0] += delta
-    #                     else:
-    #                         dp_test[0, 1] += delta
-
-    #                     test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
-    #                     test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-
-    #                     # If still blocked, increase damping and continue
-    #                     if test_ray.ra.sum() == 0:
-    #                         lamb = min(max_lambda, lamb * lambda_factor)
-    #                         if plane.lower() == "sagittal":
-    #                             dp_object_point[0, 0] *= 0.9
-    #                         else:
-    #                             dp_object_point[0, 1] *= 0.9
-    #                         continue
-
-    #                 # Calculate test error
-    #                 t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-    #                 test_intersection = test_ray.o + test_ray.d * t_test[..., None]
-    #                 test_error = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
-
-    #                 # Calculate Jacobian component
-    #                 J = (test_error - error) / delta
-
-    #                 # Prevent Jacobian from being zero or too small
-    #                 if abs(J) < 1e-12:
-    #                     J = 1e-12 if J >= 0 else -1e-12
-
-    #                 # Calculate DLS update
-    #                 JtJ = J * J
-    #                 dy = (-error * J) / (JtJ + lamb)
-
-    #                 # Dynamic limit update step
-    #                 if error < 1e-6:
-    #                     max_step = aper_radius * 0.001
-    #                 elif error < 1e-4:
-    #                     max_step = aper_radius * 0.01
-    #                 else:
-    #                     # Set different step sizes based on angle
-    #                     if fov_degrees < 5.0:
-    #                         max_step = aper_radius * 0.05
-    #                     elif fov_degrees < 9.0:
-    #                         max_step = aper_radius * 0.02
-    #                     else:
-    #                         max_step = aper_radius * 0.01
-
-    #                 dy = max(min(dy, max_step), -max_step)
-
-    #                 # Try updating
-    #                 test_point = dp_object_point.clone()
-    #                 if plane.lower() == "sagittal":
-    #                     test_point[0, 0] += dy
-    #                 else:
-    #                     test_point[0, 1] += dy
-
-    #                 test_ray = Ray(test_point, dp_direction, wvln=wvln, device=self.device)
-    #                 try:
-    #                     test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-    #                     if test_ray.ra.sum() > 0:
-    #                         t_new = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-    #                         new_intersection = test_ray.o + test_ray.d * t_new[..., None]
-    #                         new_error = torch.sqrt(new_intersection[..., 0] ** 2 + new_intersection[..., 1] ** 2).item()
-
-    #                         if new_error < error:
-    #                             # Update successful, reduce damping coefficient
-    #                             dp_object_point = test_point.clone()
-    #                             lamb = max(min_lambda, lamb / lambda_factor)
-
-    #                             # When error significantly decreases, reduce damping coefficient more aggressively
-    #                             if new_error < error * 0.1:
-    #                                 lamb = max(min_lambda, lamb / 2.0)
-    #                         else:
-    #                             # Update failed, increase damping coefficient
-    #                             lamb = min(max_lambda, lamb * lambda_factor)
-    #                     else:
-    #                         # Ray is blocked, increase damping coefficient
-    #                         lamb = min(max_lambda, lamb * lambda_factor)
-    #                 except Exception as e:
-    #                     # Ray tracing exception, increase damping coefficient
-    #                     lamb = min(max_lambda, lamb * lambda_factor)
-    #             except Exception as e:
-    #                 # Jacobian calculation failed, increase damping coefficient and adjust current position
-    #                 lamb = min(max_lambda, lamb * lambda_factor)
-    #                 if plane.lower() == "sagittal":
-    #                     dp_object_point[0, 0] *= 0.95
-    #                 else:
-    #                     dp_object_point[0, 1] *= 0.95
-
-    #         except Exception as e:
-    #             # Main ray tracing failed, adjust position and continue
-    #             correction_scale = 0.7 if "total internal reflection" in str(e) else 0.85
-    #             if plane.lower() == "sagittal":
-    #                 dp_object_point[0, 0] *= correction_scale
-    #             else:
-    #                 dp_object_point[0, 1] *= correction_scale
-    #             lamb = min(max_lambda, lamb * 1.5)
-    #             continue
-
-    #     # result
-    #     if best_distance <= tolerance:
-    #         # Verify best result
-    #         final_position = best_position.clone()
-
-    #         # If DLS approaches but does not meet the standard, try fine optimization
-    #         if best_distance < 1e-6:
-    #             # Use best position to reinitialize
-    #             dp_object_point = best_position.clone()
-    #             lamb = 0.01  # Use very small damping for fine optimization
-
-    #             # Fine optimization loop
-    #             for i in range(20):
-    #                 ray = Ray(dp_object_point, dp_direction, wvln=wvln, device=self.device)
-    #                 ray, _ = self.trace(ray, lens_range=range(0, self.aper_idx + 1))
-
-    #                 t = (aper_z - ray.o[..., 2]) / ray.d[..., 2]
-    #                 intersection = ray.o + ray.d * t[..., None]
-    #                 error = torch.sqrt(intersection[..., 0] ** 2 + intersection[..., 1] ** 2).item()
-
-    #                 if error < tolerance:
-    #                     best_distance = error
-    #                     final_position = dp_object_point.clone()
-    #                     break
-
-    #                 # Use very small increment
-    #                 delta = min(1e-8, error * 0.01)
-    #                 dp_test = dp_object_point.clone()
-    #                 if plane.lower() == "sagittal":
-    #                     dp_test[0, 0] += delta
-    #                 else:
-    #                     dp_test[0, 1] += delta
-
-    #                 test_ray = Ray(dp_test, dp_direction, wvln=wvln, device=self.device)
-    #                 test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-
-    #                 t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-    #                 test_intersection = test_ray.o + test_ray.d * t_test[..., None]
-    #                 test_error = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
-
-    #                 J = (test_error - error) / delta
-    #                 if abs(J) < 1e-15:
-    #                     J = 1e-15 if J >= 0 else -1e-15
-
-    #                 # Very small damping update
-    #                 dy = -error * J / (J * J + 1e-4)
-    #                 max_step = error * 0.5
-    #                 dy = max(min(dy, max_step), -max_step)
-
-    #                 if plane.lower() == "sagittal":
-    #                     dp_object_point[0, 0] += dy
-    #                 else:
-    #                     dp_object_point[0, 1] += dy
-
-    #                 if error < best_distance:
-    #                     best_distance = error
-    #                     final_position = dp_object_point.clone()
-
-    #             # If already reached the required accuracy, return the best position directly
-    #             if best_distance <= tolerance:
-    #                 # Final verification
-    #                 final_ray = Ray(final_position, dp_direction, wvln=wvln, device=self.device)
-    #                 final_ray, _ = self.trace(final_ray, lens_range=range(0, self.aper_idx + 1))
-    #                 t_final = (aper_z - final_ray.o[..., 2]) / final_ray.d[..., 2]
-    #                 final_intersection = final_ray.o + final_ray.d * t_final[..., None]
-    #                 final_distance = torch.sqrt(final_intersection[..., 0] ** 2 + final_intersection[..., 1] ** 2).item()
-
-    #                 if final_distance <= tolerance:
-    #                     best_distance = final_distance
-    #                     best_position = final_position.clone()
-
-    #     return best_position, best_distance
-
-    # def _calc_chief_ray_infinite_bisection(self, wvln, tolerance, plane, 
-    #                                   aper_z, initial_z, fixed_direction, 
-    #                                   evaluate_point, tan_fov,dls_position, 
-    #                                   dls_distance):
-    #     """Calculate the chief ray using infinite bisection"""
-    #     # Inherit the best result from DLS
-    #     best_position = dls_position.clone()
-    #     best_distance = dls_distance
-        
-    #     # 1. Stage one: Wide range exploration
-    #     scales_wide = []
-
-    #     # Add more extreme values to explore
-    #     for s in [-2.0, -1.5, -1.0, -0.8, -0.6, -0.5, -0.4, -0.3, -0.2, -0.15, -0.1, -0.08, -0.06,
-    #             -0.04, -0.02, -0.01, -0.005, 0, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.15,
-    #             0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0]:
-    #         scales_wide.append(s)
-
-    #     # Add random exploration points to increase coverage
-    #     import random
-    #     for _ in range(15):
-    #         # Uniformly distributed random values, covering more extreme regions
-    #         s = (random.random() * 4.0 - 2.0)
-    #         scales_wide.append(s)
-
-    #     valid_results = []
-
-    #     for scale in scales_wide:
-    #         val = tan_fov * (aper_z - initial_z) * scale
-    #         if plane.lower() == "sagittal":
-    #             point_coord = val
-    #         else:
-    #             point_coord = val
-
-    #         error = evaluate_point(point_coord)
-
-    #         if error < float('inf'):
-    #             valid_results.append((point_coord, error))
-
-    #     # Check if any valid points are found
-    #     if not valid_results:
-    #         # If DLS method has returned a finite error, use DLS result
-    #         if best_distance < float('inf'):
-    #             return best_position, best_distance
-    #         else:
-    #             # Use very conservative initial estimate
-    #             val_guess = tan_fov * (aper_z - initial_z) * 0.01
-    #             if plane.lower() == "sagittal":
-    #                 return torch.tensor([[val_guess, 0.0, initial_z]], device=self.device), float('inf')
-    #             else:
-    #                 return torch.tensor([[0.0, val_guess, initial_z]], device=self.device), float('inf')
-
-    #     # Sort by error
-    #     valid_results.sort(key=lambda x: x[1])
-
-    #     # 2. Stage two: Adaptive bisection search exploration
-    #     best_val, best_error = valid_results[0]
-
-    #     # If already better than DLS result, update best value
-    #     if best_error < best_distance:
-    #         best_distance = best_error
-    #         if plane.lower() == "sagittal":
-    #             best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device, dtype=torch.float64)
-    #         else:
-    #             best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device, dtype=torch.float64)
-
-    #     # Analyze valid point distribution to find the most promising region
-    #     val_values = [r[0] for r in valid_results]
-    #     min_val = min(val_values)
-    #     max_val = max(val_values)
-
-    #     # If the valid region range is too large, shrink to the best point nearby
-    #     if max_val - min_val > abs(tan_fov * (aper_z - initial_z)):
-    #         # Select the region containing the first 3 best points
-    #         top_val_values = [r[0] for r in valid_results[:min(3, len(valid_results))]]
-    #         min_val = min(top_val_values) - abs(tan_fov * (aper_z - initial_z)) * 0.1
-    #         max_val = max(top_val_values) + abs(tan_fov * (aper_z - initial_z)) * 0.1
-
-    #     # Use bisection for more detailed search
-    #     depth = 0
-    #     max_depth = 12  # Control bisection search depth
-
-    #     # Bisection search process
-    #     while depth < max_depth and (max_val - min_val) > tolerance * 10 and best_error > tolerance:
-    #         depth += 1
-    #         mid_val = (min_val + max_val) / 2
-
-    #         # Create 5 test points
-    #         test_points = [
-    #             min_val,
-    #             min_val + (max_val - min_val) * 0.25,
-    #             mid_val,
-    #             min_val + (max_val - min_val) * 0.75,
-    #             max_val
-    #         ]
-
-    #         # Evaluate all test points
-    #         test_results = []
-    #         for val in test_points:
-    #             error = evaluate_point(val)
-    #             if error < float('inf'):
-    #                 test_results.append((val, error))
-
-    #         if not test_results:
-    #             # Expand search range
-    #             range_expansion = (max_val - min_val) * 0.5
-    #             min_val = min_val - range_expansion
-    #             max_val = max_val + range_expansion
-    #             continue
-
-    #         # Update best result
-    #         test_results.sort(key=lambda x: x[1])
-    #         new_best_val, new_best_error = test_results[0]
-
-    #         if new_best_error < best_error:
-    #             best_val = new_best_val
-    #             best_error = new_best_error
-
-    #             # Update global best result
-    #             if best_error < best_distance:
-    #                 best_distance = best_error
-    #                 if plane.lower() == "sagittal":
-    #                     best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
-    #                                                 dtype=torch.float64)
-    #                 else:
-    #                     best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
-    #                                                 dtype=torch.float64)
-
-    #         # Update search range - select the region with the smallest error
-    #         if len(test_results) >= 3:
-    #             # Find the minimum and second minimum error points
-    #             best_idx = test_points.index(test_results[0][0])
-
-    #             # Select new search range based on the best point position
-    #             if best_idx == 0:
-    #                 # Best point is on the left, extend search range to the left
-    #                 max_val = test_points[1]
-    #                 min_val = min_val - (max_val - min_val) * 0.5
-    #             elif best_idx == len(test_points) - 1:
-    #                 # Best point is on the right, extend search range to the right
-    #                 min_val = test_points[-2]
-    #                 max_val = max_val + (max_val - min_val) * 0.5
-    #             else:
-    #                 # Best point is in the middle, shrink range
-    #                 left_neighbor = test_points[best_idx - 1]
-    #                 right_neighbor = test_points[best_idx + 1]
-    #                 min_val = left_neighbor
-    #                 max_val = right_neighbor
-    #         else:
-    #             # Not enough points, keep current range and continue searching
-    #             pass
-
-    #     # 3. Stage three: Local fine grid search
-    #     if best_error > tolerance:
-    #         # Determine fine search range
-    #         fine_range = max(abs(best_val) * 1e-5, tolerance * 100)
-    #         val_min = best_val - fine_range
-    #         val_max = best_val + fine_range
-
-    #         # Create fine grid
-    #         num_points = 21
-    #         fine_grid = torch.linspace(val_min, val_max, num_points, device=self.device).double()
-
-    #         for val in fine_grid:
-    #             val_item = val.item()
-    #             error = evaluate_point(val_item)
-
-    #             if error < float('inf') and error < best_error:
-    #                 best_val = val_item
-    #                 best_error = error
-
-    #                 # Update global best result
-    #                 if best_error < best_distance:
-    #                     best_distance = best_error
-    #                     if plane.lower() == "sagittal":
-    #                         best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
-    #                                                     dtype=torch.float64)
-    #                     else:
-    #                         best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
-    #                                                     dtype=torch.float64)
-
-    #                 if error < tolerance:
-    #                     break
-
-    #     # 4. Stage four: Final ultra-fine optimization
-    #     if best_error > tolerance and best_error < 1e-6:
-    #         # Create a much finer grid
-    #         ultra_fine_range = max(abs(best_val) * 1e-7, tolerance)
-    #         val_min = best_val - ultra_fine_range
-    #         val_max = best_val + ultra_fine_range
-
-    #         # Create a much finer grid
-    #         num_points = 31
-    #         ultra_fine_grid = torch.linspace(val_min, val_max, num_points, device=self.device).double()
-
-    #         for val in ultra_fine_grid:
-    #             val_item = val.item()
-    #             error = evaluate_point(val_item)
-
-    #             if error < float('inf') and error < best_error:
-    #                 best_val = val_item
-    #                 best_error = error
-
-    #                 # Update global best result
-    #                 if best_error < best_distance:
-    #                     best_distance = best_error
-    #                     if plane.lower() == "sagittal":
-    #                         best_position = torch.tensor([[best_val, 0.0, initial_z]], device=self.device,
-    #                                                     dtype=torch.float64)
-    #                     else:
-    #                         best_position = torch.tensor([[0.0, best_val, initial_z]], device=self.device,
-    #                                                     dtype=torch.float64)
-
-    #                 if error < tolerance:
-    #                     break
-
-    #     # Final verification
-    #     final_ray = Ray(best_position, fixed_direction, wvln=wvln, device=self.device)
-    #     final_ray, _ = self.trace(final_ray, lens_range=range(0, self.aper_idx + 1))
-    #     t_final = (aper_z - final_ray.o[..., 2]) / final_ray.d[..., 2]
-    #     final_intersection = final_ray.o + final_ray.d * t_final[..., None]
-    #     final_distance = torch.sqrt(final_intersection[..., 0] ** 2 + final_intersection[..., 1] ** 2).item()
-
-    #     # Output final result
-    #     if final_distance <= tolerance:
-    #         return best_position, final_distance
-    #     else:
-    #         # Final precision not met, add additional optimization
-    #         for _ in range(10):
-    #             current_point = best_position.clone()
-    #             delta = tolerance * 0.1
-
-    #             # Try small adjustments to meet tolerance
-    #             for direction in [-1, 1]:
-    #                 test_point = current_point.clone()
-    #                 if plane.lower() == "sagittal":
-    #                     test_point[0, 0] += direction * delta
-    #                 else:
-    #                     test_point[0, 1] += direction * delta
-
-    #                 test_ray = Ray(test_point, fixed_direction, wvln=wvln, device=self.device)
-    #                 test_ray, _ = self.trace(test_ray, lens_range=range(0, self.aper_idx + 1))
-    #                 t_test = (aper_z - test_ray.o[..., 2]) / test_ray.d[..., 2]
-    #                 test_intersection = test_ray.o + test_ray.d * t_test[..., None]
-    #                 test_distance = torch.sqrt(test_intersection[..., 0] ** 2 + test_intersection[..., 1] ** 2).item()
-
-    #                 if test_distance < final_distance:
-    #                     final_distance = test_distance
-    #                     best_position = test_point.clone()
-
-    #                     if final_distance <= tolerance:
-    #                         return best_position, final_distance
-
-    #             delta /= 2
-
-    #         # Even if the final precision is not met, return the best result
-    #         return best_position, final_distance
-
     def find_aperture(self):
         """Find aperture. If the lens has no aperture, use the surface with the smallest radius."""
         self.aper_idx = None
@@ -2242,11 +1539,11 @@ class GeoLens(Lens):
     
     def calc_efl(self):
         """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
-        fov = 0.001 # paraxial fov in radian
-        chief_ray_o, chief_ray_d = self.calc_chief_ray(fov=fov*57.3)
+        fov = 0.0001 # paraxial fov in radian
+        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=fov * 180 / math.pi)
         ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
         ray, _ = self.trace(ray)
-        image_height = (ray.o[..., 0] + ray.d[..., 0] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2])
+        image_height = (ray.o[..., 1] + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2])
         eff_foclen = image_height / float(np.tan(fov))
         return eff_foclen.mean().item()
 
@@ -2497,26 +1794,65 @@ class GeoLens(Lens):
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
 
     @torch.no_grad()
-    def calc_chief_ray(self, fov, plane="sagittal"):
+    def calc_chief_ray_infinite(self, hfov, plane="meridional", chief_ray=True):
         """Compute chief ray for an incident angle.
         
         Args:
             fov (float): incident angle in degree.
-            plane (str): "sagittal" or "tangential".
+            plane (str): "sagittal" or "meridional".
+            chief_ray (bool): compute chief ray or edge ray.
+            num_points (int): number of points to sample.
         """
-        # Sample parallel rays from object space
-        ray = self.sample_parallel_2D(fov=fov, num_rays=SPP_CALC, entrance_pupil=True)
-        inc_ray = ray.clone()
+
+        # Convert hfov to radian
+        hfov = hfov * np.pi / 180.0
+
+        if plane == "sagittal":
+            idx = 0
+        else:
+            idx = 1
+
+        if hfov == 0:
+            return torch.tensor([0, 0, -10.0], device=self.device, dtype=torch.float32), torch.tensor(
+                [0, 0, 1], device=self.device, dtype=torch.float32)
         
+        if self.aper_idx == 0:
+            if idx == 0:
+                return torch.tensor([-10 * math.tan(hfov), 0, -10], device=self.device, dtype=torch.float32), torch.tensor(
+                    [math.sin(hfov), 0, math.cos(hfov)], device=self.device, dtype=torch.float32)
+            else:
+                return torch.tensor([0, -10 * math.tan(hfov), -10], device=self.device, dtype=torch.float32), torch.tensor(
+                    [0, math.sin(hfov), math.cos(hfov)], device=self.device, dtype=torch.float32)
+        
+        # Scale factor
+        pupilz, pupilx = self.calc_entrance_pupil()
+        scale = 0.45
+        delta = scale * pupilx * 2
+
+        # Sample parallel rays from object space
+        y_distance = math.tan(hfov) * (10.0 + pupilz)
+        min_y = (-pupilx - y_distance) + delta
+        max_y = (pupilx - y_distance) - delta
+        o1 = torch.zeros([SPP_CALC, 3])
+        o1[:, idx] = torch.linspace(min_y, max_y, SPP_CALC)
+        o1[:, 2] = -10.0
+        
+        o2 = torch.zeros([SPP_CALC, 3])
+        o2[:, idx] = torch.linspace(-pupilx + delta, pupilx - delta, SPP_CALC)
+        o2[:, 2] = pupilz
+
         # Trace until the aperture
+        ray = Ray(o1, o2 - o1, device=self.device)
+        inc_ray = ray.clone()
         ray, _ = self.trace(
-            ray, lens_range=list(range(0, self.aper_idx))
+            ray, lens_range=list(range(0, self.aper_idx + 1))
         )
 
         # Look for the ray that is closest to the optical axis
-        center_x = torch.min(torch.abs(ray.o[:, 0]))
-        center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item() # int
-        chief_ray_o, chief_ray_d = inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
+        center_x = torch.min(torch.abs(ray.o[:, idx]))
+        center_idx = torch.where(torch.abs(ray.o[:, idx]) == center_x)[0][0].item() # int
+        chief_ray_o = inc_ray.o[center_idx, :]
+        chief_ray_d = torch.tensor([0, math.sin(hfov), math.cos(hfov)], device=self.device)
 
         return chief_ray_o, chief_ray_d
 
@@ -3526,23 +2862,22 @@ class GeoLens(Lens):
                 dpi=300,
             )
 
-    def draw_distortion_1D(self, hfov, filename=None, num_points=GEO_GRID, plane="sagittal"):
+    def draw_distortion_1D(self, hfov, filename=None, num_points=GEO_GRID, plane="meridional"):
         """Draw distortion.
 
         Args:
             hfov: view angle (degrees)
             filename: Save filename. Defaults to None. 
-            num_points: Number of points. Defaults to 101.
+            num_points: Number of points. Defaults to GEO_GRID.
             plane: Meridional or sagittal. Defaults to meridional.
         """
 
         # Sample view angles
         hfov_samples = np.linspace(0, hfov, num_points)
-        fov_samples = hfov_samples * (math.pi / 180)
         distortions = []
 
         # Calculate distortion
-        for fov_sample in fov_samples:
+        for fov_sample in hfov_samples:
             distortion = self.calc_distortion_1D(hfov=fov_sample, plane=plane)
             distortions.append(distortion)
 
