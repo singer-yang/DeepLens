@@ -251,9 +251,7 @@ class GeoLens(Lens):
             ray (Ray object): Ray object. Shape [num_rays, 3]
         """
         # Sample point on the object plane
-        ray_o = torch.tensor(
-            [depth * float(np.tan(fov / 57.3)), 0, depth]
-        )
+        ray_o = torch.tensor([depth * float(np.tan(fov / 57.3)), 0, depth])
         ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
 
         # Sample points (second point) on the pupil
@@ -1743,36 +1741,24 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def calc_exit_pupil(self, shrink_pupil=False):
-        """Sample **forward** rays to compute z coordinate and radius of exit pupil.
+        """Sample **forward** rays from aperture edge to sensor plane to compute exit pupil.
 
         Args:
-            shrink_pupil (bool): whether to shrink the pupil.
+            shrink_pupil (bool): shrink the pupil.
+
+        Returns:
+            avg_pupilz (float): z coordinate of exit pupil.
+            avg_pupilr (float): radius of exit pupil.
 
         Reference:
             [1] Exit pupil: how many rays can come from sensor to object space.
             [2] https://en.wikipedia.org/wiki/Exit_pupil
         """
-        return self.calc_entrance_pupil(entrance=False, shrink_pupil=shrink_pupil)
-
-    @torch.no_grad()
-    def calc_entrance_pupil(self, entrance=True, shrink_pupil=False):
-        """Sample **backward** rays, return z coordinate and radius of entrance pupil.
-
-        Args:
-            entrance (bool): whether to compute entrance pupil.
-            shrink_pupil (bool): whether to shrink the pupil.
-
-        Reference:
-            [1] Entrance pupil: how many rays can come from object space to sensor.
-            [2] https://en.wikipedia.org/wiki/Entrance_pupil: "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
-        """
         if self.aper_idx is None or hasattr(self, "aper_idx") is False:
-            if entrance:
-                return self.surfaces[0].d.item(), self.surfaces[0].r
-            else:
-                return self.surfaces[-1].d.item(), self.surfaces[-1].r
+            print("No aperture, use the last surface as exit pupil.")
+            return self.surfaces[-1].d.item(), self.surfaces[-1].r
 
-        # Sample M rays from edge of aperture to last surface.
+        # Sample rays from edge of aperture
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
@@ -1780,28 +1766,17 @@ class GeoLens(Lens):
 
         # Sample phi ranges from [-0.5rad, 0.5rad]
         phi = torch.linspace(-0.5, 0.5, SPP_CALC)
-        if entrance:
-            d = torch.stack(
-                (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
-            )
-        else:
-            d = torch.stack(
-                (torch.sin(phi), torch.zeros_like(phi), torch.cos(phi)), axis=-1
-            )
+        d = torch.stack(
+            (torch.sin(phi), torch.zeros_like(phi), torch.cos(phi)), axis=-1
+        )
 
         ray = Ray(ray_o, d, device=self.device)
 
-        # Ray tracing
-        if entrance:
-            # Trace from aperture edge to first surface
-            lens_range = range(0, self.aper_idx)
-            ray, _ = self.trace(ray, lens_range=lens_range)
-        else:
-            # Trace from aperture edge to last surface
-            lens_range = range(self.aper_idx + 1, len(self.surfaces))
-            ray, _ = self.trace(ray, lens_range=lens_range)
+        # Ray tracing from aperture edge to last surface
+        lens_range = range(self.aper_idx + 1, len(self.surfaces))
+        ray, _ = self.trace(ray, lens_range=lens_range)
 
-        # Compute intersection points. o1+d1*t1 = o2+d2*t2
+        # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
             [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
         )
@@ -1809,30 +1784,88 @@ class GeoLens(Lens):
             [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
+
+        # Handle the case where no intersection points are found or small pupil
         if len(intersection_points) == 0:
-            print("No intersection points found, use the first surface as pupil.")
-            if entrance:
-                avg_pupilz = self.surfaces[0].d.item()
-                avg_pupilx = self.surfaces[0].r
-            else:
-                avg_pupilz = self.surfaces[-1].d.item()
-                avg_pupilx = self.surfaces[-1].r
+            print("No intersection points found, use the last surface as pupil.")
+            avg_pupilr = self.surfaces[-1].r
+            avg_pupilz = self.surfaces[-1].d.item()
         else:
-            avg_pupilx = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
-        if avg_pupilx < EPSILON:
-            print("Small pupil is detected, use the first surface as pupil.")
-            if entrance:
-                avg_pupilz = self.surfaces[0].d.item()
-                avg_pupilx = self.surfaces[0].r
-            else:
+            if avg_pupilr < EPSILON:
+                print("Small pupil is detected, use the last surface as pupil.")
+                avg_pupilr = self.surfaces[-1].r
                 avg_pupilz = self.surfaces[-1].d.item()
-                avg_pupilx = self.surfaces[-1].r
 
         if shrink_pupil:
-            avg_pupilx *= 0.5
-        return avg_pupilz, avg_pupilx
+            avg_pupilr *= 0.5
+        return avg_pupilz, avg_pupilr
+
+    @torch.no_grad()
+    def calc_entrance_pupil(self, shrink_pupil=False):
+        """Sample **backward** rays, return z coordinate and radius of entrance pupil.
+
+        Args:
+            shrink_pupil (bool): shrink the pupil.
+
+        Returns:
+            avg_pupilz (float): z coordinate of entrance pupil.
+            avg_pupilr (float): radius of entrance pupil.
+
+        Reference:
+            [1] Entrance pupil: how many rays can come from object space to sensor.
+            [2] https://en.wikipedia.org/wiki/Entrance_pupil: "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
+        """
+        if self.aper_idx is None or hasattr(self, "aper_idx") is False:
+            print("No aperture, use the first surface as entrance pupil.")
+            return self.surfaces[0].d.item(), self.surfaces[0].r
+
+        # Sample rays from edge of aperture
+        aper_idx = self.aper_idx
+        aper_z = self.surfaces[aper_idx].d.item()
+        aper_r = self.surfaces[aper_idx].r
+        ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
+
+        # Sample phi ranges from [-0.5rad, 0.5rad]
+        phi = torch.linspace(-0.5, 0.5, SPP_CALC)
+        d = torch.stack(
+            (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
+        )
+
+        ray = Ray(ray_o, d, device=self.device)
+
+        # Ray tracing from aperture edge to first surface
+        lens_range = range(0, self.aper_idx)
+        ray, _ = self.trace(ray, lens_range=lens_range)
+
+        # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
+        ray_o = torch.stack(
+            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+        )
+        ray_d = torch.stack(
+            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+        )
+        intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
+
+        # Handle the case where no intersection points are found or small pupil
+        if len(intersection_points) == 0:
+            print("No intersection points found, use the first surface as pupil.")
+            avg_pupilr = self.surfaces[0].r
+            avg_pupilz = self.surfaces[0].d.item()
+        else:
+            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+
+            if avg_pupilr < EPSILON:
+                print("Small pupil is detected, use the first surface as pupil.")
+                avg_pupilr = self.surfaces[0].r
+                avg_pupilz = self.surfaces[0].d.item()
+
+        if shrink_pupil:
+            avg_pupilr *= 0.5
+        return avg_pupilz, avg_pupilr
 
     @staticmethod
     def compute_intersection_points_2d(origins, directions):
@@ -1922,13 +1955,17 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def set_fnum(self, fnum):
-        """Set F number and aperture radius using binary search."""
+        """Set F number and aperture radius using binary search.
+
+        Args:
+            fnum (float): F number.
+        """
         target_pupil_r = self.foclen / fnum / 2
 
         # Binary search to find aperture radius that gives desired exit pupil radius
         optim_aper_r = target_pupil_r
-        aper_r_min = 0.5 * target_pupil_r  # Start with small radius
-        aper_r_max = 2.0 * target_pupil_r  # Start with large radius
+        aper_r_min = 0.5 * target_pupil_r
+        aper_r_max = 2.0 * target_pupil_r
 
         for _ in range(8):
             self.surfaces[self.aper_idx].r = optim_aper_r
@@ -2058,9 +2095,11 @@ class GeoLens(Lens):
             valid_heights = ray_x_record[:, i + 1].abs()
             valid_heights = valid_heights[~torch.isnan(valid_heights)]
             if len(valid_heights) > 0:
-                 max_ray_height = valid_heights.max().item()
+                max_ray_height = valid_heights.max().item()
             else:
-                print(f"No valid rays for surface {i}, use the maximum height of the surface.")
+                print(
+                    f"No valid rays for surface {i}, use the maximum height of the surface."
+                )
                 max_ray_height = self.surfaces[i].r
 
             if max_ray_height > 0:
@@ -3547,16 +3586,16 @@ def create_lens(
 def create_surface(surface_type, d_total, aper_r, imgh, mat):
     """Create a surface object based on the surface type."""
     if mat == "air":
-         c = - np.random.rand() * 0.001
+        c = -float(np.random.rand()) * 0.001
     else:
-        c = np.random.rand() * 0.001
+        c = float(np.random.rand()) * 0.001
     r = max(imgh / 2, aper_r)
 
     if surface_type == "Spheric":
         return Spheric(r=r, d=d_total, c=c, mat2=mat)
     elif surface_type == "Aspheric":
         ai = np.random.randn(7).astype(np.float32) * 1e-30
-        k = np.random.randn() * 0.001
+        k = float(np.random.rand()) * 0.001
         return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
     else:
         raise Exception("Surface type not supported yet.")
