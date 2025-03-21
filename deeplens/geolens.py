@@ -1794,13 +1794,13 @@ class GeoLens(Lens):
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
 
     @torch.no_grad()
-    def calc_chief_ray_infinite(self, hfov, plane="meridional", chief_ray=True):
+    def calc_chief_ray_infinite(self, hfov, depth=DEPTH, plane="meridional"):
         """Compute chief ray for an incident angle.
         
         Args:
             fov (float): incident angle in degree.
             plane (str): "sagittal" or "meridional".
-            chief_ray (bool): compute chief ray or edge ray.
+            chief_ray (bool): compute chief ray or edge ray. Todo.
             num_points (int): number of points to sample.
         """
 
@@ -1813,29 +1813,30 @@ class GeoLens(Lens):
             idx = 1
 
         if hfov == 0:
-            return torch.tensor([0, 0, -10.0], device=self.device, dtype=torch.float32), torch.tensor(
+            return torch.tensor([0, 0, depth], device=self.device, dtype=torch.float32), torch.tensor(
                 [0, 0, 1], device=self.device, dtype=torch.float32)
         
         if self.aper_idx == 0:
             if idx == 0:
-                return torch.tensor([-10 * math.tan(hfov), 0, -10], device=self.device, dtype=torch.float32), torch.tensor(
+                return torch.tensor([depth * math.tan(hfov), 0, depth], device=self.device, dtype=torch.float32), torch.tensor(
                     [math.sin(hfov), 0, math.cos(hfov)], device=self.device, dtype=torch.float32)
             else:
-                return torch.tensor([0, -10 * math.tan(hfov), -10], device=self.device, dtype=torch.float32), torch.tensor(
+                return torch.tensor([0, depth * math.tan(hfov), depth], device=self.device, dtype=torch.float32), torch.tensor(
                     [0, math.sin(hfov), math.cos(hfov)], device=self.device, dtype=torch.float32)
         
         # Scale factor
-        pupilz, pupilx = self.calc_entrance_pupil()
+        # For lenses with large entrance pupil aberrations, the range can be relaxed, but ray density must be increased.
         scale = 0.45
+        pupilz, pupilx = self.calc_entrance_pupil()
         delta = scale * pupilx * 2
 
         # Sample parallel rays from object space
-        y_distance = math.tan(hfov) * (10.0 + pupilz)
+        y_distance = math.tan(hfov) * (depth + pupilz)
         min_y = (-pupilx - y_distance) + delta
         max_y = (pupilx - y_distance) - delta
         o1 = torch.zeros([SPP_CALC, 3])
         o1[:, idx] = torch.linspace(min_y, max_y, SPP_CALC)
-        o1[:, 2] = -10.0
+        o1[:, 2] = depth
         
         o2 = torch.zeros([SPP_CALC, 3])
         o2[:, idx] = torch.linspace(-pupilx + delta, pupilx - delta, SPP_CALC)
@@ -1850,7 +1851,7 @@ class GeoLens(Lens):
 
         # Look for the ray that is closest to the optical axis
         center_x = torch.min(torch.abs(ray.o[:, idx]))
-        center_idx = torch.where(torch.abs(ray.o[:, idx]) == center_x)[0][0].item() # int
+        center_idx = torch.where(torch.abs(ray.o[:, idx]) == center_x)[0][0].item()
         chief_ray_o = inc_ray.o[center_idx, :]
         chief_ray_d = torch.tensor([0, math.sin(hfov), math.cos(hfov)], device=self.device)
 
