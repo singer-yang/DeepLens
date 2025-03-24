@@ -17,7 +17,6 @@ import json
 import logging
 import math
 import os
-import random
 from datetime import datetime
 
 import cv2 as cv
@@ -43,10 +42,10 @@ from .optics.basics import (
     WAVE_RGB,
     init_device,
 )
-from .optics.materials import SELLMEIER_TABLE, Material
+from .optics.materials import Material
 from .optics.monte_carlo import forward_integral
 from .optics.ray import Ray
-from .optics.surfaces import (
+from .optics.geometric_surface import (
     Aperture,
     Aspheric,
     Cubic,
@@ -65,11 +64,10 @@ from .utils import (
     normalize_ImageNet,
     set_logger,
 )
+from .geolens_utils import draw_lens_layout, draw_layout_3d
 
 
 class GeoLens(Lens):
-    """Geolens class. A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate."""
-
     def __init__(self, filename=None):
         """Initialize a geometric lens."""
         self.device = init_device()
@@ -127,6 +125,7 @@ class GeoLens(Lens):
         depth=0.0,
         num_rays=7,
         wvln=DEFAULT_WAVE,
+        plane="sagittal",
         entrance_pupil=False,
         forward=True,
     ):
@@ -151,7 +150,14 @@ class GeoLens(Lens):
         x = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
         y = torch.zeros_like(x)
         z = torch.full_like(x, pupilz)
-        ray_o = torch.stack((x, y, z), axis=-1)  # shape [num_rays, 3]
+
+        # Form ray origins
+        if plane == "sagittal":
+            ray_o = torch.stack((x, y, z), axis=-1)  # shape [num_rays, 3]
+        elif plane == "meridional":
+            ray_o = torch.stack((y, x, z), axis=-1)  # shape [num_rays, 3]
+        else:
+            raise ValueError(f"Invalid plane: {plane}")
 
         # Sample ray directions
         if forward:
@@ -163,7 +169,13 @@ class GeoLens(Lens):
             dy = torch.zeros_like(x)
             dz = torch.full_like(x, -np.cos(fov / 57.3))
 
-        ray_d = torch.stack((dx, dy, dz), axis=-1)  # shape [num_rays, 3]
+        # Form ray directions
+        if plane == "sagittal":
+            ray_d = torch.stack((dx, dy, dz), axis=-1)  # shape [num_rays, 3]
+        elif plane == "meridional":
+            ray_d = torch.stack((dy, dx, dz), axis=-1)  # shape [num_rays, 3]
+        else:
+            raise ValueError(f"Invalid plane: {plane}")
 
         # Form rays
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
@@ -497,6 +509,10 @@ class GeoLens(Lens):
     # ====================================================================================
     # Ray tracing
     # ====================================================================================
+    def __call__(self, ray):
+        """Forward ray tracing. The input and output of a GeoLens object are both Ray objects."""
+        return self.trace(ray)
+
     def trace(self, ray, lens_range=None, record=False):
         """Ray tracing function. Forward or backward ray tracing is automatically determined by ray directions.
 
@@ -1404,7 +1420,7 @@ class GeoLens(Lens):
         pass
 
     def distortion(self, depth=DEPTH, grid_size=64):
-        """Compute distortion map.
+        """Compute distortion map at a given depth.
 
         Args:
             depth (float): depth of the point source.
@@ -1437,24 +1453,19 @@ class GeoLens(Lens):
         Returns:
             distortion (float): distortion at the specific field angle
         """
-        # 1. Calculate ideal image height
-        # ========>
+        # Calculate ideal image height
         effective_foclen = self.calc_efl()
         ideal_image_height = effective_foclen * math.tan(hfov * math.pi / 180)
-        # ========>
 
-        # 2. Calculate actual image height
         # Calculate chief ray
-        # ========>
         chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=hfov, plane=plane)
+        # chief_ray_o, chief_ray_d = self.calc_chief_ray(hfov=hfov, plane=plane)
         ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
-        # ========>
 
-        # Trace chief ray
         ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
         t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
-        
-        # 3. Calculate distortion
+
+        # Calculate actual image height
         if plane == "sagittal":
             actual_image_height = abs(ray.o[..., 0] + ray.d[..., 0] * t)
         elif plane == "meridional":
@@ -1462,6 +1473,7 @@ class GeoLens(Lens):
         else:
             raise ValueError(f"Invalid plane: {plane}")
 
+        # Calculate distortion
         distortion = (actual_image_height - ideal_image_height) / ideal_image_height
 
         # Handle the case where ideal_image_height is 0 or very close to 0
@@ -1469,7 +1481,7 @@ class GeoLens(Lens):
             distortion = torch.tensor(0.0, device=self.device)
 
         return distortion
-        
+
     # ====================================================================================
     # Geometrical optics calculation
     # ====================================================================================
@@ -1494,14 +1506,27 @@ class GeoLens(Lens):
             )
         return diff_surf_range
 
+    @torch.no_grad()
     def calc_foclen(self):
-        """Calculate the focus length."""
-        if (
-            self.r_sensor < 8
-        ):  # Cellphone lens, we usually use EFL to describe the lens.
-            return self.calc_efl()
-        else:  # Camera lens, we use the to describe the lens.
-            return self.calc_bfl()
+        """Calculate the effective focal length."""
+        return self.calc_efl()
+
+    @torch.no_grad()
+    def calc_efl(self):
+        """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
+        # Trace a paraxial chief ray
+        fov = 0.0001  # paraxial fov in radian
+        chief_ray_o, chief_ray_d = self.calc_chief_ray(fov=fov * 180 / math.pi)
+        ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
+        ray, _ = self.trace(ray)
+
+        # Compute the effective focal length
+        image_height = (
+            ray.o[..., 0]
+            + ray.d[..., 0] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
+        )
+        eff_foclen = image_height / float(np.tan(fov))
+        return eff_foclen.mean().item()
 
     @torch.no_grad()
     def calc_bfl(self, wvln=DEFAULT_WAVE):
@@ -1528,23 +1553,7 @@ class GeoLens(Lens):
 
         return bfl
 
-    # def calc_efl_old(self):
-    #     """Compute effective focal length (EFL). Effctive focal length is also commonly used to compute F/#.
-
-    #     EFL: Defined by FoV and sensor radius.
-    #     """
-    #     return self.r_sensor / math.tan(self.hfov)
-    
-    def calc_efl(self):
-        """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
-        fov = 0.0001 # paraxial fov in radian
-        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=fov * 180 / math.pi)
-        ray = Ray(chief_ray_o, chief_ray_d, wvln=DEFAULT_WAVE, device=self.device)
-        ray, _ = self.trace(ray)
-        image_height = (ray.o[..., 1] + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2])
-        eff_foclen = image_height / float(np.tan(fov))
-        return eff_foclen.mean().item()
-
+    @torch.no_grad()
     def calc_eqfl(self):
         """35mm equivalent focal length. For cellphone lens, we usually use EFL to describe the lens.
 
@@ -1767,8 +1776,7 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def chief_ray(self):
-        """Compute chief ray from sensor to object space. We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture.
-        """
+        """Compute chief ray from sensor to object space. We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture."""
         # sample rays with shape [SPP_CALC, 3]
         pupilz, pupilx = self.calc_exit_pupil()
         o1 = torch.zeros([SPP_CALC, 3])
@@ -1792,9 +1800,40 @@ class GeoLens(Lens):
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
 
     @torch.no_grad()
+    def calc_chief_ray(self, fov, plane="sagittal"):
+        """Compute chief ray for an incident angle. TODO: if chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
+
+        Args:
+            fov (float): incident angle in degree.
+            plane (str): "sagittal" or "meridional".
+
+        Returns:
+            chief_ray_o (torch.Tensor): origin of chief ray.
+            chief_ray_d (torch.Tensor): direction of chief ray.
+
+        Note:
+            It is 2D ray tracing, for 3D chief ray, we can shrink the pupil, trace rays, calculate the centroid as the chief ray.
+        """
+        # Sample parallel rays from object space
+        ray = self.sample_parallel_2D(
+            fov=fov, num_rays=SPP_CALC, entrance_pupil=True, plane=plane
+        )
+        inc_ray = ray.clone()
+
+        # Trace until the aperture
+        ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
+
+        # Look for the ray that is closest to the optical axis
+        center_x = torch.min(torch.abs(ray.o[:, 0]))
+        center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item()  # int
+        chief_ray_o, chief_ray_d = inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
+
+        return chief_ray_o, chief_ray_d
+
+    @torch.no_grad()
     def calc_chief_ray_infinite(self, hfov, depth=DEPTH, plane="meridional"):
         """Compute chief ray for an incident angle.
-        
+
         Args:
             fov (float): incident angle in degree.
             plane (str): "sagittal" or "meridional".
@@ -1803,7 +1842,7 @@ class GeoLens(Lens):
         """
 
         # Convert hfov to radian
-        hfov = hfov * np.pi / 180.0
+        hfov = hfov * float(np.pi / 180.0)
 
         if plane == "sagittal":
             idx = 0
@@ -1811,17 +1850,32 @@ class GeoLens(Lens):
             idx = 1
 
         if hfov == 0:
-            return torch.tensor([0, 0, depth], device=self.device, dtype=torch.float32), torch.tensor(
-                [0, 0, 1], device=self.device, dtype=torch.float32)
-        
+            return torch.tensor(
+                [0, 0, depth], device=self.device, dtype=torch.float32
+            ), torch.tensor([0, 0, 1], device=self.device, dtype=torch.float32)
+
         if self.aper_idx == 0:
             if idx == 0:
-                return torch.tensor([depth * math.tan(hfov), 0, depth], device=self.device, dtype=torch.float32), torch.tensor(
-                    [math.sin(hfov), 0, math.cos(hfov)], device=self.device, dtype=torch.float32)
+                return torch.tensor(
+                    [depth * math.tan(hfov), 0, depth],
+                    device=self.device,
+                    dtype=torch.float32,
+                ), torch.tensor(
+                    [math.sin(hfov), 0, math.cos(hfov)],
+                    device=self.device,
+                    dtype=torch.float32,
+                )
             else:
-                return torch.tensor([0, depth * math.tan(hfov), depth], device=self.device, dtype=torch.float32), torch.tensor(
-                    [0, math.sin(hfov), math.cos(hfov)], device=self.device, dtype=torch.float32)
-        
+                return torch.tensor(
+                    [0, depth * math.tan(hfov), depth],
+                    device=self.device,
+                    dtype=torch.float32,
+                ), torch.tensor(
+                    [0, math.sin(hfov), math.cos(hfov)],
+                    device=self.device,
+                    dtype=torch.float32,
+                )
+
         # Scale factor
         # For lenses with large entrance pupil aberrations, the range can be relaxed, but ray density must be increased.
         scale = 0.45
@@ -1835,7 +1889,7 @@ class GeoLens(Lens):
         o1 = torch.zeros([SPP_CALC, 3])
         o1[:, idx] = torch.linspace(min_y, max_y, SPP_CALC)
         o1[:, 2] = depth
-        
+
         o2 = torch.zeros([SPP_CALC, 3])
         o2[:, idx] = torch.linspace(-pupilx + delta, pupilx - delta, SPP_CALC)
         o2[:, 2] = pupilz
@@ -1843,15 +1897,15 @@ class GeoLens(Lens):
         # Trace until the aperture
         ray = Ray(o1, o2 - o1, device=self.device)
         inc_ray = ray.clone()
-        ray, _ = self.trace(
-            ray, lens_range=list(range(0, self.aper_idx + 1))
-        )
+        ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx + 1)))
 
         # Look for the ray that is closest to the optical axis
         center_x = torch.min(torch.abs(ray.o[:, idx]))
         center_idx = torch.where(torch.abs(ray.o[:, idx]) == center_x)[0][0].item()
         chief_ray_o = inc_ray.o[center_idx, :]
-        chief_ray_d = torch.tensor([0, math.sin(hfov), math.cos(hfov)], device=self.device)
+        chief_ray_d = torch.tensor(
+            [0, math.sin(hfov), math.cos(hfov)], device=self.device
+        )
 
         return chief_ray_o, chief_ray_d
 
@@ -2340,8 +2394,7 @@ class GeoLens(Lens):
 
         # Render an image, compute PSNR and SSIM
         if render:
-            if depth == float("inf"):
-                depth = DEPTH
+            depth = DEPTH if depth == float("inf") else depth
             img_org = cv.cvtColor(cv.imread("./datasets/IQ/img1.png"), cv.COLOR_BGR2RGB)
             self.analysis_rendering(
                 img_org,
@@ -2363,345 +2416,31 @@ class GeoLens(Lens):
         lens_title=None,
     ):
         """Plot lens layout with ray tracing."""
-        num_rays = 11
-        num_views = 3
+        draw_lens_layout(
+            self,
+            filename,
+            depth=depth,
+            entrance_pupil=entrance_pupil,
+            zmx_format=zmx_format,
+            multi_plot=multi_plot,
+            lens_title=lens_title,
+        )
 
-        # Lens title
-        if lens_title is None:
-            if self.aper_idx is not None:
-                fnum = self.foclen / self.calc_entrance_pupil()[1] / 2
-                lens_title = f"FoV{round(2 * self.hfov * 57.3, 1)}({int(self.calc_eqfl())}mm EFL)_F/{round(fnum, 2)}_DIAG{round(self.r_sensor * 2, 2)}mm_FocLen{round(self.foclen, 2)}mm"
-            else:
-                lens_title = f"FoV{round(2 * self.hfov * 57.3, 1)}({int(self.calc_eqfl())}mm EFL)_DIAG{round(self.r_sensor * 2, 2)}mm_FocLen{round(self.foclen, 2)}mm"
-
-        # Draw lens layout
-        if not multi_plot:
-            colors_list = ["#CC0000", "#006600", "#0066CC"]
-            views = np.linspace(0, float(np.rad2deg(self.hfov) * 0.99), num=num_views)
-            ax, fig = self.draw_setup_2d(zmx_format=zmx_format)
-
-            for i, view in enumerate(views):
-                # Sample rays, shape (num_view, num_rays, 3)
-                if depth == float("inf"):
-                    ray = self.sample_parallel_2D(
-                        fov=view,
-                        wvln=WAVE_RGB[2 - i],
-                        num_rays=num_rays,
-                        entrance_pupil=entrance_pupil,
-                    )  # shape (num_rays, 3)
-                else:
-                    ray = self.sample_point_source_2D(
-                        fov=view,
-                        depth=depth,
-                        num_rays=num_rays,
-                        wvln=WAVE_RGB[2 - i],
-                        entrance_pupil=entrance_pupil,
-                    )  # shape (num_rays, 3)
-
-                # Trace rays to sensor and plot ray paths
-                _, ray_o_record = self.trace2sensor(ray=ray, record=True)
-                ax, fig = self.draw_raytraces_2d(
-                    ray_o_record, ax=ax, fig=fig, color=colors_list[i]
-                )
-
-            ax.axis("off")
-            ax.set_title(lens_title, fontsize=10)
-            if filename.endswith(".png"):
-                fig.savefig(filename, format="png", dpi=600)
-            else:
-                raise ValueError("Invalid file extension")
-            plt.close()
-
-        else:
-            views = np.linspace(0, np.rad2deg(self.hfov) * 0.99, num=num_views)
-            colors_list = ["#CC0000", "#006600", "#0066CC"]
-            fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-            fig.suptitle(lens_title)
-
-            for i, wvln in enumerate(WAVE_RGB):
-                ax = axs[i]
-                ax, fig = self.draw_setup_2d(ax=ax, fig=fig, zmx_format=zmx_format)
-
-                for view in views:
-                    if depth == float("inf"):
-                        ray = self.sample_parallel_2D(
-                            fov=view,
-                            num_rays=num_rays,
-                            wvln=wvln,
-                            entrance_pupil=entrance_pupil,
-                        )  # shape (num_rays, 3)
-                    else:
-                        ray = self.sample_point_source_2D(
-                            fov=view,
-                            depth=depth,
-                            num_rays=num_rays,
-                            wvln=wvln,
-                            entrance_pupil=entrance_pupil,
-                        )  # shape (num_rays, 3)
-
-                    ray_out, ray_o_record = self.trace2sensor(ray=ray, record=True)
-                    ax, fig = self.draw_raytraces_2d(
-                        ray_o_record, ax=ax, fig=fig, color=colors_list[i]
-                    )
-                    ax.axis("off")
-
-            if filename.endswith(".png"):
-                fig.savefig(filename, format="png", dpi=300)
-            else:
-                raise ValueError("Invalid file extension")
-            plt.close()
-
-    def draw_layout_3d(self, filename=None):
+    def draw_layout_3d(self, filename=None, figsize=(10, 6), view_angle=30, show=True):
         """Draw 3D layout of the lens system.
 
         Args:
             filename (str, optional): Path to save the figure. Defaults to None.
+            figsize (tuple): Figure size
+            view_angle (int): Viewing angle for the 3D plot
+            show (bool): Whether to display the figure
 
         Returns:
             fig, ax: Matplotlib figure and axis objects
         """
-        figsize = (10, 6)
-        view_angle = 30
-        show = True
-
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111, projection="3d")
-
-        # Enable depth sorting for proper occlusion
-        ax.set_proj_type(
-            "persp"
-        )  # Use perspective projection for better depth perception
-
-        # Draw each surface
-        for i, surf in enumerate(self.surfaces):
-            surf.draw_widget3D(ax)
-
-            # Connect current surface with previous surface if material is not air
-            if i > 0 and self.surfaces[i - 1].mat2.get_name() != "air":
-                # Get edge points of current and previous surfaces
-                theta = np.linspace(0, 2 * np.pi, 256)
-
-                # Current surface edge
-                curr_edge_x = surf.r * np.cos(theta)
-                curr_edge_y = surf.r * np.sin(theta)
-                curr_edge_z = np.array(
-                    [
-                        surf.surface_with_offset(
-                            torch.tensor(curr_edge_x[j], device=surf.device),
-                            torch.tensor(curr_edge_y[j], device=surf.device),
-                        ).item()
-                        for j in range(len(theta))
-                    ]
-                )
-
-                # Previous surface edge
-                prev_surf = self.surfaces[i - 1]
-                prev_edge_x = prev_surf.r * np.cos(theta)
-                prev_edge_y = prev_surf.r * np.sin(theta)
-                prev_edge_z = np.array(
-                    [
-                        prev_surf.surface_with_offset(
-                            torch.tensor(prev_edge_x[j], device=prev_surf.device),
-                            torch.tensor(prev_edge_y[j], device=prev_surf.device),
-                        ).item()
-                        for j in range(len(theta))
-                    ]
-                )
-
-                # Create a cylindrical surface connecting the two edges
-                theta_mesh, t_mesh = np.meshgrid(theta, np.array([0, 1]))
-
-                # Interpolate between previous and current surface edges
-                x_mesh = (
-                    prev_edge_x[None, :] * (1 - t_mesh) + curr_edge_x[None, :] * t_mesh
-                )
-                y_mesh = (
-                    prev_edge_y[None, :] * (1 - t_mesh) + curr_edge_y[None, :] * t_mesh
-                )
-                z_mesh = (
-                    prev_edge_z[None, :] * (1 - t_mesh) + curr_edge_z[None, :] * t_mesh
-                )
-
-                # Plot the connecting surface with sort_zpos for proper occlusion
-                surf = ax.plot_surface(
-                    z_mesh,
-                    x_mesh,
-                    y_mesh,
-                    color="lightblue",
-                    alpha=0.3,
-                    edgecolor="lightblue",
-                    linewidth=0.5,
-                    antialiased=True,
-                )
-                # Set the zorder based on the mean z position for better occlusion
-                surf._sort_zpos = np.mean(z_mesh)
-
-        # Draw sensor as a rectangle
-        if hasattr(self, "sensor_size") and hasattr(self, "d_sensor"):
-            # Get sensor dimensions
-            sensor_width = self.sensor_size[0]
-            sensor_height = self.sensor_size[1]
-            sensor_z = self.d_sensor.item()
-
-            # Create sensor vertices
-            half_width = sensor_width / 2
-            half_height = sensor_height / 2
-
-            # Define the corners of the rectangle
-            x = np.array(
-                [-half_width, half_width, half_width, -half_width, -half_width]
-            )
-            y = np.array(
-                [-half_height, -half_height, half_height, half_height, -half_height]
-            )
-            z = np.full_like(x, sensor_z)
-
-            # Plot the sensor rectangle
-            ax.plot(z, x, y, color="black", linewidth=1.5)
-
-            # Add a semi-transparent surface for the sensor
-            sensor_x, sensor_y = np.meshgrid(
-                np.linspace(-half_width, half_width, 2),
-                np.linspace(-half_height, half_height, 2),
-            )
-            sensor_z = np.full_like(sensor_x, sensor_z)
-            sensor_surf = ax.plot_surface(
-                sensor_z,
-                sensor_x,
-                sensor_y,
-                color="gray",
-                alpha=0.3,
-                edgecolor="black",
-                linewidth=0.5,
-            )
-            # Set the zorder for the sensor
-            sensor_surf._sort_zpos = sensor_z.mean()
-
-        # Set axis properties
-        ax.set_xlabel("Z")
-        ax.set_ylabel("X")
-        ax.set_zlabel("Y")
-        ax.view_init(elev=20, azim=-view_angle - 90)
-
-        # Make all axes have the same scale (unit step size)
-        ax.set_box_aspect([1, 1, 1])
-        ax.set_aspect("equal")
-
-        # Enable depth sorting for proper occlusion
-        from matplotlib.collections import PathCollection
-
-        for c in ax.collections:
-            if isinstance(c, PathCollection):
-                c.set_sort_zpos(c.get_offsets()[:, 2].mean())
-
-        plt.tight_layout()
-
-        if filename:
-            fig.savefig(f"{filename}.png", format="png", dpi=300)
-
-        if show:
-            plt.show()
-        else:
-            plt.close()
-
-        return fig, ax
-
-    def draw_raytraces_2d(self, ray_o_record, ax, fig, color="b"):
-        """Plot ray paths.
-
-        Args:
-            ray_o_record (list): list of intersection points.
-            ax (matplotlib.axes.Axes): matplotlib axes.
-            fig (matplotlib.figure.Figure): matplotlib figure.
-        """
-        # shape (num_view, num_rays, num_path, 2)
-        ray_o_record = torch.stack(ray_o_record, dim=-2).cpu().numpy()
-        if ray_o_record.ndim == 3:
-            ray_o_record = ray_o_record[None, ...]
-
-        for idx_view in range(ray_o_record.shape[0]):
-            for idx_ray in range(ray_o_record.shape[1]):
-                ax.plot(
-                    ray_o_record[idx_view, idx_ray, :, 2],
-                    ray_o_record[idx_view, idx_ray, :, 0],
-                    color,
-                    linewidth=0.8,
-                )
-
-                # ax.scatter(
-                #     ray_o_record[idx_view, idx_ray, :, 2],
-                #     ray_o_record[idx_view, idx_ray, :, 0],
-                #     "b",
-                #     marker="x",
-                # )
-
-        return ax, fig
-
-    def draw_setup_2d(
-        self,
-        ax=None,
-        fig=None,
-        color="k",
-        linestyle="-",
-        zmx_format=False,
-        fix_bound=False,
-    ):
-        """Draw lens layout in a 2D plot."""
-
-        # If no ax is given, generate a new one.
-        if ax is None and fig is None:
-            fig, ax = plt.subplots(figsize=(5, 5))
-
-        # Draw lens surfaces
-        for i, s in enumerate(self.surfaces):
-            s.draw_widget(ax)
-
-        # Connect two surfaces
-        for i in range(len(self.surfaces)):
-            if self.surfaces[i].mat2.n > 1.1:
-                s_prev = self.surfaces[i]
-                s = self.surfaces[i + 1]
-
-                r_prev = float(s_prev.r)
-                r = float(s.r)
-                sag_prev = s_prev.surface_with_offset(r_prev, 0.0).item()
-                sag = s.surface_with_offset(r, 0.0).item()
-
-                if zmx_format:
-                    if r > r_prev:
-                        z = np.array([sag_prev, sag_prev, sag])
-                        x = np.array([r_prev, r, r])
-                    else:
-                        z = np.array([sag_prev, sag, sag])
-                        x = np.array([r_prev, r, r])
-                else:
-                    z = np.array([sag_prev, sag])
-                    x = np.array([r_prev, r])
-
-                ax.plot(z, -x, color, linewidth=0.75)
-                ax.plot(z, x, color, linewidth=0.75)
-                s_prev = s
-
-        # Draw sensor
-        ax.plot(
-            [self.d_sensor.item(), self.d_sensor.item()],
-            [-self.r_sensor, self.r_sensor],
-            color,
+        return draw_layout_3d(
+            self, filename=filename, figsize=figsize, view_angle=view_angle, show=show
         )
-
-        # Figure size
-        if fix_bound:
-            ax.set_aspect("equal")
-            ax.set_xlim(-1, 7)
-            ax.set_ylim(-4, 4)
-        else:
-            ax.set_aspect("equal", adjustable="datalim", anchor="C")
-            ax.minorticks_on()
-            ax.set_xlim(-0.5, 7.5)
-            ax.set_ylim(-4, 4)
-            ax.autoscale()
-
-        return ax, fig
 
     @torch.no_grad()
     def draw_psf_radial(
@@ -2907,12 +2646,14 @@ class GeoLens(Lens):
                 dpi=300,
             )
 
-    def draw_distortion_1D(self, hfov, filename=None, num_points=GEO_GRID, plane="meridional"):
+    def draw_distortion_1D(
+        self, hfov, filename=None, num_points=GEO_GRID, plane="meridional"
+    ):
         """Draw distortion.
 
         Args:
             hfov: view angle (degrees)
-            filename: Save filename. Defaults to None. 
+            filename: Save filename. Defaults to None.
             num_points: Number of points. Defaults to GEO_GRID.
             plane: Meridional or sagittal. Defaults to meridional.
         """
@@ -2927,20 +2668,22 @@ class GeoLens(Lens):
             distortions.append(distortion)
 
         # Handle possible NaN values and convert to percentage
-        values = [t.item() * 100 if not math.isnan(t.item()) else 0 for t in distortions]
+        values = [
+            t.item() * 100 if not math.isnan(t.item()) else 0 for t in distortions
+        ]
 
         # Create figure
         fig, ax = plt.subplots(figsize=(8, 8))
         ax.set_title(f"{plane} Surface Distortion")
 
         # Draw distortion curve
-        ax.plot(values, hfov_samples, linestyle='-', color='g', linewidth=1.5)
+        ax.plot(values, hfov_samples, linestyle="-", color="g", linewidth=1.5)
 
         # Draw reference line (vertical line)
-        ax.axvline(x=0, color='k', linestyle='-', linewidth=0.8)
+        ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
 
         # Set grid
-        ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=1)
+        ax.grid(True, color="gray", linestyle="-", linewidth=0.5, alpha=1)
 
         # Dynamically adjust x-axis range
         value = max(abs(v) for v in values)
@@ -3543,251 +3286,18 @@ class GeoLens(Lens):
 
     def read_lens_zmx(self, filename="./test.zmx"):
         """Read the lens from .zmx file."""
-        # Read ZMX file
-        try:
-            with open(filename, "r", encoding="utf-8") as file:
-                lines = file.readlines()
-        except UnicodeDecodeError:
-            with open(filename, "r", encoding="utf-16") as file:
-                lines = file.readlines()
+        from .geolens_utils import read_zmx
 
-        # Iterate through the lines and extract SURF dict
-        surfs_dict = {}
-        current_surf = None
-        for line in lines:
-            if line.startswith("SURF"):
-                current_surf = int(line.split()[1])
-                surfs_dict[current_surf] = {}
-            elif current_surf is not None and line.strip() != "":
-                if len(line.strip().split(maxsplit=1)) == 1:
-                    continue
-                else:
-                    key, value = line.strip().split(maxsplit=1)
-                    if key == "PARM":
-                        new_key = "PARM" + value.split()[0]
-                        new_value = value.split()[1]
-                        surfs_dict[current_surf][new_key] = new_value
-                    else:
-                        surfs_dict[current_surf][key] = value
+        loaded_lens = read_zmx(filename)
 
-        # Print the extracted data for each SURF
-        self.surfaces = []
-        d = 0.0
-        for surf_idx, surf_dict in surfs_dict.items():
-            if surf_idx > 0 and surf_idx < current_surf:
-                mat2 = (
-                    f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}"
-                    if "GLAS" in surf_dict
-                    else "air"
-                )
-                surf_r = (
-                    float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 1.0
-                )
-                surf_c = (
-                    float(surf_dict["CURV"].split()[0]) if "CURV" in surf_dict else 0.0
-                )
-                surf_d_next = (
-                    float(surf_dict["DISZ"].split()[0]) if "DISZ" in surf_dict else 0.0
-                )
+        # Copy all attributes from loaded_lens to self
+        for attr_name, attr_value in loaded_lens.__dict__.items():
+            setattr(self, attr_name, attr_value)
 
-                if surf_dict["TYPE"] == "STANDARD":
-                    # Aperture
-                    if surf_c == 0.0 and mat2 == "air":
-                        s = Aperture(r=surf_r, d=d)
-
-                    # Spherical surface
-                    else:
-                        s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2)
-
-                # Aspherical surface
-                elif surf_dict["TYPE"] == "EVENASPH":
-                    raise NotImplementedError()
-                    s = Aspheric()
-
-                else:
-                    print(f"Surface type {surf_dict['TYPE']} not implemented.")
-                    continue
-
-                self.surfaces.append(s)
-                d += surf_d_next
-
-            elif surf_idx == current_surf:
-                # Image sensor
-                self.r_sensor = float(surf_dict["DIAM"].split()[0])
-
-            else:
-                pass
-
-        self.d_sensor = torch.tensor(d)
+        return self
 
     def write_lens_zmx(self, filename="./test.zmx"):
         """Write the lens into .zmx file."""
-        lens_zmx_str = ""
-        ENPD = self.calc_entrance_pupil()[1] * 2
-        # Head string
-        head_str = f"""VERS 190513 80 123457 L123457
-MODE SEQ
-NAME 
-PFIL 0 0 0
-LANG 0
-UNIT MM X W X CM MR CPMM
-ENPD {ENPD}
-ENVD 2.0E+1 1 0
-GFAC 0 0
-GCAT OSAKAGASCHEMICAL MISC
-XFLN 0. 0. 0.
-YFLN 0.0 {0.707 * self.hfov * 57.3} {0.99 * self.hfov * 57.3}
-WAVL 0.4861327 0.5875618 0.6562725
-RAIM 0 0 1 1 0 0 0 0 0
-PUSH 0 0 0 0 0 0
-SDMA 0 1 0
-FTYP 0 0 3 3 0 0 0
-ROPD 2
-PICB 1
-PWAV 2
-POLS 1 0 1 0 0 1 0
-GLRS 1 0
-GSTD 0 100.000 100.000 100.000 100.000 100.000 100.000 0 1 1 0 0 1 1 1 1 1 1
-NSCD 100 500 0 1.0E-3 5 1.0E-6 0 0 0 0 0 0 1000000 0 2
-COFN QF "COATING.DAT" "SCATTER_PROFILE.DAT" "ABG_DATA.DAT" "PROFILE.GRD"
-COFN COATING.DAT SCATTER_PROFILE.DAT ABG_DATA.DAT PROFILE.GRD
-SURF 0
-    TYPE STANDARD
-    CURV 0.0
-    DISZ INFINITY
-"""
-        lens_zmx_str += head_str
+        from .geolens_utils import write_zmx
 
-        # Surface string
-        for i, s in enumerate(self.surfaces):
-            d_next = (
-                self.surfaces[i + 1].d - self.surfaces[i].d
-                if i < len(self.surfaces) - 1
-                else self.d_sensor - self.surfaces[i].d
-            )
-            surf_str = s.zmx_str(surf_idx=i + 1, d_next=d_next)
-            lens_zmx_str += surf_str
-
-        # Sensor string
-        sensor_str = f"""SURF {i + 2}
-    TYPE STANDARD
-    CURV 0.
-    DISZ 0.0
-    DIAM {self.r_sensor}
-"""
-        lens_zmx_str += sensor_str
-
-        # Write lens zmx string into file
-        with open(filename, "w") as f:
-            f.writelines(lens_zmx_str)
-            f.close()
-
-
-# ====================================================================================
-# Useful functions
-# ====================================================================================
-def create_lens(
-    foclen,
-    fov,
-    fnum,
-    flange,
-    thickness=None,
-    lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
-    save_dir="./",
-):
-    """Create a flat starting point for camera lens design.
-
-    Contributor: Rayengineer
-
-    Args:
-        foclen: Focal length in mm.
-        fov: Diagonal field of view in degrees.
-        fnum: Maximum f number.
-        flange: Distance from last surface to sensor.
-        thickness: Total thickness if specified.
-        lens_type: List of surface types defining each lens element and aperture.
-    """
-    # Compute lens parameters
-    aper_r = foclen / fnum / 2
-    imgh = 2 * foclen * float(np.tan(fov / 2 / 57.3))
-    if thickness is None:
-        thickness = foclen + flange
-    d_opt = thickness - flange
-
-    # Materials
-    mat_names = list(SELLMEIER_TABLE.keys())
-    remove_materials = ["air", "vacuum", "occluder"]
-    for mat in remove_materials:
-        if mat in mat_names:
-            mat_names.remove(mat)
-
-    # Create lens
-    lens = GeoLens()
-    surfaces = lens.surfaces
-
-    d_total = 0.0
-    for elem_type in lens_type:
-        if elem_type == "Aperture":
-            d_next = (torch.rand(1) + 0.5).item()
-            surfaces.append(Aperture(r=aper_r, d=d_total))
-            d_total += d_next
-
-        elif isinstance(elem_type, list):
-            if len(elem_type) == 1 and elem_type[0] == "Aperture":
-                d_next = (torch.rand(1) + 0.5).item()
-                surfaces.append(Aperture(r=aper_r, d=d_total))
-                d_total += d_next
-
-            elif len(elem_type) in [2, 3]:
-                for i, surface_type in enumerate(elem_type):
-                    if i == len(elem_type) - 1:
-                        mat = "air"
-                        d_next = (torch.rand(1) + 0.5).item()
-                    else:
-                        mat = random.choice(mat_names)
-                        d_next = (torch.rand(1) + 1.0).item()
-
-                    surfaces.append(
-                        create_surface(surface_type, d_total, aper_r, imgh, mat)
-                    )
-                    d_total += d_next
-            else:
-                raise Exception("Lens element type not supported yet.")
-        else:
-            raise Exception("Lens type format not correct.")
-
-    # Normalize optical part total thickness
-    d_opt_actual = d_total - d_next
-    for s in surfaces:
-        s.d = s.d / d_opt_actual * d_opt
-
-    # Lens calculation
-    lens = lens.to(lens.device)
-    lens.d_sensor = torch.tensor(thickness, dtype=torch.float32).to(lens.device)
-    lens.r_sensor = imgh / 2
-    lens.set_sensor(sensor_res=lens.sensor_res)
-    lens.post_computation()
-
-    # Save lens
-    filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
-    lens.write_lens_json(os.path.join(save_dir, filename))
-
-    return lens
-
-
-def create_surface(surface_type, d_total, aper_r, imgh, mat):
-    """Create a surface object based on the surface type."""
-    if mat == "air":
-        c = -float(np.random.rand()) * 0.001
-    else:
-        c = float(np.random.rand()) * 0.001
-    r = max(imgh / 2, aper_r)
-
-    if surface_type == "Spheric":
-        return Spheric(r=r, d=d_total, c=c, mat2=mat)
-    elif surface_type == "Aspheric":
-        ai = np.random.randn(7).astype(np.float32) * 1e-30
-        k = float(np.random.rand()) * 0.001
-        return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
-    else:
-        raise Exception("Surface type not supported yet.")
+        write_zmx(self, filename)

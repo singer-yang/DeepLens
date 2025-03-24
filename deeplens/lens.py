@@ -1,6 +1,6 @@
 """Basic lens class.
 
-When creating a new lens class, it is recommended to inherit from the Lens class and re-write core functions.
+When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and re-write core functions.
 """
 
 import matplotlib.pyplot as plt
@@ -27,12 +27,24 @@ from .sensor.inv_isp import Inv_ISP
 
 
 class Lens(DeepObj):
-    """Base lens class."""
+    def __init__(self, lens_path=None, sensor_res=(2000, 2000), device=None):
+        """Initialize a lens class.
+        
+        Args:
+            lens_path (str): Path to the lens file.
+            sensor_res (tuple, optional): Sensor resolution (W, H). Defaults to (2000, 2000).
+            device (str, optional): Device to run the lens. Defaults to None.
+        """
+        if device is None:
+            device = init_device()
+        self.device = device
+        
+        # Sensor
+        self.sensor_res = sensor_res
 
-    def __init__(self, lens_path):
-        """Initialize a lens class."""
-        self.device = init_device()
-        self.read_lens(lens_path)
+        # Lens
+        if lens_path is not None:
+            self.read_lens(lens_path)
         self.to(self.device)
 
     def read_lens(self, lens_path):

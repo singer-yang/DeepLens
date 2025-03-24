@@ -30,8 +30,8 @@ from .optics.basics import (
     WAVE_RGB,
 )
 from .optics.monte_carlo import forward_integral
-from .optics.surfaces import Diffractive_GEO
-from .optics.surfaces_diffractive import DOE
+from .optics.geometric_surface import Diffractive_GEO
+from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from .optics.wave import AngularSpectrumMethod
 from .optics.waveoptics_utils import diff_float
 
@@ -61,25 +61,21 @@ class HybridLens(Lens):
 
             # Load DOE
             doe_dict = data["DOE"]
-            doe0 = DOE(
-                l=doe_dict["l"],
-                d=doe_dict["d"],
-                res=doe_dict["res"],
-                fab_ps=doe_dict["fab_ps"],
-                param_model=doe_dict["param_model"],
-            )
-            try:
-                doe0.load_doe(doe_dict)
-            except Exception:
-                print(
-                    "When loading DOE, DOE parameter is not found, use random initialization."
-                )
-                doe0.init_param_model(param_model=doe_dict["param_model"])
+            if doe_dict["param_model"] == "binary2":
+                doe0 = Binary2.init_from_dict(doe_dict)
+            elif doe_dict["param_model"] == "pixel2d":
+                doe0 = Pixel2D.init_from_dict(doe_dict)
+            elif doe_dict["param_model"] == "fresnel":
+                doe0 = Fresnel.init_from_dict(doe_dict)
+            elif doe_dict["param_model"] == "zernike":
+                doe0 = Zernike.init_from_dict(doe_dict)
+            else:
+                raise ValueError(f"Unsupported DOE parameter model: {doe_dict['param_model']}")
 
             self.doe = doe0
 
             # Add a DOE surface to GeoLens
-            geolens0.surfaces.append(Diffractive_GEO(l=doe0.l, d=doe0.d))
+            geolens0.surfaces.append(Diffractive_GEO(r=doe0.size[0] / float(np.sqrt(2)), d=doe0.d))
             self.geolens = geolens0
 
             #
