@@ -58,11 +58,11 @@ def config():
     logging.info(f"EXP: {args['EXP_NAME']}")
 
     # Device
-    num_gpus = torch.cuda.device_count()
+    num_gpus = 1 #torch.cuda.device_count()
     args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    #logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
 
     # ==> Save config and original code
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -153,9 +153,13 @@ def curriculum_design(
             center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =======================================
-        # Optimize lens by minimizing rms
+        # Optimize lens by minimizing rms and anamorphic squeeze
         # =======================================
         loss_rms = []
+        loss_anamorphic_list = []
+        delta = 1  # object-space offset (ensure consistent units)
+        target_squeeze = 1.5  # desired horizontal/vertical magnification ratio
+
         for j, wv in enumerate(WAVE_RGB):
             # Ray tracing to sensor
             ray = rays_backup[j].clone()
@@ -185,13 +189,40 @@ def curriculum_design(
             )
             loss_rms.append(l_rms)
 
+            # ---- Anamorphic (Squeeze) Loss Computation ----
+            # Horizontal offset ray.
+            ray_offset_h = self.get_cached_rays(depth=depth, wvln=wv, offset='h')
+            ray_offset_h = self.trace2sensor(ray_offset_h)
+            xy_offset_h = ray_offset_h.o[..., :2]
+            ra_xy_offset_h = ray_offset_h.ra.clone().detach()
+            xy_offset_h_norm = (xy_offset_h - center_p) * ra_xy_offset_h.unsqueeze(-1)
+
+            # Vertical offset ray.
+            ray_offset_v = self.get_cached_rays(depth=depth, wvln=wv, offset='v')
+            ray_offset_v = self.trace2sensor(ray_offset_v)
+            xy_offset_v = ray_offset_v.o[..., :2]
+            ra_xy_offset_v = ray_offset_v.ra.clone().detach()
+            xy_offset_v_norm = (xy_offset_v - center_p) * ra_xy_offset_v.unsqueeze(-1)
+
+            # Compute effective magnifications.
+            M_x = torch.mean(torch.abs(xy_offset_h_norm[..., 0])) / delta
+            M_y = torch.mean(torch.abs(xy_offset_v_norm[..., 1])) / delta
+            print(f'Magnifications: {M_x}, {M_y}')
+            ratio = M_x / (M_y + EPSILON)
+            loss_anamorphic_list.append((ratio - target_squeeze) ** 2)
+
         # RMS loss for all wavelengths
         loss_rms = sum(loss_rms) / len(loss_rms)
+        #loss_anamorphic = torch.mean(torch.stack(loss_anamorphic_list))
+        loss_anamorphic = sum(loss_anamorphic_list) / len(loss_anamorphic_list)
 
         # Lens design constraint
         loss_reg = self.loss_reg()
         w_reg = 0.1
-        L_total = loss_rms + w_reg * loss_reg
+        # Adding for anamorphics. 1.5x squeeze hardcoded for now
+        w_anamorphic = 1.0
+        print(f"Losses: {loss_rms}, {w_reg * loss_reg}, {w_anamorphic * loss_anamorphic}")
+        L_total = loss_rms + w_reg * loss_reg + w_anamorphic * loss_anamorphic
 
         # Gradient-based optimization
         optimizer.zero_grad()
@@ -236,7 +267,7 @@ if __name__ == "__main__":
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
         iterations=5000,
-        test_per_iter=50,
+        test_per_iter=3,
         optim_mat=True,
         match_mat=False,
         shape_control=True,

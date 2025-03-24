@@ -66,11 +66,11 @@ def config():
         raise Exception("Add your wandb logging config here.")
 
     # ==> Device
-    num_gpus = torch.cuda.device_count()
+    num_gpus = 1
     args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
     args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    #logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
 
     # ==> Save config and original code
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -100,6 +100,7 @@ def end2end_train(lens, net, args):
 
     train_set = ImageDataset(args["train"]["train_dir"], lens.sensor_res)
     train_loader = DataLoader(train_set, batch_size=args["train"]["bs"])
+    logging.info(f'train_loader: {train_loader}')
 
     # ==> Network optimizer
     batchs = len(train_loader)
@@ -134,18 +135,22 @@ def end2end_train(lens, net, args):
         # ==> Train 1 epoch
         for img_org in tqdm(train_loader):
             img_org = img_org.to(device)
+            logging.info(f'img_org: {img_org}')
 
             # => Render image
             # ========================================
             # Line 3: plug-and-play diff-rendering
             # ========================================
             img_render = lens.render(img_org)
+            logging.info(f'img_render: {img_render}')
 
             # => Image restoration
             img_rec = net(img_render)
+            logging.info(f'img_rec: {img_rec}')
 
             # => Loss
             L_rec = cri_l1(img_rec, img_org)
+            logging.info(f'L_rec: {L_rec}')
 
             # => Back-propagation
             net_optim.zero_grad()
@@ -225,9 +230,11 @@ if __name__ == "__main__":
     # Line 1: load a lens
     # ========================================
     lens = GeoLens(filename=args["lens"]["path"])
+    logging.info(f'lens: {lens}')
     lens.change_sensor_res(args["train"]["img_res"])
     net = UNet()
     net = net.to(lens.device)
+    logging.info(f'net: {net}')
     if args["network"]["pretrained"]:
         net.load_state_dict(torch.load(args["network"]["pretrained"]))
 

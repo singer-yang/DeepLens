@@ -2047,3 +2047,281 @@ class ThinLens(Surface):
         }
 
         return surf_dict
+        
+class Anamorphic(Surface):
+    """Anamorphic surface with different curvatures in x and y directions.
+    
+    This surface implements an anamorphic adapter with different horizontal and
+    vertical curvatures to create a squeeze effect. Typically used in 
+    cinematography to create widescreen images with standard spherical lenses.
+    """
+    
+    def __init__(self, r, d, c_x, mat2, squeeze_factor=1.5, base_focal_length=50.0, is_cylinder=True, device="cpu"):
+        """Initialize an anamorphic surface.
+        
+        Args:
+            r (float): Surface aperture radius
+            d (float or tensor): Distance from origin to surface
+            cx (float): Curvature in x-direction (horizontal)
+            mat2 (str or Material): Material after the surface
+            squeeze_factor (float): Horizontal squeeze factor (default: 1.5x)
+            base_focal_length (float): Base lens focal length in mm (default: 50mm)
+            device (str): Computation device
+        """
+        super(Anamorphic, self).__init__(r, d, mat2, is_square=False, device=device)
+        
+        # Set curvatures for x and y directions
+        self.c_x = torch.tensor(c_x, device=device)
+        self.c_x_perturb = 0.0
+        self.c_y_perturb = 0.0
+        self.is_cylinder = is_cylinder
+        
+        # Store anamorphic parameters
+        self.squeeze_factor = squeeze_factor
+        self.base_focal_length = base_focal_length
+        
+        # Calculate curvatures based on squeeze factor if not provided
+        if c_x is None:
+            # For 1.5x squeeze on 50mm lens:
+            # Vertical focal length = 50mm
+            # Horizontal focal length = 75mm (50mm × 1.5)
+            self.c_x = torch.tensor(1.0 / (base_focal_length * squeeze_factor), device=device)  # Horizontal curvature
+
+        self.to(device)
+    
+    @property
+    def c_y(self):
+        return torch.tensor(1e-9, device=self.device) if self.is_cylinder else self.c_x / self.squeeze_factor
+
+    @c_y.setter
+    def c_y(self, value):
+        if self.is_cylinder:
+            return
+        self.c_x = value * self.squeeze_factor
+
+    @classmethod
+    def init_from_dict(cls, surf_dict):
+        """Initialize surface from a dictionary.
+        
+        Args:
+            surf_dict (dict): Surface parameters dictionary
+            
+        Returns:
+            Anamorphic: Initialized anamorphic surface
+        """
+        if "roc_x" in surf_dict:
+            c_x = 1 / surf_dict["roc_x"]
+        else:
+            c_x = 1 / surf_dict["c_x"]
+        
+        return cls(r=surf_dict["r"], d=surf_dict["d"], c_x=c_x, mat2=surf_dict["mat2"], 
+                  squeeze_factor=surf_dict["squeeze"], base_focal_length=surf_dict["base_focal"])
+        
+    def _sag(self, x, y):
+        """
+        Compute the surface sag for an anamorphic (toroidal) lens.
+        
+        The sag is calculated as the sum of two independent contributions along x and y:
+          sag(x,y) = sag_x(x) + sag_y(y),
+        where:
+          sag_x(x) = (c_x * x^2) / (1 + sqrt(1 - c_x^2 * x^2))
+          sag_y(y) = (c_y * y^2) / (1 + sqrt(1 - c_y^2 * y^2))
+        
+        Here, self.c_x and self.c_y are the nominal curvatures along x and y, and
+        self.c_x_perturb and self.c_y_perturb are any small perturbations.
+        An EPSILON term is added to ensure numerical stability.
+        """
+        c_x = self.c_x + self.c_x_perturb
+        c_y = self.c_y + self.c_y_perturb
+
+        # Handle near-zero curvature to avoid instability:
+        if abs(c_x) < 1e-8:
+            sag_x = torch.zeros_like(x)
+        else:
+            sqrt_arg_x = 1 - c_x**2 * x**2
+            if torch.any(sqrt_arg_x < 0):
+                print("Warning: Negative sqrt_arg_x encountered", sqrt_arg_x)
+            sqrt_arg_x = torch.clamp(sqrt_arg_x, min=EPSILON)
+            A = torch.sqrt(sqrt_arg_x)
+            sag_x = c_x * x**2 / (1 + A)
+
+        if abs(c_y) < 1e-8:
+            sag_y = torch.zeros_like(y)
+        else:
+            sqrt_arg_y = 1 - c_y**2 * y**2
+            if torch.any(sqrt_arg_y < 0):
+                print("Warning: Negative sqrt_arg_y encountered", sqrt_arg_y)
+            sqrt_arg_y = torch.clamp(sqrt_arg_y, min=EPSILON)
+            B = torch.sqrt(sqrt_arg_y)
+            sag_y = c_y * y**2 / (1 + B)
+
+        return sag_x + sag_y
+
+    def _dfdxy(self, x, y):
+        """
+        Compute the first-order derivatives (dz/dx and dz/dy) of the anamorphic sag.
+        Includes a check: if |c_x| or |c_y| is below 1e-8, returns zero derivative.
+        """
+        c_x = self.c_x + self.c_x_perturb
+        c_y = self.c_y + self.c_y_perturb
+
+        # For the x-component:
+        if abs(c_x) < 1e-8:
+            dfdx = torch.zeros_like(x)
+        else:
+            sqrt_arg_x = 1 - c_x**2 * x**2
+            if torch.any(sqrt_arg_x < 0):
+                print("Warning: Negative sqrt_arg_x encountered", sqrt_arg_x)
+            sqrt_arg_x = torch.clamp(sqrt_arg_x, min=EPSILON)
+            A = torch.sqrt(sqrt_arg_x)
+            dfdx = 2 * c_x * x / (1 + A) + (c_x**3 * x**3) / (A * (1 + A)**2)
+
+        # For the y-component:
+        if abs(c_y) < 1e-8:
+            dfdy = torch.zeros_like(y)
+        else:
+            sqrt_arg_y = 1 - c_y**2 * y**2
+            if torch.any(sqrt_arg_y < 0):
+                print("Warning: Negative sqrt_arg_y encountered", sqrt_arg_y)
+            sqrt_arg_y = torch.clamp(sqrt_arg_y, min=EPSILON)
+            B = torch.sqrt(sqrt_arg_y)
+            dfdy = 2 * c_y * y / (1 + B) + (c_y**3 * y**3) / (B * (1 + B)**2)
+
+        return dfdx, dfdy
+
+
+    def _d2fdxy(self, x, y):
+        """
+        Compute the second-order derivatives of the anamorphic sag surface.
+        Returns d²f/dx², d²f/dxdy, d²f/dy².
+        If |c_x| or |c_y| is below 1e-8, returns zero for the corresponding second derivative.
+    
+        Uses a finite difference approximation for the second derivative of the function:
+        F(r²) = c * r² / (1 + sqrt(1 - c² * r²))
+        with r² = x² (or y²).
+        """
+        delta = 1e-6  # Small step for finite difference
+
+        c_x = self.c_x + self.c_x_perturb
+        c_y = self.c_y + self.c_y_perturb
+
+        # For the x-component:
+        if abs(c_x) < 1e-8:
+            d2f_dx2 = torch.zeros_like(x)
+        else:
+            r2_x = x**2
+            S_x = torch.sqrt(torch.clamp(1 - c_x**2 * r2_x, min=EPSILON))
+            Fprime_x = (c_x * (1 + S_x) + c_x**3 * r2_x / (2 * S_x)) / ((1 + S_x)**2)
+            r2_x_plus = r2_x + delta
+            S_x_plus = torch.sqrt(torch.clamp(1 - c_x**2 * r2_x_plus, min=EPSILON))
+            Fprime_x_plus = (c_x * (1 + S_x_plus) + c_x**3 * r2_x_plus / (2 * S_x_plus)) / ((1 + S_x_plus)**2)
+            Fdouble_x = (Fprime_x_plus - Fprime_x) / delta
+
+            d2f_dx2 = 4 * x**2 * Fdouble_x + 2 * Fprime_x
+
+        # For the y-component:
+        if abs(c_y) < 1e-8:
+            d2f_dy2 = torch.zeros_like(y)
+        else:
+            r2_y = y**2
+            S_y = torch.sqrt(torch.clamp(1 - c_y**2 * r2_y, min=EPSILON))
+            Fprime_y = (c_y * (1 + S_y) + c_y**3 * r2_y / (2 * S_y)) / ((1 + S_y)**2)
+            r2_y_plus = r2_y + delta
+            S_y_plus = torch.sqrt(torch.clamp(1 - c_y**2 * r2_y_plus, min=EPSILON))
+            Fprime_y_plus = (c_y * (1 + S_y_plus) + c_y**3 * r2_y_plus / (2 * S_y_plus)) / ((1 + S_y_plus)**2)
+            Fdouble_y = (Fprime_y_plus - Fprime_y) / delta
+
+            d2f_dy2 = 4 * y**2 * Fdouble_y + 2 * Fprime_y
+
+        # Cross derivative is zero since the surface is separable:
+        d2f_dxdy = torch.zeros_like(x)
+
+        return d2f_dx2, d2f_dxdy, d2f_dy2
+
+    def is_within_data_range(self, x, y):
+        """Check if (x, y) is within the valid region of the anamorphic surface.
+
+        For an anamorphic lens the valid region is naturally elliptical. One way to
+        define this is to require that:
+            (cx*x)^2 + (cy*y)^2 < 1
+        """
+        valid_x = (x**2) < 1/(self.c_x**2)
+        valid_y = (y**2) < 1/(self.c_y**2)
+        return valid_x & valid_y
+
+    def max_height(self):
+        """Return the maximum valid y coordinate for the anamorphic surface.
+
+        Since the vertical curvature controls the valid range in y, we use 1/cy.
+        A small margin (e.g., 0.01) is subtracted to avoid boundary issues.
+        """
+        max_y = 1.0 / self.c_y.abs().item() - 0.01
+        return max_y
+
+    def perturb(self, tolerance):
+        """Randomly perturb surface parameters to simulate manufacturing errors.
+
+        In the anamorphic case you might also want to perturb the separate curvatures.
+        """
+        self.r_offset = np.random.randn() * tolerance.get("r", 0.001)
+        self.d_offset = np.random.randn() * tolerance.get("d", 0.001)
+        # Optionally, add curvature perturbations:
+        self.cx_offset = np.random.randn() * tolerance.get("cx", 0.001)
+        # Apply the perturbations if desired:
+        self.c_x = self.c_x + self.cx_offset
+
+    def get_optimizer_params(self, lr=[0.001, 0.001, 0.001], optim_mat=False):
+        """Activate gradient computation for cx, cy, and d and return optimizer parameters.
+
+        Here we include separate parameters for horizontal and vertical curvatures.
+        """
+        self.c_x.requires_grad_(True)
+        self.d.requires_grad_(True)
+
+        params = []
+        params.append({"params": [self.c_x], "lr": lr[0]})
+        params.append({"params": [self.d], "lr": lr[1]})
+
+        if optim_mat and self.mat2.get_name() != "air":
+            params += self.mat2.get_optimizer_params()
+
+        return params
+
+    def surf_dict(self):
+        """Return a dictionary of the anamorphic surface parameters."""
+        roc_x = 1 / self.c_x.item() if self.c_x.item() != 0 else 0.0
+        roc_y = 1 / self.c_y.item() if self.c_y.item() != 0 else 0.0
+        # special: self.r *sometimes* becomes a torch tensor. If it is, unwrap it.
+        r = self.r.item() if isinstance(self.r, torch.Tensor) else self.r
+        surf_dict = {
+            "type": "Anamorphic",
+            "r": round(r, 4),
+            "cx": round(self.c_x.item(), 4),
+            "roc_x": round(roc_x, 4),
+            "cy": round(self.c_y.item(), 4),
+            "roc_y": round(roc_y, 4),
+            "d": round(self.d.item(), 4),
+            "mat2": self.mat2.get_name(),
+        }
+        return surf_dict
+
+    def zmx_str(self, surf_idx, d_next):
+        """Return Zemax surface string for an anamorphic lens."""
+        if self.mat2.get_name() == "air":
+            zmx_str = f"""SURF {surf_idx} 
+    TYPE STANDARD 
+    CURVX {self.c_x.item()} 
+    CURVY {self.c_y.item()} 
+    DISZ {d_next.item()} 
+    DIAM {self.r * 2}
+"""
+        else:
+            zmx_str = f"""SURF {surf_idx} 
+    TYPE STANDARD 
+    CURVX {self.c_x.item()} 
+    CURVY {self.c_y.item()} 
+    DISZ {d_next.item()} 
+    GLAS {self.mat2.get_name().upper()} 0 0 {self.mat2.n} {self.mat2.V}
+    DIAM {self.r * 2}
+"""
+        return zmx_str

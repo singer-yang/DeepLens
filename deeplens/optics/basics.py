@@ -11,6 +11,10 @@ def init_device():
         device = torch.device("cuda")
         device_name = torch.cuda.get_device_name(0)
         print(f"Using CUDA: {device_name}")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        device_name = "mps"
+        print("Using MPS")
     else:
         device = torch.device("cpu")
         device_name = "CPU"
@@ -264,8 +268,11 @@ class DeepObj:
 
         torch.set_default_dtype(torch.float64)
         """
+        if torch.backends.mps.is_available():
+            torch.set_default_dtype(torch.float32)
+            return
         assert (
-            torch.get_default_dtype() == torch.float64
+            torch.get_default_dtype() == torch.float64 and not torch.backends.mps.is_available()
         ), "Default dtype should be float64."
 
         for key, val in vars(self).items():
