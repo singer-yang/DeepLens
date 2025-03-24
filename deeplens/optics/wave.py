@@ -46,7 +46,7 @@ class ComplexWave(DeepObj):
             # Initialize a complex wave field with given complex amplitude
             if not u.dtype == torch.complex128:
                 print(
-                    "In the future, we want to always use double precision when creating a complex wave field."
+                    "A complex wave field is created with single precision. In the future, we want to always use double precision when creating a complex wave field."
                 )
 
             self.u = u if torch.is_tensor(u) else torch.from_numpy(u)
@@ -70,7 +70,7 @@ class ComplexWave(DeepObj):
         # Other paramters
         assert wvln > 0.1 and wvln < 1, "wvln unit should be [um]."
         self.wvln = wvln  # wvln, store in [um]
-        self.k = 2 * np.pi / (self.wvln * 1e-3)  # distance unit [mm]
+        self.k = 2 * torch.pi / (self.wvln * 1e-3)  # distance unit [mm]
         self.phy_size = np.array(phy_size)  # physical size with padding, in [mm]
         self.valid_phy_size = (
             self.phy_size if valid_phy_size is None else np.array(valid_phy_size)
@@ -82,7 +82,7 @@ class ComplexWave(DeepObj):
         self.ps = phy_size[0] / self.res[0]  # pixel size, float value
 
         self.x, self.y = self.gen_xy_grid()
-        self.z = torch.full_like(self.x, z)
+        self.z = torch.full_like(self.x, z) # Maybe keeping z as a float tensor is better
 
     def load_img(self, img):
         """Load an image and use its pixel values as the amplitude of the complex wave field.
@@ -198,7 +198,7 @@ class ComplexWave(DeepObj):
         Args:
             z (float): destination plane z coordinate.
         """
-        prop_dist = z - self.z[0, 0]
+        prop_dist = z - self.z[0, 0].item()
         self.prop(prop_dist, n=n)
         return self
 
@@ -207,12 +207,12 @@ class ComplexWave(DeepObj):
         ps = self.ps
         x, y = torch.meshgrid(
             torch.linspace(
-                -0.5 * self.phy_size[0] + 0.5 * ps,
+                -0.5 * self.phy_size[1] + 0.5 * ps,
                 0.5 * self.phy_size[1] - 0.5 * ps,
                 self.res[0],
             ),
             torch.linspace(
-                0.5 * self.phy_size[1] - 0.5 * ps,
+                0.5 * self.phy_size[0] - 0.5 * ps,
                 -0.5 * self.phy_size[0] + 0.5 * ps,
                 self.res[1],
             ),
