@@ -1,6 +1,12 @@
 {
+  "_info": {
+    "Cauchy": "[nd, Vd]. References: https://www.schott.com/en-dk/interactive-abbe-diagram, https://refractiveindex.info/.",
+    "Sellmeier": "Sellmeier equation parameters. References: https://en.wikipedia.org/wiki/Sellmeier_equation, https://shop.schott.com/advanced_optics/,  https://refractiveindex.info, nd at 589.3 [nm]",
+    "Schott": "Schott equation parameters. References: https://shop.schott.com/advanced_optics/, https://refractiveindex.info/.",
+    "Interp": "Refractive indices from 0.4um to 0.7um for interpolation, 0.01um step size. References: https://refractiveindex.info/.",
+    "CDMGs": "Cheng Du Guang Ming is a glass company in China. I select the most common glasses with stock (MA category) from their catalog. Some glasses may have different names, for example, BK7 glass uses another name in the catalog."
+  },
   "MATERIAL_TABLE": {
-    "info": "[nd, Vd]. References: https://www.schott.com/en-dk/interactive-abbe-diagram, https://refractiveindex.info/.",
     "vacuum": [1.0000, 1e38],
     "air": [1.0000, 1e38],
     "occluder": [1.0000, 1e38],
@@ -53,7 +59,6 @@
     "sf11": [1.8745, 25.68]
   },
   "SELLMEIER_TABLE": {
-    "info": "Sellmeier equation parameters. References: https://en.wikipedia.org/wiki/Sellmeier_equation, https://shop.schott.com/advanced_optics/,  https://refractiveindex.info, nd at 589.3 [nm]",
     "air": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "vacuum": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "occluder": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -95,7 +100,6 @@
     "okp4": [2.49230, -1.46713e-3, 3.04056e-2, -2.31960e-4, 3.62928e-4, -1.89103e-5]
   },
   "INTERP_TABLE": {
-    "info": "Refractive indices from 0.4um to 0.7um for interpolation, 0.01um step size",
     "wvlns": [
       0.40, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49,
       0.50, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59,
@@ -118,7 +122,6 @@
     "okp4ht": "OKP4HT"
   },
   "CDGM_GLASS": {
-    "info": "Cheng Du Guang Ming is a glass company in China. I select the most common glasses with stock (MA category) from their catalog. Some glasses may have different names, for example, BK7 glass uses another name in the catalog.",
     "H-QK3L": [1.48749, 70.44],
     "D-FK61A-25": [1.49665, 81.55],
     "H-FK61": [1.497, 81.61],

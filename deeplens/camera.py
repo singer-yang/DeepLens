@@ -101,7 +101,7 @@ class Camera(Renderer):
     def render_lens(self, img_raw, field=None):
         """Render a blurry rgb raw image with the lens.
 
-        Should also support more rendering settings, e.g. depth, focus, etc.
+        Here we adopt the full sensor resolution rendering, while a PSF-based patch rendering is also possible.
         """
         return self.lens.render(img_raw)
 
@@ -147,7 +147,9 @@ class Camera(Renderer):
 
             # ISO channel (B, 1, H, W)
             iso_channel = (
-                torch.ones_like(rggb_gt[:, 0, :, :].unsqueeze(1)) * iso.view(-1, 1, 1, 1) / iso_scale
+                torch.ones_like(rggb_gt[:, 0, :, :].unsqueeze(1))
+                * iso.view(-1, 1, 1, 1)
+                / iso_scale
             )
 
             rggbi_blur_noise = torch.cat([rggb_blur_noise, iso_channel], dim=1)
@@ -172,7 +174,7 @@ class Camera(Renderer):
             # Field channel (B, 1, H, W)
             B = bayer_blur_noise.shape[0]
             field_channels = []
-            
+
             for b in range(B):
                 grid_x, grid_y = torch.meshgrid(
                     torch.linspace(
@@ -191,7 +193,7 @@ class Camera(Renderer):
                 )
                 field_channel = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
                 field_channels.append(field_channel)
-            
+
             field_channel = torch.cat(field_channels, dim=0).unsqueeze(1)
 
             # Concatenate all channels

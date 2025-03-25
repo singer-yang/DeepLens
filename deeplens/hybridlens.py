@@ -34,6 +34,7 @@ from .optics.geometric_surface import Diffractive_GEO
 from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from .optics.wave import AngularSpectrumMethod
 from .optics.waveoptics_utils import diff_float
+from .geolens_utils import draw_setup_2d, draw_raytraces_2d
 
 
 class HybridLens(Lens):
@@ -141,7 +142,7 @@ class HybridLens(Lens):
 
         # Draw lens layout
         if ax is None:
-            ax, fig = geolens.draw_setup_2d()
+            ax, fig = draw_setup_2d(geolens)
             save_fig = True
         else:
             save_fig = False
@@ -157,9 +158,7 @@ class HybridLens(Lens):
                 depth=depth, fov=view, num_rays=num_rays, entrance_pupil=True, wvln=WAVE_RGB[2 - i]
             )
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
-            ax, fig = geolens.draw_raytraces_2d(
-                ray_o_record, ax=ax, fig=fig, color=color_list[i]
-            )
+            ax, fig = draw_raytraces_2d(ray_o_record, ax=ax, fig=fig, color=color_list[i])
 
             # Draw wave propagation
             ray.prop_to(geolens.d_sensor) # shape [num_rays, 3]
