@@ -1,6 +1,6 @@
-"""DDP example for computational photography with realistic lens and sensor model.
+"""An example for computational photography with realistic lens and sensor model.
 
-# To use all GPUs on a single machine (Example with 4 GPUs)
+# The code uses distributed data parallel (DDP) scheme. To run experiments on multiple GPUs, use the following command:
 # torchrun --nproc_per_node=4 7_comp_photography.py
 
 Reference:
