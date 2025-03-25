@@ -1,5 +1,3 @@
-from .version import __version__
-
 # optics
 from .optics import *
 
@@ -10,7 +8,6 @@ from .network import *
 from .utils import *
 
 # doelens
-# from .doelens import *
-from .geolens import *
-from .psfnet import *
-# from .psfnet_coherent import *
+from .geolens import GeoLens
+from .psfnet import PSFNet
+from .camera import Camera
