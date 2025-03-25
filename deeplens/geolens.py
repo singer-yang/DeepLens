@@ -68,13 +68,13 @@ from .geolens_utils import draw_lens_layout, draw_layout_3d
 
 
 class GeoLens(Lens):
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, sensor_res=(1000, 1000), device=None):
         """Initialize a geometric lens."""
-        self.device = init_device()
+        super().__init__(filename, sensor_res, device)
 
         # Load lens file
         if filename is not None:
-            self.lens_name = filename
+            self.sensor_res = sensor_res
             self.load_file(filename)
             self.to(self.device)
 
@@ -83,7 +83,7 @@ class GeoLens(Lens):
             self.post_computation()
 
         else:
-            self.sensor_res = [1024, 1024]
+            self.sensor_res = sensor_res
             self.surfaces = []
             self.materials = []
             self.to(self.device)
@@ -2184,14 +2184,21 @@ class GeoLens(Lens):
         """Set camera sensor, define pixel size and sensor size.
 
         Args:
-            sensor_res (list): Resolution, pixel number.
-            sensor_size (list): Sensor size in [mm].
+            sensor_res: Resolution, pixel number.
+            sensor_size: Sensor size in [mm].
         """
-        assert not (sensor_res is None and sensor_size is None), (
-            "Cannot set both sensor_res and sensor_size"
-        )
+        if sensor_size is not None and sensor_res is not None:
+            assert sensor_res[0] * sensor_size[1] == sensor_res[1] * sensor_size[0], (
+                "sensor_res and sensor_size are not consistent"
+            )
 
-        if sensor_res is not None:
+            self.sensor_res = sensor_res
+            self.sensor_size = sensor_size
+            self.pixel_size = sensor_size[0] / sensor_res[0]
+
+            self.post_computation()
+
+        elif sensor_res is not None:
             # Change sensor size, resolution and pixel size. Do not change sensor diagonal radius.
             if isinstance(sensor_res, int):
                 sensor_res = (sensor_res, sensor_res)
@@ -3252,7 +3259,7 @@ class GeoLens(Lens):
         self.d_sensor = torch.tensor(d)
         self.lens_info = data.get("info", "None")
 
-        sensor_res = data.get("sensor_res", [1024, 1024])
+        sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]
         self.set_sensor(sensor_res=sensor_res)
 

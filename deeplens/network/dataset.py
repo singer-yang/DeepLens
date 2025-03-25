@@ -44,6 +44,74 @@ class ImageDataset(Dataset):
         return img
 
 
+class PhotographicDataset(Dataset):
+    def __init__(self, img_dir, output_type="rgb", img_res=(512, 512), is_train=True):
+        """Initialize the Photographic Dataset.
+
+        Args:
+            img_dir: Directory containing the images
+            output_type: Type of output image format
+            img_res: Image resolution. If int, creates square image of [img_res, img_res]
+            is_train: Whether this is for training (with augmentation) or testing
+        """
+        super(PhotographicDataset, self).__init__()
+        self.img_paths = glob.glob(f"{img_dir}/**.png") + glob.glob(f"{img_dir}/**.jpg")
+        print(f"Found {len(self.img_paths)} images in {img_dir}")
+
+        if isinstance(img_res, int):
+            img_res = (img_res, img_res)
+        self.is_train = is_train
+        
+        # Training transform with augmentation
+        self.train_transform = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(img_res),
+                transforms.ColorJitter(
+                    brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+                ),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: torch.clamp(x, 0.0, 1.0)),
+            ]
+        )
+        
+        # Test transform without augmentation
+        self.test_transform = transforms.Compose(
+            [
+                transforms.Resize(img_res),
+                transforms.CenterCrop(img_res),
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: torch.clamp(x, 0.0, 1.0)),
+            ]
+        )
+        
+        self.output_type = output_type
+
+    def __len__(self):
+        return len(self.img_paths)
+
+    def sample_iso(self):
+        return torch.randint(100, 400, (1,))[0].float()
+
+    def __getitem__(self, idx):
+        # Load image
+        img = Image.open(self.img_paths[idx]).convert("RGB")
+        
+        # Transform
+        if self.is_train:
+            img = self.train_transform(img)
+        else:
+            img = self.test_transform(img)
+
+        # Random ISO value
+        iso = self.sample_iso()
+
+        return {
+            "img": img,
+            "iso": iso,
+            "output_type": self.output_type,
+        }
+
 # ======================================
 # Online dataset
 # ======================================
