@@ -22,50 +22,47 @@ from .optics import (
 )
 from .optics.render_psf import render_psf_map, render_psf
 
-from .sensor.isp import ISP
-from .sensor.inv_isp import Inv_ISP
-
 
 class Lens(DeepObj):
-    def __init__(self, lens_path=None, sensor_res=(2000, 2000), device=None):
+    def __init__(self, filename=None, sensor_res=(1024, 1024), device=None):
         """Initialize a lens class.
-        
+
         Args:
-            lens_path (str): Path to the lens file.
-            sensor_res (tuple, optional): Sensor resolution (W, H). Defaults to (2000, 2000).
+            filename (str): Path to the lens file.
+            sensor_res (tuple, optional): Sensor resolution (W, H). Defaults to (1024, 1024).
             device (str, optional): Device to run the lens. Defaults to None.
         """
         if device is None:
             device = init_device()
         self.device = device
-        
+
         # Sensor
         self.sensor_res = sensor_res
 
         # Lens
-        if lens_path is not None:
-            self.read_lens(lens_path)
+        if filename is not None:
+            self.read_lens(filename)
         self.to(self.device)
 
-    def read_lens(self, lens_path):
+    def read_lens(self, filename):
         """Read lens from a file."""
-        if lens_path.endswith(".json"):
-            self.read_lens_json(lens_path)
+        if filename.endswith(".json"):
+            self.read_lens_json(filename)
         else:
             raise Exception("Unknown lens file format.")
 
-    def read_lens_json(self, lens_path):
+    def read_lens_json(self, filename):
         """Read lens from a json file."""
         raise NotImplementedError
 
-    def write_lens(self, lens_path):
+    def write_lens(self, filename):
         """Write lens to a file."""
-        if lens_path.endswith(".json"):
-            self.write_lens_json(lens_path)
+        if filename.endswith(".json"):
+            self.write_lens_json(filename)
         else:
             raise Exception("Unknown lens file format.")
 
-    def write_lens_json(self, lens_path):
+    def write_lens_json(self, filename):
         """Write lens to a json file."""
         raise NotImplementedError
 
@@ -425,33 +422,6 @@ class Lens(DeepObj):
 
         return img_render
 
-    def render_unprocess(self, img_obj, bit=10, depth=DEPTH, method="psf_map", **kwargs):
-        """Unprocess image to raw space for image simulation. Because PSF is defined in energy space.
-
-        Accurate image simulation:
-            (1) raw image space
-            (2) lens vignetting (shading)
-            (3) high optical ray sampling
-            (4) sensor noise and quantization
-            (5) ISP
-        """
-        # Initialize ISP and INV_ISP
-        isp, inv_isp = ISP(bit=bit), Inv_ISP(bit=bit)
-
-        # Unprocess image to linear rgb space
-        img_raw = inv_isp.inv_isp_linearRGB(img_obj)
-
-        # Lens aberration simulation
-        img_raw_render = self.render(img_raw, depth=depth, method=method, **kwargs)
-        
-        # Noise simulation
-        img_raw_noise = self.add_noise(img_raw_render, bit=bit)
-
-        # Convert linear rgb image to output image
-        img_render = isp.diff_isp(img_raw_noise)
-
-        return img_render
-
     def render_psf(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=51):
         """Render image patch using PSF convolution. Better not use this function to avoid confusion."""
         return self.render_psf_patch(
@@ -502,7 +472,7 @@ class Lens(DeepObj):
         )
         field_channel = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
 
-        return img_render #, field_channel
+        return img_render  # , field_channel
 
     def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
         """Render image using PSF block convolution.
@@ -543,14 +513,14 @@ class Lens(DeepObj):
         else:
             img_Nbit = img
             is_float = False
-        
+
         # Noise statistics
         if not hasattr(self, "read_noise_std"):
             read_noise_std = 0.0
             print("Read noise standard deviation is not defined.")
         else:
             read_noise_std = self.read_noise_std
-        
+
         if not hasattr(self, "shot_noise_alpha"):
             shot_noise_alpha = 0.0
             print("Shot noise alpha is not defined.")
