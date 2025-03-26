@@ -21,17 +21,11 @@ import yaml
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
-from deeplens import (
-    DEPTH,
-    EPSILON,
-    WAVE_RGB,
-    GeoLens,
-    create_lens,
-    create_video_from_images,
-    set_logger,
-    set_seed,
-)
 
+from deeplens.geolens import GeoLens
+from deeplens.geolens_utils import create_lens
+from deeplens.optics.basics import DEPTH, EPSILON, WAVE_RGB
+from deeplens.utils import create_video_from_images, set_logger, set_seed
 
 def config():
     """Config file for training."""

@@ -28,7 +28,7 @@ from torchvision.utils import save_image
 from tqdm import tqdm
 
 from deeplens import GeoLens
-from deeplens.network import UNet
+from deeplens.network import UNet, NAFNet
 from deeplens.network.dataset import ImageDataset
 from deeplens.utils import (
     batch_PSNR,
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     # ========================================
     lens = GeoLens(filename=args["lens"]["path"])
     lens.change_sensor_res(args["train"]["img_res"])
-    net = UNet()
+    net = NAFNet(in_chan=3, out_chan=3, width=16, middle_blk_num=1, enc_blk_nums=[1, 1, 1, 18], dec_blk_nums=[1, 1, 1, 1])
     net = net.to(lens.device)
     if args["network"]["pretrained"]:
         net.load_state_dict(torch.load(args["network"]["pretrained"]))

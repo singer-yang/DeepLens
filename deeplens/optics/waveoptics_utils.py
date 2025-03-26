@@ -7,11 +7,10 @@ import torch.nn.functional as F
 from .basics import DEFAULT_WAVE
 from .wave import ComplexWave
 
+
 # ==================================
 # Generate wave field
 # ==================================
-
-
 def square_field(n, W, w, x0=0, y0=0, theta=0):
     """Code copied from yidan's rect function.
 
@@ -65,10 +64,10 @@ def circle_field(phy_size, circle_radius, W, H, wvln=DEFAULT_WAVE, center=[0, 0]
     return ComplexWave(u=u, phy_size=phy_size, wvln=wvln)
 
 
-def plane_wave_field(phy_size, res, wvln=0.589, z=0.0):
+def plane_wave_field(phy_size, res, wvln=0.589, z=0.0, device="cpu"):
     """fCreate a plane wave field for debugging."""
     u = torch.ones(res) + 0j
-    return ComplexWave(u=u, phy_size=phy_size, wvln=wvln)
+    return ComplexWave(u=u, phy_size=phy_size, wvln=wvln).to(device)
 
 
 def point_source_field(
@@ -206,7 +205,9 @@ def img2field(img=None, wvln=0.589, phy_size=[1, 1], padding=False):
     return field
 
 
-def batch2field(img, phy_size, z=0, wvln=0.589, padding=False, phase="zero"):
+def batch2field(
+    img, phy_size, z=0, wvln=0.589, padding=False, phase="zero", device="cpu"
+):
     """Convert a batch of images to a complex field.
 
     Args:
@@ -253,13 +254,8 @@ def batch2field(img, phy_size, z=0, wvln=0.589, padding=False, phase="zero"):
 
     res = u.shape
     field = ComplexWave(
-        u=u,
-        phy_size=phy_size,
-        valid_phy_size=valid_phy_size,
-        res=res,
-        wvln=wvln,
-        device=device,
-    )
+        u=u, phy_size=phy_size, valid_phy_size=valid_phy_size, res=res, wvln=wvln
+    ).to(device)
     field.z += z
 
     return field
