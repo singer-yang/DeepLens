@@ -18,6 +18,7 @@ class DOE(DeepObj):
     def __init__(self, l, d, res, fab_ps=0.001, param_model="pixel2d", device="cpu"):
         """DOE class."""
         # super().__init__()
+        raise Exception("surface_diffractive.py is deprecated. Use deeplens.optics.diffractive_surface instead.")
 
         # DOE material
         self.glass = "fused_silica"  # DOE substrate material

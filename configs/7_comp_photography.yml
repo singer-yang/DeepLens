@@ -1,0 +1,38 @@
+exp_name: "Computational photography"
+is_debug: True
+seed: 42
+
+camera:
+  lens_file: "./lenses/camera/ef50mm_f1.8.json"
+  sensor_size: [20, 20]
+  sensor_res: [1000, 1000]
+
+network:
+  name: NAFNet
+  in_chan: 5
+  out_chan: 4
+  width: 32
+  middle_blk_num: 1
+  enc_blk_nums: [1, 1, 1, 18]
+  dec_blk_nums: [1, 1, 1, 1]
+  ckpt_path: null
+
+train:
+  epochs: 100
+  eval_every_n_epochs: 5
+  log_every_n_steps: 100
+  lr: 1e-4
+
+train_set:
+  dataset: "./datasets/DIV2K_train_HR"
+  res: [512, 512]
+  output_type: "rggbi"
+  batch_size: 4
+  num_workers: 3
+
+eval_set:
+  dataset: "./datasets/DIV2K_valid_HR"
+  res: [512, 512]
+  output_type: "rggbi"
+  batch_size: 1
+  num_workers: 3
