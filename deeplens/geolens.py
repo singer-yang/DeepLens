@@ -243,58 +243,6 @@ class GeoLens(Lens):
         return rays
 
     @torch.no_grad()
-    def sample_parallel_new(
-        self,
-        fov_x=[0.0],
-        fov_y=[0.0],
-        num_rays=SPP_CALC,
-        wvln=DEFAULT_WAVE,
-        entrance_pupil=False,
-    ):
-        """Sample parallel rays from object space. Returns rays for each combination of fov_x and fov_y. Used for geometric optics calculation.
-
-        Args:
-            fov_x (float or list): angle rotated from z-axis to ray direction in x0z plane, positive is clockwise.
-            fov_y (float or list): angle rotated from z-axis to ray direction in y0z plane, positive is clockwise.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_fov_x, num_fov_y, num_rays, 3]
-        """
-
-        if isinstance(fov_x, float):
-            fov_x = [fov_x]
-        if isinstance(fov_y, float):
-            fov_y = [fov_y]
-
-        # Sample points on the pupil
-        if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilr = 0, self.surfaces[0].r
-        
-        ray_o = self.sample_circle(
-            pupilr, pupilz, shape=[len(fov_x), len(fov_y), num_rays]
-        )  # [num_fov_x, num_fov_y, num_rays, 3]
-
-        ray_o2 = ray_o.clone()
-        delta_z = -10
-        ray_o[..., 2] = delta_z
-        for idx in range(len(fov_y)):
-            ray_o[0, idx, ..., 1] = ray_o[0, idx, ..., 1] - ((pupilz + abs(delta_z)) * math.tan(fov_y[idx]))
-
-        # Calculate ray directions
-        ray_d = ray_o2 - ray_o
-
-        # Form rays
-        rays = Ray(ray_o, ray_d, wvln, device=self.device, coherent=True)  
-
-        return rays
-    
-    @torch.no_grad()
     def sample_point_source_2D(
         self,
         fov=0.0,
@@ -1794,8 +1742,8 @@ class GeoLens(Lens):
             o2 = ray.project_to(self.d_sensor)  # shape [num_grid, num_grid, spp, 2]
 
             # Use only center region of points, because we assume center points have no distortion
-            center_start = o1.shape[0] // 2 - o1.shape[0] // 8
-            center_end = o1.shape[0] // 2 + o1.shape[0] // 8
+            center_start = GEO_GRID // 2 - GEO_GRID // 8
+            center_end = GEO_GRID // 2 + GEO_GRID // 8
             o1_center = o1[center_start:center_end, center_start:center_end, :, :]
             o2_center = o2[center_start:center_end, center_start:center_end, :, :]
             ra_center = ray.ra.clone().detach()[
@@ -1955,16 +1903,10 @@ class GeoLens(Lens):
         center_x = torch.min(torch.abs(ray.o[:, idx]))
         center_idx = torch.where(torch.abs(ray.o[:, idx]) == center_x)[0][0].item()
         chief_ray_o = inc_ray.o[center_idx, :]
+        chief_ray_d = torch.tensor(
+            [0, math.sin(hfov), math.cos(hfov)], device=self.device
+        )
 
-        if idx == 0:
-            chief_ray_d = torch.tensor(
-                [math.sin(hfov), 0, math.cos(hfov)], device=self.device
-                )
-        else:
-            chief_ray_d = torch.tensor(
-                [0, math.sin(hfov), math.cos(hfov)], device=self.device
-                )
-        
         return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
@@ -2904,55 +2846,7 @@ class GeoLens(Lens):
             rms += torch.sum(o2_norm**2 * ray.ra.unsqueeze(-1)) / torch.sum(ray.ra)
 
         return rms / 3
-    
-    def loss_rms_infinite(self):
-        """Compute RGB RMS error per pixel, forward rms error.
 
-        Can also revise this function to plot PSF.
-        """
-        num_fields = 3
-        fov_x = [0.0]
-        fov_y = torch.linspace(0.0, self.hfov, num_fields).tolist()
-
-        all_rms_errors = []
-        all_rms_radii = []
-        for i, wvln in enumerate([WAVE_RGB[0], WAVE_RGB[1], WAVE_RGB[2]]):
-            # Ray tracing
-            ray = self.sample_parallel_new(
-                fov_x=fov_x, fov_y=fov_y, num_rays=SPP_PSF, wvln=wvln
-            )
-            ray = self.trace2sensor(ray)
-
-            # center for reference
-            pointc_center = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
-                -2
-            ) / ray.ra.sum(-1).add(EPSILON).unsqueeze(-1)   # shape [1, num_fields, 2]
-            pointc_center = pointc_center.unsqueeze(-2).repeat(
-                1, 1, SPP_PSF, 1
-            )  # shape [1, num_fields, num_rays, 2]
-
-            # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_center) * ray.ra.unsqueeze(-1)
-            
-            # error
-            rms_error = (((o2_norm**2).sum(-1) * ray.ra).sum(-1) / 
-                            (ray.ra.sum(-1) + EPSILON)
-                            ).sqrt()   # shape [1, num_fields]
-            
-            # radius
-            rms_radius = ((o2_norm**2).sum(-1) * ray.ra).sqrt().max(dim=-1).values
-            all_rms_errors.append(rms_error)
-            all_rms_radii.append(rms_radius)
-
-        # calculate average
-        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-        avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-
-        loss_rms = 0.5 *avg_rms_error[..., 0] + 0.5* avg_rms_error[..., 1] + avg_rms_error[..., 2]
-        loss_geo = avg_rms_radius.sum() / len(avg_rms_radius)
-
-        return loss_rms, loss_geo
-    
     def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
         """Loss function designed on the MTF. We want to maximize MTF values."""
         loss = 0.0
