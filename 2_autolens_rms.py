@@ -131,16 +131,57 @@ def curriculum_design(
                 multi_plot=False,
             )
 
+            # Sample new rays and calculate target centers
+            rays_backup = []
+            for wv in WAVE_RGB:
+                ray = self.sample_point_source(
+                    depth=depth,
+                    num_rays=spp,
+                    num_grid=num_grid,
+                    wvln=wv,
+                    importance_sampling=importance_sampling,
+                )
+                rays_backup.append(ray)
+
+            center_p = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+            center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
+
         # =======================================
         # Optimize lens by minimizing rms
         # =======================================
+        loss_rms = []
+        for j, wv in enumerate(WAVE_RGB):
+            # Ray tracing to sensor
+            ray = rays_backup[j].clone()
+            ray = self.trace2sensor(ray)
+            xy = ray.o[..., :2]  # [h, w, spp, 2]
+            ra = ray.ra.clone().detach()  # [h, w, spp]
+            xy_norm = (xy - center_p) * ra.unsqueeze(-1)
+
+            # Use only quater of rays
+            xy_norm = xy_norm[num_grid // 2 :, num_grid // 2 :, :, :]
+            ra = ra[num_grid // 2 :, num_grid // 2 :, :]  # [h/2, w/2, spp]
+
+            # Weight mask (L2 error map)
+            with torch.no_grad():
+                weight_mask = (xy_norm.clone().detach() ** 2).sum(-1).sqrt().sum(-1) / (
+                    ra.sum([-1]) + EPSILON
+                )
+                weight_mask /= weight_mask.mean()  # shape of [M, M]
+
+            # Weighted L2 loss
+            l_rms = torch.mean(
+                (
+                    (xy_norm**2 + EPSILON).sum(-1).sqrt().sum(-1)
+                    / (ra.sum([-1]) + EPSILON)
+                    * weight_mask
+                )
+            )
+            loss_rms.append(l_rms)
+
         # RMS loss for all wavelengths
-        num_fields = 101
-        loss_rms_fov = self.loss_rms_infinite(num_fields)
-        loss_focus_fov = torch.clamp(loss_focus_fov, min=EPSILON)
-        w_fov = torch.linspace(1.0, 10.0, num_fields).to(self.device)
-        loss_rms = torch.mean(w_fov * loss_rms_fov)
-        
+        loss_rms = sum(loss_rms) / len(loss_rms)
+
         # Lens design constraint
         loss_reg = self.loss_reg()
         w_reg = 0.1
