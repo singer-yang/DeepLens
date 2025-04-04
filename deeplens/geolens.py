@@ -2823,30 +2823,43 @@ class GeoLens(Lens):
         loss_avg = sum(loss) / len(loss)
         return loss_avg
 
-    def loss_rms(self, depth=DEPTH):
+    def loss_rms(self, num_rays=SPP_CALC, num_grid=GEO_GRID, depth=DEPTH, importance_sampling=False):
         """Compute RGB RMS error per pixel, forward rms error.
 
         Can also revise this function to plot PSF.
         """
         # PSF and RMS by patch
-        rms = 0.0
-        for wvln in WAVE_RGB:
+        all_rms_errors = []
+        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
             ray = self.sample_point_source(
                 depth=depth,
-                num_rays=SPP_PSF,
-                num_grid=GEO_GRID,
+                num_rays=num_rays,
+                num_grid=num_grid,
                 wvln=wvln,
+                importance_sampling=importance_sampling,
             )
-            ray, _ = self.trace(ray)
-            o2 = ray.project_to(self.d_sensor)
-            o2_center = (o2 * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(
-                EPSILON
-            ).unsqueeze(-1)
-            # normalized to center (0, 0)
-            o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)
-            rms += torch.sum(o2_norm**2 * ray.ra.unsqueeze(-1)) / torch.sum(ray.ra)
+            ray = self.trace2sensor(ray)
+            
+            # Green light point center for reference
+            if i == 0:
+                pointc_green = ((ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(-2) /
+                                ray.ra.sum(-1).add(EPSILON).unsqueeze(-1))  # shape [num_grid, num_grid, 2]
+                pointc_green = pointc_green.unsqueeze(-2).repeat(
+                    1, 1, num_rays, 1
+                )  # shape [1, num_grid, num_grid, 2]
 
-        return rms / 3
+            # Calculate RMS error
+            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
+            o2_norm = o2_norm[num_grid // 2, num_grid // 2, ...]
+            ray.ra = ray.ra[num_grid // 2, num_grid // 2, ...]
+
+            rms_error = torch.mean((((o2_norm ** 2).sum(-1) * ray.ra).sum(-1) /
+                         (ray.ra.sum(-1) + EPSILON)).sqrt()
+                       ) * 1e3
+            all_rms_errors.append(rms_error)
+
+        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
+        return avg_rms_error
 
     def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
         """Loss function designed on the MTF. We want to maximize MTF values."""
