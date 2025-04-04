@@ -301,11 +301,11 @@ class RGBSensor(Sensor):
         return image
 
     def raw2bayer(self, img_raw):
-        """Unprocess the raw image from [0, 1] to [~black_level, 2**bit - 1].
+        """Unprocess the raw image from [0, 1] to [~black_level, 2**bit - 1], because noise is simulated in the N-bit bayer space. This function is non-differentiable because round() removes valid gradients.
 
         Args:
             img_raw: Tensor of shape (B, 3, H, W), range [0, 1]
-
+        
         Returns:
             bayer_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
         """
@@ -401,12 +401,13 @@ class RGBSensor(Sensor):
 
         return rggb
 
-    def rggb2bayer(self, rggb):
-        """Convert RGGB image to RAW Bayer.
+    def rggb2bayer(self, rggb, round=False):
+        """Convert RGGB image to RAW Bayer for ISP processing. This function needs to be differentiable.
 
         Args:
             rggb: Tensor of shape [4, H/2, W/2] or [B, 4, H/2, W/2], range [0, 1]
-
+            round: If True, round the output to the nearest integer. Default is False because round() is not differentiable.
+        
         Returns:
             bayer: Tensor of shape [1, H, W] or [B, 1, H, W], range [~black_level, 2**bit - 1]
         """
@@ -428,7 +429,10 @@ class RGBSensor(Sensor):
         bayer[:, 0, 1 : 2 * H : 2, 1 : 2 * W : 2] = rggb[:, 3, :, :]
 
         # Data range [0, 1] -> [0, 2**bit-1]
-        bayer = torch.round(bayer * (2**bit - 1 - black_level) + black_level)
+        bayer = bayer * (2**bit - 1 - black_level) + black_level
+
+        if round:
+            bayer = torch.round(bayer)
 
         if single_image:
             bayer = bayer.squeeze(0)
