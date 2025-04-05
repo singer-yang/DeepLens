@@ -103,7 +103,7 @@ def local_psf_render(input, psf,expand=False):
     if expand:
         img = F.fold(y, (Himg+pad*2, Wimg+pad*2), (Ks, Ks),padding=0)
     else:
-        img = F.fold(y, (Himg, Wimg), (Ks, Ks),padding=1)
+        img = F.fold(y, (Himg, Wimg), (Ks, Ks),padding=pad)
     return img
 
 
