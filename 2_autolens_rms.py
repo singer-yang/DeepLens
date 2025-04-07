@@ -56,7 +56,12 @@ def config():
     args["num_gpus"] = num_gpus
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    
+    # Log the device information
+    if torch.cuda.is_available():
+        logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    else:
+        logging.info("Using CPU")
 
     # ==> Save config and original code
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -70,7 +75,7 @@ def config():
 
 
 def curriculum_design(
-    self,
+    self:GeoLens,
     lrs=[5e-4, 1e-4, 0.1, 1e-4],
     decay=0.02,
     iterations=5000,
