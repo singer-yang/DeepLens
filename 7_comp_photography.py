@@ -67,7 +67,12 @@ def config():
     args["num_gpus"] = torch.cuda.device_count()
     args["ddp"] = args["num_gpus"] > 1
     args["device"] = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    
+    # Log the device information
+    if torch.cuda.is_available():
+        logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    else:
+        logging.info("Using CPU")
 
     # Save config and code
     with open(f"{result_dir}/config.yml", "w") as f:
