@@ -71,9 +71,9 @@ class ComplexWave(DeepObj):
         assert wvln > 0.1 and wvln < 1, "wvln unit should be [um]."
         self.wvln = wvln  # wvln, store in [um]
         self.k = 2 * torch.pi / (self.wvln * 1e-3)  # distance unit [mm]
-        self.phy_size = np.array(phy_size)  # physical size with padding, in [mm]
+        self.phy_size = phy_size  # physical size with padding, in [mm]
         self.valid_phy_size = (
-            self.phy_size if valid_phy_size is None else np.array(valid_phy_size)
+            self.phy_size if valid_phy_size is None else valid_phy_size
         )  # physical size without padding, in [mm]
 
         assert phy_size[0] / self.res[0] == phy_size[1] / self.res[1], (
@@ -602,7 +602,7 @@ def RayleighSommerfeldIntegral(
     # Parameters
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
     wvln_mm = wvln * 1e-3  # [um] to [mm]
-    k = n * 2 * np.pi / wvln_mm  # wave number [mm]-1
+    k = n * 2 * torch.pi / wvln_mm  # wave number [mm]-1
     if x2 is None:
         x2 = x1.clone()
     if y2 is None:
@@ -633,7 +633,7 @@ def RayleighSommerfeldIntegral(
         obliq = z / r
 
         u2 = torch.sum(
-            u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * np.pi)),
+            u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * torch.pi)),
             (0, 1),
         )
         u2 = u2 / (1j * wvln_mm)
@@ -660,7 +660,7 @@ def RayleighSommerfeldIntegral(
 
                 # Shape of [patch_size, patch_size]
                 u2_patch = torch.sum(
-                    u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * np.pi)),
+                    u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * torch.pi)),
                     (0, 1),
                 )
 

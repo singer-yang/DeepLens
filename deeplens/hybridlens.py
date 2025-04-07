@@ -33,7 +33,7 @@ from .optics.monte_carlo import forward_integral
 from .optics.geometric_surface import Diffractive_GEO
 from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from .optics.wave import AngularSpectrumMethod
-from .optics.waveoptics_utils import diff_float
+from .optics.utils import diff_float
 from .geolens_utils import draw_setup_2d, draw_raytraces_2d
 
 
@@ -44,6 +44,7 @@ class HybridLens(Lens):
         1. Aberration of the refractive lens
         2. DOE phase modulation
     """
+
     def __init__(self, lens_path):
         super().__init__(lens_path)
         self.double()
@@ -71,15 +72,18 @@ class HybridLens(Lens):
             elif doe_dict["param_model"] == "zernike":
                 doe0 = Zernike.init_from_dict(doe_dict)
             else:
-                raise ValueError(f"Unsupported DOE parameter model: {doe_dict['param_model']}")
+                raise ValueError(
+                    f"Unsupported DOE parameter model: {doe_dict['param_model']}"
+                )
 
             self.doe = doe0
 
             # Add a DOE surface to GeoLens
-            geolens0.surfaces.append(Diffractive_GEO(r=doe0.size[0] / float(np.sqrt(2)), d=doe0.d))
+            r_doe = float(np.sqrt(doe0.w**2 + doe0.h**2) / 2)
+            geolens0.surfaces.append(Diffractive_GEO(r=r_doe, d=doe0.d))
             self.geolens = geolens0
 
-            #
+            # Update sensor resolution and pixel size
             self.sensor_res = geolens0.sensor_res
             self.pixel_size = geolens0.pixel_size
 
@@ -149,27 +153,37 @@ class HybridLens(Lens):
 
         # Draw light path
         color_list = ["#CC0000", "#006600", "#0066CC"]
-        views = [0.0, float(np.rad2deg(geolens.hfov) * 0.707), float(np.rad2deg(geolens.hfov) * 0.99)]
+        views = [
+            0.0,
+            float(np.rad2deg(geolens.hfov) * 0.707),
+            float(np.rad2deg(geolens.hfov) * 0.99),
+        ]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
         num_rays = 5
         for i, view in enumerate(views):
             # Draw ray tracing
             ray = geolens.sample_point_source_2D(
-                depth=depth, fov=view, num_rays=num_rays, entrance_pupil=True, wvln=WAVE_RGB[2 - i]
+                depth=depth,
+                fov=view,
+                num_rays=num_rays,
+                entrance_pupil=True,
+                wvln=WAVE_RGB[2 - i],
             )
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
-            ax, fig = draw_raytraces_2d(ray_o_record, ax=ax, fig=fig, color=color_list[i])
+            ax, fig = draw_raytraces_2d(
+                ray_o_record, ax=ax, fig=fig, color=color_list[i]
+            )
 
             # Draw wave propagation
-            ray.prop_to(geolens.d_sensor) # shape [num_rays, 3]
+            ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
             arc_center = (ray.o[:, 0] * ray.ra).sum() / ray.ra.sum()
             arc_center = arc_center.item()
             # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
             arc_radi = geolens.d_sensor.item() - self.doe.d.item()
             chief_theta = np.rad2deg(
-                    np.arctan2(
-                        ray.o[0, 0].item() - ray_o_record[-1][num_rays//2, 0].item(),
-                        ray.o[0, 2].item() - ray_o_record[-1][num_rays//2, 2].item(),
+                np.arctan2(
+                    ray.o[0, 0].item() - ray_o_record[-1][num_rays // 2, 0].item(),
+                    ray.o[0, 2].item() - ray_o_record[-1][num_rays // 2, 2].item(),
                 )
             )
             theta1 = chief_theta - 10
@@ -227,9 +241,9 @@ class HybridLens(Lens):
             "Coherent ray tracing spp is too small, "
             "which may lead to inaccurate simulation."
         )
-        assert (
-            torch.get_default_dtype() == torch.float64
-        ), "Default dtype must be set to float64 for accurate phase tracing."
+        assert torch.get_default_dtype() == torch.float64, (
+            "Default dtype must be set to float64 for accurate phase tracing."
+        )
 
         geolens, doe = self.geolens, self.doe
 
@@ -259,9 +273,7 @@ class HybridLens(Lens):
             ks=doe.res[0],
             pointc=torch.zeros_like(point[:, :2]),
             coherent=True,
-        ).squeeze(
-            0
-        )  # shape [H, W]
+        ).squeeze(0)  # shape [H, W]
 
         # Compute PSF center based on chief ray
         psf_center = [
@@ -300,9 +312,9 @@ class HybridLens(Lens):
             )
 
         # Check lens last surface
-        assert isinstance(
-            self.geolens.surfaces[-1], Diffractive_GEO
-        ), "The last lens surface should be a DOE."
+        assert isinstance(self.geolens.surfaces[-1], Diffractive_GEO), (
+            "The last lens surface should be a DOE."
+        )
         geolens, doe = self.geolens, self.doe
 
         # Compute pupil field by coherent ray tracing

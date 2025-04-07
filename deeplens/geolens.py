@@ -40,7 +40,6 @@ from .optics.basics import (
     SPP_PSF,
     SPP_RENDER,
     WAVE_RGB,
-    init_device,
 )
 from .optics.materials import Material
 from .optics.monte_carlo import forward_integral
@@ -55,7 +54,7 @@ from .optics.geometric_surface import (
     ThinLens,
 )
 from .optics.wave import AngularSpectrumMethod
-from .optics.waveoptics_utils import diff_float
+from .optics.utils import diff_float
 from .utils import (
     batch_psnr,
     batch_ssim,
