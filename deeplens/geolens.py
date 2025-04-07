@@ -314,14 +314,14 @@ class GeoLens(Lens):
         # Sample normalized grid points [-1, 1] * [-1, 1] on the sensor plane
         x, y = torch.meshgrid(
             torch.linspace(
-                -1 / 2,
-                1 / 2,
+                -1,
+                1,
                 num_grid[1],
                 device=self.device,
             ),
             torch.linspace(
-                -1 / 2,
-                1 / 2,
+                -1,
+                1,
                 num_grid[0],
                 device=self.device,
             ),
@@ -335,7 +335,7 @@ class GeoLens(Lens):
 
         # Scale grid points to the object space
         scale = self.calc_scale_pinhole(depth=depth)
-        x, y = x * self.sensor_size[1] * scale, y * self.sensor_size[0] * scale
+        x, y = x * (self.sensor_size[1]/2) * scale, y * (self.sensor_size[0]/2) * scale
 
         # Form ray origins
         z = torch.full_like(x, depth)
@@ -800,7 +800,7 @@ class GeoLens(Lens):
 
         return image
 
-    def unwarp(self, img, depth=DEPTH, grid_size=128, crop=True):
+    def unwarp(self, img, depth=DEPTH, grid_size=128, crop=True, flip=True):
         """Unwarp rendered images using distortion map.
 
         Args:
@@ -819,6 +819,7 @@ class GeoLens(Lens):
 
         # Interpolate distortion grid to image resolution
         distortion_grid = distortion_grid.permute(2, 0, 1).unsqueeze(1)
+        distortion_grid = torch.flip(distortion_grid, [-2]) if flip else distortion_grid
         distortion_grid = F.interpolate(
             distortion_grid, img.shape[-2:], mode="bilinear", align_corners=True
         )
