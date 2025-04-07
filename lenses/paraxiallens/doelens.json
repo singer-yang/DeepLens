@@ -1,7 +1,7 @@
 {
     "info": "A paraxial DOE lens system.",
     "d_sensor": 50.0,
-    "l_sensor": 4.0,
+    "sensor_size": [4.0, 4.0],
     "sensor_res": [2000, 2000],
     "surfaces": [
         {
