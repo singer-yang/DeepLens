@@ -71,18 +71,20 @@ class ComplexWave(DeepObj):
         assert wvln > 0.1 and wvln < 1, "wvln unit should be [um]."
         self.wvln = wvln  # wvln, store in [um]
         self.k = 2 * torch.pi / (self.wvln * 1e-3)  # distance unit [mm]
-        self.phy_size = np.array(phy_size)  # physical size with padding, in [mm]
+        self.phy_size = phy_size  # physical size with padding, in [mm]
         self.valid_phy_size = (
-            self.phy_size if valid_phy_size is None else np.array(valid_phy_size)
+            self.phy_size if valid_phy_size is None else valid_phy_size
         )  # physical size without padding, in [mm]
 
-        assert (
-            phy_size[0] / self.res[0] == phy_size[1] / self.res[1]
-        ), "Wrong pixel size."
+        assert phy_size[0] / self.res[0] == phy_size[1] / self.res[1], (
+            "Wrong pixel size."
+        )
         self.ps = phy_size[0] / self.res[0]  # pixel size, float value
 
         self.x, self.y = self.gen_xy_grid()
-        self.z = torch.full_like(self.x, z) # Maybe keeping z as a float tensor is better
+        self.z = torch.full_like(
+            self.x, z
+        )  # Maybe keeping z as a float tensor is better
 
     def load_img(self, img):
         """Load an image and use its pixel values as the amplitude of the complex wave field.
@@ -160,7 +162,7 @@ class ComplexWave(DeepObj):
             [2] https://github.com/kaanaksit/odak/blob/master/odak/wave/classical.py
             [3] https://spie.org/samples/PM103.pdf
             [4] "Non-approximated Rayleigh Sommerfeld diffraction integral: advantages and disadvantages in the propagation of complex wave fields"
-    
+
         Args:
             prop_dist (float): propagation distance, unit [mm].
             n (float): refractive index.
@@ -182,9 +184,13 @@ class ComplexWave(DeepObj):
 
         else:
             # Other distances: Angular Spectrum Method
-            prop_dist_min = Nyquist_zmin(wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0])
+            prop_dist_min = Nyquist_zmin(
+                wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0]
+            )
             if np.abs(prop_dist) < prop_dist_min:
-                print(f"Minium required propagation distance is {prop_dist_min} mm, but propagation is still performed.")
+                print(
+                    f"Minium required propagation distance is {prop_dist_min} mm, but propagation is still performed."
+                )
             self.u = AngularSpectrumMethod(
                 self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n
             )
@@ -229,7 +235,7 @@ class ComplexWave(DeepObj):
 
     def save_image(self, save_name=None, data="irr"):
         return self.show(save_name=save_name, data=data)
-    
+
     def show(self, save_name=None, data="irr"):
         """Save the field as an image."""
         cmap = "gray"
@@ -323,6 +329,7 @@ class ComplexWave(DeepObj):
         self.z = torch.flip(self.z, [-1, -2])
         return self
 
+
 # ===================================
 # Diffraction functions
 # ===================================
@@ -345,8 +352,8 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
         u: complex field, shape [H, W] or [B, 1, H, W]
     """
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
-    wvln_mm = wvln * 1e-3  # [um] to [mm]
-    k = 2 * n * np.pi / wvln_mm  # [mm]-1
+    wvln_mm = wvln / n * 1e-3  # [um] to [mm]
+    k = 2 * torch.pi / wvln_mm  # [mm]-1
 
     # Shape
     if len(u.shape) == 2:
@@ -399,8 +406,10 @@ def ScalableASM(u, z, wvln, ps, n=1.0, padding=True):
 def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
     """Fresnel propagation with FFT.
 
-    Ref: Computational fourier optics : a MATLAB tutorial
-         https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
+    Reference:
+        [1] Computational fourier optics : a MATLAB tutorial. Chapter 5, section 5.1
+        [2] https://qiweb.tudelft.nl/aoi/wavefielddiffraction/wavefielddiffraction.html
+        [3] https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
 
     Args:
         u: complex field, shape [H, W] or [B, C, H, W]
@@ -423,27 +432,24 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
     else:
         _, _, Wimg, Himg = u.shape
 
-    # Compute H function
+    # Wave field parameters in medium
     assert wvln > 0.1 and wvln < 10, "wvln should be in [um]."
-    wvln_mm = wvln * 1e-3  # [um] to [mm]
-    k = 2 * n * np.pi / wvln_mm
+    wvln_mm = wvln / n * 1e-3  # [um] to [mm]
+    k = 2 * torch.pi / wvln_mm
+
+    # Compute x, y, fx, fy
     x, y = torch.meshgrid(
-        torch.linspace(-0.5 * Wimg * ps, 0.5 * Himg * ps, Wimg + 1, device=u.device)[
-            :-1
-        ],
-        torch.linspace(0.5 * Wimg * ps, -0.5 * Himg * ps, Himg + 1, device=u.device)[
-            :-1
-        ],
+        torch.linspace(-0.5 * Wimg * ps, 0.5 * Himg * ps, Wimg, device=u.device),
+        torch.linspace(0.5 * Wimg * ps, -0.5 * Himg * ps, Himg, device=u.device),
         indexing="xy",
     )
     fx, fy = torch.meshgrid(
-        torch.linspace(-0.5 / ps, 0.5 / ps, Wimg + 1, device=u.device)[:-1],
-        torch.linspace(-0.5 / ps, 0.5 / ps, Himg + 1, device=u.device)[:-1],
+        torch.linspace(-0.5 / ps, 0.5 / ps, Wimg, device=u.device),
+        torch.linspace(0.5 / ps, -0.5 / ps, Himg, device=u.device),
         indexing="xy",
     )
 
     # TF or IR method
-    # Computational fourier optics. Chapter 5, section 5.1.
     if TF is None:
         if ps > wvln_mm * np.abs(z) / (Wimg * ps):
             TF = True
@@ -451,10 +457,13 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
             TF = False
 
     if TF:
-        H = np.sqrt(n) * torch.exp(-1j * np.pi * wvln_mm * z * (fx**2 + fy**2) / n)
+        H = torch.exp(-1j * torch.pi * wvln_mm * z * (fx**2 + fy**2))
         H = fftshift(H)
-    else:    
-        h = n / (1j * wvln_mm * z) * torch.exp(1j * k / (2 * z) * (x**2 + y**2))
+    else:
+        h_amp = 1 / (1j * wvln_mm * z)
+        h_const_phase = torch.exp(1j * k * z)
+        h_phase = torch.exp(1j * torch.pi / (wvln_mm * z) * (x**2 + y**2))
+        h = h_const_phase * h_amp * h_phase
         H = fft2(fftshift(h)) * ps**2
 
     # Fourier transformation
@@ -470,7 +479,7 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
 
 def FraunhoferDiffraction(u, z, wvln, ps, n=1.0, padding=True):
     """Fraunhofer diffraction.
-    
+
     Args:
         u: complex field, shape [H, W] or [B, 1, H, W]
         z: propagation distance
@@ -481,6 +490,9 @@ def FraunhoferDiffraction(u, z, wvln, ps, n=1.0, padding=True):
 
     Returns:
         u: complex field, shape [H, W] or [B, 1, H, W]
+
+    Reference:
+        [1] Computational fourier optics : a MATLAB tutorial. Chapter 5, section 5.5.
     """
     # Padding
     if padding:
@@ -492,20 +504,23 @@ def FraunhoferDiffraction(u, z, wvln, ps, n=1.0, padding=True):
         Wimg, Himg = u.shape
 
     # side length
-    wvln_mm = wvln * 1e-3  # [um] to [mm]
+    wvln_mm = wvln / n * 1e-3  # [um] to [mm]
+    k = 2 * torch.pi / wvln_mm
+
+    # Compute x, y, fx, fy
     L2 = wvln_mm * z / ps
-    ps2 = wvln_mm * z / Wimg / ps
     x2, y2 = torch.meshgrid(
-        torch.linspace(-L2 / 2, L2 / 2, Wimg + 1, device=u.device)[:-1],
-        torch.linspace(-L2 / 2, L2 / 2, Himg + 1, device=u.device)[:-1],
+        torch.linspace(-L2 / 2, L2 / 2, Wimg, device=u.device),
+        torch.linspace(-L2 / 2, L2 / 2, Himg, device=u.device),
         indexing="xy",
     )
 
-    # Computational fourier optics. Chapter 5, section 5.5.
-    # Shorter propagation will not affect final results.
-    k = 2 * n * np.pi / wvln_mm
-    c = n / (1j * wvln_mm * z) * torch.exp(1j * k / (2 * z) * (x2**2 + y2**2))
-    u = c * ps**2 * ifftshift(fft2(fftshift(u)))
+    # Shorter propagation will not affect final result
+    h_amp = 1 / (1j * wvln_mm * z)
+    h_const_phase = torch.exp(1j * k * z)
+    h_phase = torch.exp(1j * torch.pi / (wvln_mm * z) * (x2**2 + y2**2))
+    h = h_amp * h_const_phase * h_phase
+    u = h * ps**2 * ifftshift(fft2(fftshift(u)))
 
     # Remove padding
     if padding:
@@ -514,13 +529,11 @@ def FraunhoferDiffraction(u, z, wvln, ps, n=1.0, padding=True):
     return u
 
 
-def RayleighSommerfeld(
-    u, z, wvln, ps, n=1.0, memory_saving=True
-):
-    """Rayleigh-Sommerfeld diffraction. 
-    
+def RayleighSommerfeld(u, z, wvln, ps, n=1.0, memory_saving=True):
+    """Rayleigh-Sommerfeld diffraction.
+
     This function is differentiable but we donot want to use it for optimization, because it is too expensive.
-    
+
     Args:
         u: complex field, shape [H, W] or [B, 1, H, W]
         z: propagation distance
@@ -534,18 +547,32 @@ def RayleighSommerfeld(
     """
     _, _, H, W = u.shape
     x, y = torch.meshgrid(
-        torch.linspace(-0.5 * W * ps + 0.5 * ps, 0.5 * W * ps - 0.5 * ps, W, device=u.device),
-        torch.linspace(0.5 * W * ps - 0.5 * ps, -0.5 * W * ps + 0.5 * ps, H, device=u.device),
+        torch.linspace(
+            -0.5 * W * ps + 0.5 * ps, 0.5 * W * ps - 0.5 * ps, W, device=u.device
+        ),
+        torch.linspace(
+            0.5 * W * ps - 0.5 * ps, -0.5 * W * ps + 0.5 * ps, H, device=u.device
+        ),
         indexing="xy",
     )
 
     if u.ndim == 2:
-        u2 = RayleighSommerfeldIntegral(u, x1=x, y1=y, z=z, wvln=wvln, n=n, memory_saving=memory_saving)
+        u2 = RayleighSommerfeldIntegral(
+            u, x1=x, y1=y, z=z, wvln=wvln, n=n, memory_saving=memory_saving
+        )
     elif u.ndim == 4:
         u2 = torch.zeros_like(u)
         for i in range(u.shape[0]):
             for j in range(u.shape[1]):
-                u2[i, j] = RayleighSommerfeldIntegral(u[i, j], x1=x, y1=y, z=z, wvln=wvln, n=n, memory_saving=memory_saving)
+                u2[i, j] = RayleighSommerfeldIntegral(
+                    u[i, j],
+                    x1=x,
+                    y1=y,
+                    z=z,
+                    wvln=wvln,
+                    n=n,
+                    memory_saving=memory_saving,
+                )
     return u2
 
 
@@ -575,7 +602,7 @@ def RayleighSommerfeldIntegral(
     # Parameters
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
     wvln_mm = wvln * 1e-3  # [um] to [mm]
-    k = n * 2 * np.pi / wvln_mm  # wave number [mm]-1
+    k = n * 2 * torch.pi / wvln_mm  # wave number [mm]-1
     if x2 is None:
         x2 = x1.clone()
     if y2 is None:
@@ -584,8 +611,12 @@ def RayleighSommerfeldIntegral(
     # Nyquist sampling criterion
     max_side_dist = max(abs(x1.max() - x2.min()), abs(x2.max() - x1.min()))
     ps = (x1.max() - x1.min()) / x1.shape[-1]
-    zmin = Nyquist_zmin(wvln=wvln, ps=ps.item(), max_side_dist=max_side_dist.item(), n=n)
-    assert zmin < z, f"Propagation distance is too short, minimum distance is {zmin} mm."
+    zmin = Nyquist_zmin(
+        wvln=wvln, ps=ps.item(), max_side_dist=max_side_dist.item(), n=n
+    )
+    assert zmin < z, (
+        f"Propagation distance is too short, minimum distance is {zmin} mm."
+    )
 
     # Rayleigh-Sommerfeld diffraction integral
     if not memory_saving:
@@ -602,11 +633,11 @@ def RayleighSommerfeldIntegral(
         obliq = z / r
 
         u2 = torch.sum(
-            u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * np.pi)),
+            u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * torch.pi)),
             (0, 1),
         )
         u2 = u2 / (1j * wvln_mm)
-    
+
     else:
         # Patch computation
         u2 = torch.zeros_like(u1) + 0j
@@ -629,13 +660,13 @@ def RayleighSommerfeldIntegral(
 
                 # Shape of [patch_size, patch_size]
                 u2_patch = torch.sum(
-                    u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * np.pi)),
+                    u1 * obliq / r * torch.exp(1j * torch.fmod(k * r, 2 * torch.pi)),
                     (0, 1),
                 )
 
                 # Assign to output field
                 u2[i : i + patch_size, j : j + patch_size] = u2_patch
-        
+
         u2 = u2 / (1j * wvln_mm)
 
     return u2
