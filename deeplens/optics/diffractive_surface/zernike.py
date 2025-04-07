@@ -7,7 +7,7 @@ from .base import DiffractiveSurface
 class Zernike(DiffractiveSurface):
     """DOE parameterized by Zernike polynomials."""
     
-    def __init__(self, d, size, z_coeff=None, zernike_order=37, res=(2000, 2000), mat="fused_silica", fab_ps=0.001, device="cpu"):
+    def __init__(self, d, z_coeff=None, zernike_order=37, res=(2000, 2000), mat="fused_silica", fab_ps=0.001, wvln0=0.55, device="cpu"):
         """Initialize Zernike DOE.
         
         Args:
@@ -18,7 +18,7 @@ class Zernike(DiffractiveSurface):
             fab_ps: Fabrication pixel size
             device: Computation device
         """
-        super().__init__(d=d, size=size, res=res, mat=mat, fab_ps=fab_ps, device=device)
+        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, wvln0=wvln0, device=device)
         
         # Initialize Zernike coefficients with random values
         assert zernike_order==37, "Currently, Zernike DOE only supports 37 orders"
@@ -33,17 +33,19 @@ class Zernike(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize Zernike DOE from a dict."""
-        size = doe_dict["size"]
         d = doe_dict["d"]
         res = doe_dict.get("res", (2000, 2000))
         fab_ps = doe_dict.get("fab_ps", 0.001)
         z_coeff = doe_dict.get("z_coeff", None)
+        wvln0 = doe_dict.get("wvln0", 0.55)
+        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            size=size,
             d=d,
             res=res,
+            mat=mat,
             fab_ps=fab_ps,
             z_coeff=z_coeff,
+            wvln0=wvln0,
         )
 
     def _phase_map0(self):

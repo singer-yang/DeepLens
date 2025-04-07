@@ -5,9 +5,9 @@ from .base import DiffractiveSurface
 
 
 class Binary2(DiffractiveSurface):
-    def __init__(self, d, size, res=(2000, 2000), mat="fused_silica", fab_ps=0.001, device="cpu"):
+    def __init__(self, d, res=(2000, 2000), mat="fused_silica", wvln0=0.55, fab_ps=0.001, device="cpu"):
         """Initialize Binary DOE."""
-        super().__init__(d=d, size=size, res=res, mat=mat, fab_ps=fab_ps, device=device)
+        super().__init__(d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, device=device)
 
         # Initialize with random small values
         self.alpha2 = (torch.rand(1) - 0.5) * 0.02
@@ -28,13 +28,15 @@ class Binary2(DiffractiveSurface):
     def init_from_dict(cls, doe_dict):
         """Initialize Binary DOE from a dict."""
         d = doe_dict["d"]
-        size = doe_dict["size"]
         res = doe_dict.get("res", (2000, 2000))
         fab_ps = doe_dict.get("fab_ps", 0.001)
+        wvln0 = doe_dict.get("wvln0", 0.55)
+        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            size=size,
             d=d,
             res=res,
+            mat=mat,
+            wvln0=wvln0,
             fab_ps=fab_ps,
         )
 

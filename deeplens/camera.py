@@ -2,17 +2,23 @@
 
 import torch
 
-from deeplens import GeoLens
-from deeplens.sensor import RGBSensor
+from .optics.basics import DeepObj
+from .geolens import GeoLens
+from .sensor import RGBSensor
 
 
 class Renderer:
-    """In the future Renderer will be replaced as Camera to be integrated into DeepLens code"""
+    """Renderer is a basic class for image simulation."""
 
     def __init__(self, device=None):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
+
+    def __call__(self, *args, **kwargs):
+        """Render a blurry and noisy RGB image batch with for loop.
+        """
+        return self.render(*args, **kwargs)
 
     def set_device(self, device):
         """Set the device for rendering."""
@@ -25,11 +31,20 @@ class Renderer:
                 data_dict[key] = data_dict[key].to(self.device)
         return data_dict
 
-    def __call__(self, *args, **kwargs):
+    def render_single_frame(self, *args, **kwargs):
+        """Render a single frame of a blurry and noisy RGB image from spectral data.
+        """
+        raise NotImplementedError
+    
+    def render(self, data_dict):
+        """Render a blurry and noisy RGB image batch with for loop.
+        """
         raise NotImplementedError
 
 
 class Camera(Renderer):
+    """Camera includes an optical lens and a sensor. It is used to simulate real camera-captured images for computational photography."""
+
     def __init__(
         self,
         lens_file,
