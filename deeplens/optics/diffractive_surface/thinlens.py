@@ -9,25 +9,23 @@ class ThinLens(DiffractiveSurface):
     def __init__(
         self,
         d,
-        size,
         f0=None,
         res=(2000, 2000),
         mat="fused_silica",
         fab_ps=0.001,
         device="cpu",
     ):
-        """Initialize a thin lens.
+        """Initialize a thin lens. A thin lens focuses all wavelengths to the same point.
 
         Args:
             d (float): Distance of the DOE surface. [mm]
-            size (tuple or int): Size of the DOE, [w, h]. [mm]
             f0 (float): Initial focal length. [mm]
             res (tuple or int): Resolution of the DOE, [w, h]. [pixel]
             mat (str): Material of the DOE.
             fab_ps (float): Fabrication pixel size. [mm]
             device (str): Device to run the DOE.
         """
-        super().__init__(d=d, size=size, res=res, mat=mat, fab_ps=fab_ps, device=device)
+        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, device=device)
 
         # Initial focal length
         if f0 is None:
@@ -43,14 +41,16 @@ class ThinLens(DiffractiveSurface):
     def init_from_dict(cls, doe_dict):
         """Initialize a thin lens from a dict."""
         d = doe_dict["d"]
-        size = doe_dict["size"]
         f0 = doe_dict.get("f0", None)
         res = doe_dict.get("res", (2000, 2000))
+        mat = doe_dict.get("mat", "fused_silica")
+        fab_ps = doe_dict.get("fab_ps", 0.001)
         return cls(
             d=d,
-            size=size,
             f0=f0,
             res=res,
+            mat=mat,
+            fab_ps=fab_ps,
         )
 
     def get_phase_map(self, wvln=0.55):
