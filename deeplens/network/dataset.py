@@ -56,7 +56,7 @@ class PhotographicDataset(Dataset):
         """
         super(PhotographicDataset, self).__init__()
         self.img_paths = glob.glob(f"{img_dir}/**.png") + glob.glob(f"{img_dir}/**.jpg")
-        print(f"Found {len(self.img_paths)} images in {img_dir}")
+        # print(f"Found {len(self.img_paths)} images in {img_dir}")
 
         if isinstance(img_res, int):
             img_res = (img_res, img_res)
@@ -145,8 +145,41 @@ def download_and_unzip_div2k(destination_folder):
             zip_ref.extractall(destination_folder)
         print(f"Unzipping of {filename} complete.")
 
-        # Remove the zip file
+        # Remove the zip files
         os.remove(zip_path)
+
+
+def download_bsd300(destination_folder="./datasets"):
+    """Download the BSDS300 dataset.
+    
+    Reference:
+        [1] https://github.com/pytorch/examples/blob/main/super_resolution/data.py#L10
+    """
+    import urllib.request
+    import tarfile
+    from os import makedirs, remove
+    from os.path import basename, exists, join
+
+    output_image_dir = join(destination_folder, "BSDS300/images")
+
+    if not exists(output_image_dir):
+        url = "http://www2.eecs.berkeley.edu/Research/Projects/CS/vision/bsds/BSDS300-images.tgz"
+        print("downloading url ", url)
+
+        data = urllib.request.urlopen(url)
+
+        file_path = join(destination_folder, basename(url))
+        with open(file_path, 'wb') as f:
+            f.write(data.read())
+
+        print("Extracting data")
+        with tarfile.open(file_path) as tar:
+            for item in tar:
+                tar.extract(item, destination_folder)
+
+        remove(file_path)
+
+    return output_image_dir
 
 
 # ======================================
