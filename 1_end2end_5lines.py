@@ -61,16 +61,18 @@ def config():
 
     # ==> Log
     set_logger(result_dir)
-    logging.info(f'EXP: {args["EXP_NAME"]}')
+    logging.info(f"EXP: {args['EXP_NAME']}")
     if not args["DEBUG"]:
         raise Exception("Add your wandb logging config here.")
 
     # ==> Device
-    num_gpus = torch.cuda.device_count()
-    args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    if torch.cuda.is_available():
+        args["device"] = torch.device("cuda")
+        args["num_gpus"] = torch.cuda.device_count()
+        logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    else:
+        args["device"] = torch.device("cpu")
+        logging.info("Using CPU")
 
     # ==> Save config and original code
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -81,12 +83,12 @@ def config():
     return args
 
 
-def validate(net, lens, epoch, args, val_loader):
+def validate(lens: GeoLens, net, epoch, args, val_loader):
     # Complete quantiative evaluation
     return
 
 
-def end2end_train(lens, net, args):
+def end2end_train(lens: GeoLens, net, args):
     device = args["device"]
     result_dir = args["result_dir"]
 
@@ -95,8 +97,12 @@ def end2end_train(lens, net, args):
         "./datasets/DIV2K_train_HR"
     ):
         from deeplens.network.dataset import download_and_unzip_div2k
-
         download_and_unzip_div2k("./datasets")
+    elif args["train"]["train_dir"] == "./datasets/BSDS300/images/train" and not os.path.exists(
+        "./datasets/BSDS300/images/train"
+    ):
+        from deeplens.network.dataset import download_bsd300
+        download_bsd300("./datasets")
 
     train_set = ImageDataset(args["train"]["train_dir"], lens.sensor_res)
     train_loader = DataLoader(train_set, batch_size=args["train"]["bs"])
@@ -168,19 +174,19 @@ def end2end_train(lens, net, args):
         net_sche.step()
         lens_sche.step()
 
-        logging.info(f"Epoch{epoch+1} finishs.")
+        logging.info(f"Epoch{epoch + 1} finishs.")
 
         # ==> Evaluate
         if epoch % 1 == 0:
             net.eval()
             with torch.no_grad():
                 # => Save data and simple evaluation
-                lens.write_lens_json(f"{result_dir}/epoch{epoch+1}.json")
+                lens.write_lens_json(f"{result_dir}/epoch{epoch + 1}.json")
                 lens.analysis(
-                    f"{result_dir}/epoch{epoch+1}", render=False, zmx_format=True
+                    f"{result_dir}/epoch{epoch + 1}", render=False, zmx_format=True
                 )
 
-                torch.save(net.state_dict(), f"{result_dir}/net_epoch{epoch+1}.pth")
+                torch.save(net.state_dict(), f"{result_dir}/net_epoch{epoch + 1}.pth")
 
                 # => Qualitative evaluation
                 img1 = cv.cvtColor(cv.imread("./datasets/bird.png"), cv.COLOR_BGR2RGB)
@@ -198,18 +204,18 @@ def end2end_train(lens, net, args):
                 ssim_render = batch_SSIM(img1, img1_render)
                 save_image(
                     denormalize_ImageNet(img1_render),
-                    f"{result_dir}/img1_render_epoch{epoch+1}.png",
+                    f"{result_dir}/img1_render_epoch{epoch + 1}.png",
                 )
                 img1_rec = net(img1_render)
                 psnr_rec = batch_PSNR(img1, img1_rec)
                 ssim_rec = batch_SSIM(img1, img1_rec)
                 save_image(
                     denormalize_ImageNet(img1_rec),
-                    f"{result_dir}/img1_rec_epoch{epoch+1}.png",
+                    f"{result_dir}/img1_rec_epoch{epoch + 1}.png",
                 )
 
                 logging.info(
-                    f'Epoch [{epoch+1}/{args["train"]["epochs"]}], PSNR_render: {psnr_render:.4f}, SSIM_render: {ssim_render:.4f}, PSNR_rec: {psnr_rec:.4f}, SSIM_rec: {ssim_rec:.4f}'
+                    f"Epoch [{epoch + 1}/{args['train']['epochs']}], PSNR_render: {psnr_render:.4f}, SSIM_render: {ssim_render:.4f}, PSNR_rec: {psnr_rec:.4f}, SSIM_rec: {ssim_rec:.4f}"
                 )
 
                 # => Quantitative evaluation
@@ -225,8 +231,16 @@ if __name__ == "__main__":
     # Line 1: load a lens
     # ========================================
     lens = GeoLens(filename=args["lens"]["path"])
-    lens.change_sensor_res(args["train"]["img_res"])
-    net = NAFNet(in_chan=3, out_chan=3, width=16, middle_blk_num=1, enc_blk_nums=[1, 1, 1, 18], dec_blk_nums=[1, 1, 1, 1])
+    lens.set_sensor(sensor_res=args["train"]["img_res"], sensor_size=lens.sensor_size)
+    
+    net = NAFNet(
+        in_chan=3,
+        out_chan=3,
+        width=16,
+        middle_blk_num=1,
+        enc_blk_nums=[1, 1, 1, 18],
+        dec_blk_nums=[1, 1, 1, 1],
+    )
     net = net.to(lens.device)
     if args["network"]["pretrained"]:
         net.load_state_dict(torch.load(args["network"]["pretrained"]))

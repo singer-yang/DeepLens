@@ -424,6 +424,12 @@ class Surface(DeepObj):
         x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
         return self.sag(x, y) + self.d
+    
+    def surface_sag(self, x, y):
+        """Calculate sag (z) of the surface at (x, y)."""
+        x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
+        y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
+        return self.sag(x, y).item()
 
     def max_height(self):
         """Maximum valid height."""

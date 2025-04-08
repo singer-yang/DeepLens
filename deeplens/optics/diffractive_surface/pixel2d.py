@@ -1,4 +1,4 @@
-"""Pixel2D DOE parameterization."""
+"""Pixel2D DOE parameterization. Each pixel is an independent parameter."""
 
 import torch
 from .base import DiffractiveSurface
@@ -10,10 +10,10 @@ class Pixel2D(DiffractiveSurface):
     def __init__(
         self,
         d,
-        size,
         phase_map_path=None,
         res=(2000, 2000),
         mat="fused_silica",
+        wvln0=0.55,
         fab_ps=0.001,
         device="cpu",
     ):
@@ -27,15 +27,13 @@ class Pixel2D(DiffractiveSurface):
             fab_ps (float): Fabrication pixel size. [mm]
             device (str): Device to run the DOE.
         """
-        super().__init__(d=d, size=size, res=res, mat=mat, fab_ps=fab_ps, device=device)
+        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, wvln0=wvln0, device=device)
 
         # Initialize phase map with random values
         if phase_map_path is None:
             self.phase_map = torch.randn(self.res, device=self.device) * 1e-3
-
         elif isinstance(phase_map_path, str):
             self.phase_map = torch.load(phase_map_path, map_location=device)
-
         else:
             raise ValueError(f"Invalid phase_map_path: {phase_map_path}")
 
@@ -44,17 +42,19 @@ class Pixel2D(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize Pixel2D DOE from a dict."""
-        size = doe_dict["size"]
         d = doe_dict["d"]
         res = doe_dict.get("res", (2000, 2000))
         fab_ps = doe_dict.get("fab_ps", 0.001)
         phase_map_path = doe_dict.get("phase_map_path", None)
+        wvln0 = doe_dict.get("wvln0", 0.55)
+        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            size=size,
             d=d,
             res=res,
+            mat=mat,
             fab_ps=fab_ps,
             phase_map_path=phase_map_path,
+            wvln0=wvln0,
         )
 
     def _phase_map0(self):

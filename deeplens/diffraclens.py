@@ -23,32 +23,49 @@ from .optics.basics import DEPTH, EPSILON, DEFAULT_WAVE
 from .optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
 from .optics.materials import Material
 from .optics.waveoptics_utils import point_source_field, plane_wave_field
+from .optics.render_psf import render_psf
+from .optics.utils import diff_float
 
 
 class DiffractiveLens(Lens):
-    def __init__(self, filename=None, sensor_res=(2000, 2000), device=None):
+    def __init__(
+        self,
+        filename=None,
+        sensor_res=(2000, 2000),
+        sensor_size=(8.0, 8.0),
+        device=None,
+    ):
         """Initialize a lens consisting of a diffractive optical element (DOE).
 
         Args:
             filename (str): Path to the lens file.
             sensor_res (tuple, optional): Sensor resolution (W, H). Defaults to (2000, 2000).
+            sensor_size (tuple, optional): Sensor size (W, H). Defaults to (8.0, 8.0).
             device (str, optional): Device to run the lens. Defaults to "cpu".
         """
-        super().__init__(lens_path=filename, sensor_res=sensor_res, device=device)
+        super().__init__(device=device)
 
-        torch.set_default_dtype(torch.float64)
+        # Lens sensor size and resolution
+        self.sensor_res = sensor_res
+        self.sensor_size = sensor_size
+
+        # Load lens file
+        if filename is not None:
+            self.read_lens_json(filename)
+        else:
+            self.surfaces = []
+
         self.double()
 
     @classmethod
     def load_example1(cls):
-        self = cls(sensor_res=(2000, 2000))
+        self = cls(sensor_size=(4.0, 4.0), sensor_res=(2000, 2000))
 
         # Diffractive Fresnel DOE
         self.surfaces = [Fresnel(f0=50, d=0, size=4, res=4000)]
 
         # Sensor
         self.d_sensor = torch.tensor(50)
-        self.l_sensor = 4
 
         self.to(self.device)
         return self
@@ -56,7 +73,7 @@ class DiffractiveLens(Lens):
     @classmethod
     def load_example2(cls):
         """Initialize a lens from a dict."""
-        self = cls(sensor_res=(2000, 2000))
+        self = cls(sensor_size=(8.0, 8.0), sensor_res=(2000, 2000))
 
         # Diffractive Fresnel DOE
         self.surfaces = [
@@ -66,20 +83,21 @@ class DiffractiveLens(Lens):
 
         # Sensor
         self.d_sensor = torch.tensor(50)
-        self.l_sensor = 4
+        self.sensor_size = (8.0, 8.0)
+        self.sensor_res = (2000, 2000)
 
         self.to(self.device)
         return self
 
     def read_lens_json(self, filename):
-        """Load lens from a .json sfile."""
+        """Load lens from a .json file."""
         assert filename.endswith(".json"), "File must be a .json file."
 
         with open(filename, "r") as f:
             # Lens general info
             data = json.load(f)
-            self.d_sensor = data["d_sensor"]
-            self.l_sensor = data["l_sensor"]
+            self.d_sensor = torch.tensor(data["d_sensor"])
+            self.sensor_size = data["sensor_size"]
             self.sensor_res = data["sensor_res"]
             self.lens_info = data["info"]
 
@@ -89,15 +107,15 @@ class DiffractiveLens(Lens):
             for surf_dict in data["surfaces"]:
                 surf_dict["d"] = d
 
-                if surf_dict["type"] == "Binary2":
+                if surf_dict["type"].lower() == "binary2":
                     s = Binary2.init_from_dict(surf_dict)
-                elif surf_dict["type"] == "Fresnel":
+                elif surf_dict["type"].lower() == "fresnel":
                     s = Fresnel.init_from_dict(surf_dict)
-                elif surf_dict["type"] == "Pixel2D":
+                elif surf_dict["type"].lower() == "pixel2d":
                     s = Pixel2D.init_from_dict(surf_dict)
-                elif surf_dict["type"] == "ThinLens":
+                elif surf_dict["type"].lower() == "thinlens":
                     s = ThinLens.init_from_dict(surf_dict)
-                elif surf_dict["type"] == "Zernike":
+                elif surf_dict["type"].lower() == "zernike":
                     s = Zernike.init_from_dict(surf_dict)
                 else:
                     raise ValueError(
@@ -107,6 +125,46 @@ class DiffractiveLens(Lens):
                 self.surfaces.append(s)
                 d_next = surf_dict["d_next"]
                 d += d_next
+
+    def write_lens_json(self, filename):
+        """Write the lens into a file."""
+        assert filename.endswith(".json"), "File must be a .json file."
+
+        # Save lens to a file
+        data = {}
+        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
+        data["surfaces"] = []
+        data["d_sensor"] = round(self.d_sensor.item(), 2)
+        data["l_sensor"] = round(self.l_sensor, 2)
+        data["sensor_res"] = self.sensor_res
+
+        # Save diffractive surfaces
+        for i, s in enumerate(self.surfaces):
+            surf_dict = {"idx": i + 1}
+
+            if isinstance(s, Pixel2D):
+                surf_data = s.surf_dict(filename.replace(".json", "_pixel2d.pth"))
+            else:
+                surf_data = s.surf_dict()
+
+            surf_dict.update(surf_data)
+
+            if i < len(self.surfaces) - 1:
+                surf_dict["d_next"] = (
+                    self.surfaces[i + 1].d.item() - self.surfaces[i].d.item()
+                )
+
+            data["surfaces"].append(surf_dict)
+
+        # Save data to a file
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+
+    # =============================================
+    # Utils
+    # =============================================
+    def __call__(self, wave):
+        return self.forward(wave)
 
     def forward(self, wave):
         """Propagate a wave through the optical element.
@@ -122,45 +180,71 @@ class DiffractiveLens(Lens):
             wave = surf(wave)
 
         # Propagate to sensor
-        wave = wave.prop_to(self.d_sensor.item())  # TODO: check if we need .item()
+        wave = wave.prop_to(self.d_sensor.item())
 
         return wave
 
-    def __call__(self, wave):
-        return self.forward(wave)
+    # =============================================
+    # Image simulation
+    # =============================================
+    def render_mono(self, img, wvln=DEFAULT_WAVE, ks=101):
+        """Apply PSF to simulate lens blur for single spectral channel image.
 
-    # =============================================
-    # PSF-related functions
-    # =============================================
-    def psf(self, point=[0, 0, -10000.0], wvln=0.589, ks=101):
+        Args:
+            img (torch.Tensor): Input image. Shape: (B, 1, H, W)
+            wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
+            ks (int, optional): PSF kernel size. Defaults to 101.
+
+        Returns:
+            img_render (torch.Tensor): Rendered image. Shape: (B, C, H, W)
+        """
+        psf = self.psf_infinite(wvln=wvln, ks=ks).unsqueeze(0)  # (1, ks, ks)
+        img_render = render_psf(img, psf)
+        return img_render
+
+    def psf(self, depth=float("inf"), wvln=0.589, ks=101, upsample_factor=1):
         """Calculate monochromatic point PSF by wave propagation approach.
 
-            For the shifted phase issue, refer to "Modeling off-axis diffraction with the least-sampling angular spectrum method".
-
         Args:
-            point (list, optional): Normalized point source position [-1, 1] x [-1, 1] x [0, Inf]. Defaults to [0, 0, -10000.0].
+            depth (float, optional): Depth of the point source. Defaults to float('inf').
             wvln (float, optional): wvln. Defaults to 0.589 [um].
             ks (int, optional): PSF kernel size. Defaults to 101.
+            upsample_factor (int, optional): Upsampling factor to meet Nyquist sampling constraint. Defaults to 1.
 
         Returns:
             psf_out (tensor): PSF. shape [ks, ks]
-        """
-        # Get input wave field
-        x, y, z = point
-        sensor_l = self.l_sensor
-        field_res = self.surfaces[0].res
-        scale = -z / self.d_sensor.item()
-        x_obj, y_obj = x * scale * sensor_l / 2, y * scale * sensor_l / 2
 
-        # We have to sample high resolution to meet Nyquist sampling constraint.
-        inp_wave = point_source_field(
-            point=[x_obj, y_obj, z],
-            phy_size=[sensor_l, sensor_l],
-            res=field_res,
-            wvln=wvln,
-            fieldz=self.surfaces[0].d.item(),
-            device=self.device,
-        )
+        Note:
+            [1] Usually we only consider the on-axis PSF because paraxial approximation is implicitly applied for wave optical model. For the shifted phase issue, refer to "Modeling off-axis diffraction with the least-sampling angular spectrum method".
+        """
+        # Sample input wave field (We have to sample high resolution to meet Nyquist sampling constraint)
+        field_res = [
+            self.surfaces[0].res[0] * upsample_factor,
+            self.surfaces[0].res[1] * upsample_factor,
+        ]
+        field_size = [
+            self.surfaces[0].res[0] * self.surfaces[0].ps,
+            self.surfaces[0].res[1] * self.surfaces[0].ps,
+        ]
+        if depth == float("inf"):
+            inp_wave = plane_wave_field(
+                phy_size=field_size,
+                res=field_res,
+                wvln=wvln,
+                z=0.0,
+                device=self.device,
+                dtype=self.dtype,
+            )
+        else:
+            inp_wave = point_source_field(
+                point=[0.0, 0.0, depth],
+                phy_size=field_size,
+                res=field_res,
+                wvln=wvln,
+                fieldz=self.surfaces[0].d.item(),
+                device=self.device,
+                dtype=self.dtype,
+            )
 
         # Calculate intensity on the sensor. Shape [H_sensor, W_sensor]
         output_wave = self.forward(inp_wave)
@@ -172,9 +256,9 @@ class DiffractiveLens(Lens):
             align_corners=False,
         )[0, 0, :, :]
 
-        # Crop the valid patch of the full-resolution intensity as the PSF
-        coord_c_i = int((1 + y) * self.sensor_res[1] / 2)
-        coord_c_j = int((1 - x) * self.sensor_res[0] / 2)
+        # Crop the valid patch from the full-resolution intensity map as the PSF
+        coord_c_i = int(self.sensor_res[1] / 2)
+        coord_c_j = int(self.sensor_res[0] / 2)
         intensity_full_res = F.pad(
             intensity_full_res,
             [ks // 2, ks // 2, ks // 2, ks // 2],
@@ -187,82 +271,7 @@ class DiffractiveLens(Lens):
         psf /= psf.sum()
         psf = torch.flip(psf, [0, 1])
 
-        return psf
-
-    def psf_infinite(self, wvln=DEFAULT_WAVE, ks=101):
-        """Calculate monochromatic PSF of infinite point source (plane wave).
-
-        Args:
-            wvln (float, optional): wvln. Defaults to 0.589 [um].
-            ks (int, optional): PSF kernel size. Defaults to 101.
-
-        Returns:
-            psf_out (tensor): PSF. shape [ks, ks]
-        """
-        # Get input wave field
-        sensor_l = self.l_sensor
-        field_res = self.surfaces[0].res
-        inp_wave = plane_wave_field(
-            phy_size=[sensor_l, sensor_l], res=field_res, wvln=wvln, z=0.0, device=self.device
-        )
-
-        # Calculate intensity on the sensor. Shape [H_sensor, W_sensor]
-        output_wave = self.forward(inp_wave)
-        intensity_full_res = output_wave.u.abs() ** 2
-        intensity_full_res = F.interpolate(
-            intensity_full_res,
-            size=self.sensor_res,
-            mode="bilinear",
-            align_corners=False,
-        )[0, 0, :, :]
-
-        # Crop the valid patch of the full-resolution intensity as the PSF
-        coord_c_i = self.sensor_res[1] // 2
-        coord_c_j = self.sensor_res[0] // 2
-        intensity_full_res = F.pad(
-            intensity_full_res,
-            [ks // 2, ks // 2, ks // 2, ks // 2],
-            mode="constant",
-            value=0,
-        )
-        psf = intensity_full_res[coord_c_i : coord_c_i + ks, coord_c_j : coord_c_j + ks]
-
-        # Normalize PSF
-        psf /= psf.sum()
-        psf = torch.flip(psf, [0, 1])
-
-        return psf
-
-    def draw_psf(
-        self,
-        depth=DEPTH,
-        ks=101,
-        save_name="./psf_doelens.png",
-        log_scale=True,
-        eps=1e-4,
-    ):
-        """Draw on-axis RGB PSF.
-
-        Args:
-            depth (float): Depth of the point source
-            ks (int): Size of the PSF kernel
-            save_name (str): Path to save the PSF image
-            log_scale (bool): If True, display PSF in log scale
-        """
-        psf_rgb = self.psf_rgb(point=[0, 0, depth], ks=ks)
-
-        if log_scale:
-            psf_rgb = torch.log10(psf_rgb + eps)
-            psf_rgb = (psf_rgb - psf_rgb.min()) / (psf_rgb.max() - psf_rgb.min())
-            save_name = save_name.replace(".png", "_log.png")
-
-        save_image(psf_rgb.unsqueeze(0), save_name, normalize=True)
-
-    # =============================================
-    # Optimization
-    # =============================================
-    def get_optimizer(self, lr):
-        return self.doe.get_optimizer(lr=lr)
+        return diff_float(psf)
 
     # =============================================
     # Visualization
@@ -297,39 +306,33 @@ class DiffractiveLens(Lens):
         fig.savefig(save_name, dpi=600, bbox_inches="tight")
         plt.close(fig)
 
+    def draw_psf(
+        self,
+        depth=DEPTH,
+        ks=101,
+        save_name="./psf_doelens.png",
+        log_scale=True,
+        eps=1e-4,
+    ):
+        """Draw on-axis RGB PSF.
+
+        Args:
+            depth (float): Depth of the point source
+            ks (int): Size of the PSF kernel
+            save_name (str): Path to save the PSF image
+            log_scale (bool): If True, display PSF in log scale
+        """
+        psf_rgb = self.psf_rgb(point=[0, 0, depth], ks=ks)
+
+        if log_scale:
+            psf_rgb = torch.log10(psf_rgb + eps)
+            psf_rgb = (psf_rgb - psf_rgb.min()) / (psf_rgb.max() - psf_rgb.min())
+            save_name = save_name.replace(".png", "_log.png")
+
+        save_image(psf_rgb.unsqueeze(0), save_name, normalize=True)
+
     # =============================================
-    # IO
+    # Optimization
     # =============================================
-    def write_file(self, filename):
-        """Write the lens into a file."""
-        assert filename.endswith(".json"), "File must be a .json file."
-
-        # Save lens to a file
-        data = {}
-        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
-        data["surfaces"] = []
-        data["d_sensor"] = round(self.d_sensor.item(), 2)
-        data["l_sensor"] = round(self.l_sensor, 2)
-        data["sensor_res"] = self.sensor_res
-
-        # Save diffractive surfaces
-        for i, s in enumerate(self.surfaces):
-            surf_dict = {"idx": i + 1}
-
-            if isinstance(s, Pixel2D):
-                surf_data = s.surf_dict(filename.replace(".json", "_pixel2d.pth"))
-            else:
-                surf_data = s.surf_dict()
-
-            surf_dict.update(surf_data)
-
-            if i < len(self.surfaces) - 1:
-                surf_dict["d_next"] = (
-                    self.surfaces[i + 1].d.item() - self.surfaces[i].d.item()
-                )
-
-            data["surfaces"].append(surf_dict)
-
-        # Save data to a file
-        with open(filename, "w") as f:
-            json.dump(data, f, indent=4)
+    def get_optimizer(self, lr):
+        return self.doe.get_optimizer(lr=lr)
