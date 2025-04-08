@@ -31,8 +31,8 @@ class DiffractiveLens(Lens):
     def __init__(
         self,
         filename=None,
-        sensor_size=(8.0, 8.0),
         sensor_res=(2000, 2000),
+        sensor_size=(8.0, 8.0),
         device=None,
     ):
         """Initialize a lens consisting of a diffractive optical element (DOE).
@@ -40,14 +40,20 @@ class DiffractiveLens(Lens):
         Args:
             filename (str): Path to the lens file.
             sensor_res (tuple, optional): Sensor resolution (W, H). Defaults to (2000, 2000).
+            sensor_size (tuple, optional): Sensor size (W, H). Defaults to (8.0, 8.0).
             device (str, optional): Device to run the lens. Defaults to "cpu".
         """
-        super().__init__(
-            filename=filename,
-            sensor_size=sensor_size,
-            sensor_res=sensor_res,
-            device=device,
-        )
+        super().__init__(device=device)
+
+        # Lens sensor size and resolution
+        self.sensor_res = sensor_res
+        self.sensor_size = sensor_size
+
+        # Load lens file
+        if filename is not None:
+            self.read_lens_json(filename)
+        else:
+            self.surfaces = []
 
         self.double()
 
@@ -83,6 +89,83 @@ class DiffractiveLens(Lens):
         self.to(self.device)
         return self
 
+    def read_lens_json(self, filename):
+        """Load lens from a .json file."""
+        assert filename.endswith(".json"), "File must be a .json file."
+
+        with open(filename, "r") as f:
+            # Lens general info
+            data = json.load(f)
+            self.d_sensor = torch.tensor(data["d_sensor"])
+            self.sensor_size = data["sensor_size"]
+            self.sensor_res = data["sensor_res"]
+            self.lens_info = data["info"]
+
+            # Load diffractive surfaces/elements
+            d = 0.0
+            self.surfaces = []
+            for surf_dict in data["surfaces"]:
+                surf_dict["d"] = d
+
+                if surf_dict["type"].lower() == "binary2":
+                    s = Binary2.init_from_dict(surf_dict)
+                elif surf_dict["type"].lower() == "fresnel":
+                    s = Fresnel.init_from_dict(surf_dict)
+                elif surf_dict["type"].lower() == "pixel2d":
+                    s = Pixel2D.init_from_dict(surf_dict)
+                elif surf_dict["type"].lower() == "thinlens":
+                    s = ThinLens.init_from_dict(surf_dict)
+                elif surf_dict["type"].lower() == "zernike":
+                    s = Zernike.init_from_dict(surf_dict)
+                else:
+                    raise ValueError(
+                        f"Diffractive surface type {surf_dict['type']} not implemented."
+                    )
+
+                self.surfaces.append(s)
+                d_next = surf_dict["d_next"]
+                d += d_next
+
+    def write_lens_json(self, filename):
+        """Write the lens into a file."""
+        assert filename.endswith(".json"), "File must be a .json file."
+
+        # Save lens to a file
+        data = {}
+        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
+        data["surfaces"] = []
+        data["d_sensor"] = round(self.d_sensor.item(), 2)
+        data["l_sensor"] = round(self.l_sensor, 2)
+        data["sensor_res"] = self.sensor_res
+
+        # Save diffractive surfaces
+        for i, s in enumerate(self.surfaces):
+            surf_dict = {"idx": i + 1}
+
+            if isinstance(s, Pixel2D):
+                surf_data = s.surf_dict(filename.replace(".json", "_pixel2d.pth"))
+            else:
+                surf_data = s.surf_dict()
+
+            surf_dict.update(surf_data)
+
+            if i < len(self.surfaces) - 1:
+                surf_dict["d_next"] = (
+                    self.surfaces[i + 1].d.item() - self.surfaces[i].d.item()
+                )
+
+            data["surfaces"].append(surf_dict)
+
+        # Save data to a file
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+
+    # =============================================
+    # Utils
+    # =============================================
+    def __call__(self, wave):
+        return self.forward(wave)
+
     def forward(self, wave):
         """Propagate a wave through the optical element.
 
@@ -100,9 +183,6 @@ class DiffractiveLens(Lens):
         wave = wave.prop_to(self.d_sensor.item())
 
         return wave
-
-    def __call__(self, wave):
-        return self.forward(wave)
 
     # =============================================
     # Image simulation
@@ -194,12 +274,6 @@ class DiffractiveLens(Lens):
         return diff_float(psf)
 
     # =============================================
-    # Optimization
-    # =============================================
-    def get_optimizer(self, lr):
-        return self.doe.get_optimizer(lr=lr)
-
-    # =============================================
     # Visualization
     # =============================================
     def draw_layout(self, save_name="./doelens.png"):
@@ -258,75 +332,7 @@ class DiffractiveLens(Lens):
         save_image(psf_rgb.unsqueeze(0), save_name, normalize=True)
 
     # =============================================
-    # IO
+    # Optimization
     # =============================================
-    def read_lens_json(self, filename):
-        """Load lens from a .json file."""
-        assert filename.endswith(".json"), "File must be a .json file."
-
-        with open(filename, "r") as f:
-            # Lens general info
-            data = json.load(f)
-            self.d_sensor = torch.tensor(data["d_sensor"])
-            self.sensor_size = data["sensor_size"]
-            self.sensor_res = data["sensor_res"]
-            self.lens_info = data["info"]
-
-            # Load diffractive surfaces/elements
-            d = 0.0
-            self.surfaces = []
-            for surf_dict in data["surfaces"]:
-                surf_dict["d"] = d
-
-                if surf_dict["type"].lower() == "binary2":
-                    s = Binary2.init_from_dict(surf_dict)
-                elif surf_dict["type"].lower() == "fresnel":
-                    s = Fresnel.init_from_dict(surf_dict)
-                elif surf_dict["type"].lower() == "pixel2d":
-                    s = Pixel2D.init_from_dict(surf_dict)
-                elif surf_dict["type"].lower() == "thinlens":
-                    s = ThinLens.init_from_dict(surf_dict)
-                elif surf_dict["type"].lower() == "zernike":
-                    s = Zernike.init_from_dict(surf_dict)
-                else:
-                    raise ValueError(
-                        f"Diffractive surface type {surf_dict['type']} not implemented."
-                    )
-
-                self.surfaces.append(s)
-                d_next = surf_dict["d_next"]
-                d += d_next
-
-    def write_file(self, filename):
-        """Write the lens into a file."""
-        assert filename.endswith(".json"), "File must be a .json file."
-
-        # Save lens to a file
-        data = {}
-        data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
-        data["surfaces"] = []
-        data["d_sensor"] = round(self.d_sensor.item(), 2)
-        data["l_sensor"] = round(self.l_sensor, 2)
-        data["sensor_res"] = self.sensor_res
-
-        # Save diffractive surfaces
-        for i, s in enumerate(self.surfaces):
-            surf_dict = {"idx": i + 1}
-
-            if isinstance(s, Pixel2D):
-                surf_data = s.surf_dict(filename.replace(".json", "_pixel2d.pth"))
-            else:
-                surf_data = s.surf_dict()
-
-            surf_dict.update(surf_data)
-
-            if i < len(self.surfaces) - 1:
-                surf_dict["d_next"] = (
-                    self.surfaces[i + 1].d.item() - self.surfaces[i].d.item()
-                )
-
-            data["surfaces"].append(surf_dict)
-
-        # Save data to a file
-        with open(filename, "w") as f:
-            json.dump(data, f, indent=4)
+    def get_optimizer(self, lr):
+        return self.doe.get_optimizer(lr=lr)

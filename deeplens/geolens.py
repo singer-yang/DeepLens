@@ -67,52 +67,62 @@ from .geolens_utils import draw_lens_layout, draw_layout_3d
 
 
 class GeoLens(Lens):
-    def __init__(self, filename=None, sensor_res=(1000, 1000), device=None):
-        """Initialize a geometric lens."""
-        super().__init__(filename, sensor_res, device)
+    def __init__(self, filename=None, sensor_res=(1000, 1000), sensor_size=(8.0, 8.0), device=None):
+        """Initialize a geometric lens.
+        
+        There are three ways to initialize a GeoLens:
+            1. Load a lens from .json file
+            2. Load a lens from .zmx/.seq file
+            3. Initialize a lens with no lens file, then manually add surfaces and materials
+        """
+        super().__init__(device)
+
+        # Lens sensor size and resolution
+        self.sensor_res = sensor_res
+        self.sensor_size = sensor_size
 
         # Load lens file
         if filename is not None:
-            self.sensor_res = sensor_res
-            self.load_file(filename)
-            self.to(self.device)
-
-            # Lens calculation
-            self.find_aperture()
-            self.post_computation()
-
+            self.read_lens(filename)
         else:
-            self.sensor_res = sensor_res
             self.surfaces = []
             self.materials = []
             self.to(self.device)
 
-    def load_file(self, filename):
-        """Load lens file."""
+    def read_lens(self, filename):
+        """Read a GeoLens from a file. In this step, sensor size and resolution will usually be overwritten."""
+        # Load lens file
         if filename[-4:] == ".txt":
             raise ValueError("File format .txt has been deprecated.")
         elif filename[-5:] == ".json":
             self.read_lens_json(filename)
         elif filename[-4:] == ".zmx":
             self.read_lens_zmx(filename)
+        elif filename[-4:] == ".seq":
+            raise NotImplementedError("File format .seq is not supported yet.")
         else:
             raise ValueError(f"File format {filename[-4:]} not supported.")
+
+        # After loading lens, compute foclen, fov and fnum
+        self.to(self.device)
+        self.post_computation()
+
+    def post_computation(self):
+        """After loading lens, compute foclen, fov and fnum."""
+        # Basic lens parameter calculation
+        self.find_aperture()
+        self.hfov = self.calc_hfov()
+        self.foclen = self.calc_efl()
+        self.fnum = self.calc_fnum()
+
+        # Initialize lens design constraints (edge thickness, etc.)
+        self.init_constraints()
 
     def double(self):
         """Use double-precision for coherent ray tracing."""
         torch.set_default_dtype(torch.float64)
         for surf in self.surfaces:
             surf.double()
-
-    def post_computation(self):
-        """After loading lens, compute foclen, fov and fnum."""
-        self.find_aperture()
-
-        self.hfov = self.calc_hfov()
-        self.foclen = self.calc_efl()
-        self.fnum = self.calc_fnum()
-
-        self.init_constraints()
 
     # ====================================================================================
     # Ray sampling
@@ -652,7 +662,7 @@ class GeoLens(Lens):
             and self.sensor_res[1] == img_obj.shape[-1]
         ):
             H, W = img_obj.shape[-2], img_obj.shape[-1]
-            self.change_sensor_res(sensor_res=(H, W))
+            self.set_sensor(sensor_res=(H, W), sensor_size=self.sensor_size)
 
         # Differentiable image simulation
         if method == "psf_map":
@@ -857,7 +867,7 @@ class GeoLens(Lens):
         # Change sensor resolution to match the image
         sensor_res_original = self.sensor_res
         img = img2batch(img_org).to(self.device)
-        self.change_sensor_res(sensor_res=img.shape[-2:])
+        self.set_sensor(sensor_res=img.shape[-2:], sensor_size=self.sensor_size)
 
         # Image rendering
         img_render = self.render(img, depth=depth, method=method, spp=spp)
@@ -888,7 +898,7 @@ class GeoLens(Lens):
                 save_image(img_render, f"{save_name}_unwarped.png")
 
         # Change the sensor resolution back
-        self.change_sensor_res(sensor_res=sensor_res_original)
+        self.set_sensor(sensor_res=sensor_res_original, sensor_size=self.sensor_size)
 
         return img_render
 
@@ -1030,7 +1040,7 @@ class GeoLens(Lens):
     def psf_map(
         self,
         depth=DEPTH,
-        grid=7,
+        grid=(7, 7),
         ks=PSF_KS,
         spp=SPP_PSF,
         wvln=DEFAULT_WAVE,
@@ -1048,15 +1058,15 @@ class GeoLens(Lens):
         Returns:
             psf_map: Shape of [grid*ks, grid*ks].
         """
+        if isinstance(grid, int):
+            grid = (grid, grid)
         points = self.point_source_grid(depth=depth, grid=grid)
         points = points.reshape(-1, 3)
         psfs = self.psf(
             points=points, ks=ks, recenter=recenter, spp=spp, wvln=wvln
         ).unsqueeze(1)  # shape [grid**2, 1, ks, ks]
 
-        psf_map = make_grid(psfs, nrow=grid, padding=0)[
-            0, :, :
-        ]  # shape [grid*ks, grid*ks]
+        psf_map = psfs.reshape(grid[0], grid[1], 1, ks, ks)
         return psf_map
 
     # ====================================================================================
@@ -2181,29 +2191,33 @@ class GeoLens(Lens):
         self.hfov = hfov
 
     @torch.no_grad()
-    def set_sensor(self, sensor_res=None, sensor_size=None):
-        """Set camera sensor, define pixel size and sensor size.
+    def set_sensor(self, sensor_res, sensor_size=None, r_sensor=None):
+        """Set four parameters of camera sensor: resolution, size, r_sensor and pixel size.
 
         Args:
             sensor_res: Resolution, pixel number.
             sensor_size: Sensor size in [mm].
+            r_sensor: Sensor radius in [mm].
         """
-        if sensor_size is not None and sensor_res is not None:
+        if sensor_size is not None:
+            assert r_sensor is None, "Sensor_size is provided, no need to provide r_sensor."
             assert sensor_res[0] * sensor_size[1] == sensor_res[1] * sensor_size[0], (
                 "sensor_res and sensor_size are not consistent"
             )
 
             self.sensor_res = sensor_res
             self.sensor_size = sensor_size
+            self.r_sensor = math.sqrt(sensor_size[0]**2 + sensor_size[1]**2) / 2
             self.pixel_size = sensor_size[0] / sensor_res[0]
 
             self.post_computation()
 
-        elif sensor_res is not None:
-            # Change sensor size, resolution and pixel size. Do not change sensor diagonal radius.
+        elif r_sensor is not None:
+            assert sensor_size is None, "sensor_res and r_sensor are provided, no need to provide sensor_size."
             if isinstance(sensor_res, int):
                 sensor_res = (sensor_res, sensor_res)
             self.sensor_res = sensor_res
+            self.r_sensor = r_sensor
             self.sensor_size = [
                 2
                 * self.r_sensor
@@ -2219,15 +2233,7 @@ class GeoLens(Lens):
             self.post_computation()
 
         else:
-            # Change sensor size, resolution and sensor diagonal radius. Do not change pixel size.
-            self.sensor_size = sensor_size
-            self.sensor_res = [
-                sensor_size[0] / self.pixel_size,
-                sensor_size[1] / self.pixel_size,
-            ]
-            self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
-
-            self.post_computation()
+            raise ValueError("Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time.")
 
     @torch.no_grad()
     def prune_surf(self, expand_surf=None, surface_range=None):
@@ -3262,7 +3268,7 @@ class GeoLens(Lens):
 
         sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]
-        self.set_sensor(sensor_res=sensor_res)
+        self.set_sensor(sensor_res=sensor_res, r_sensor=self.r_sensor)
 
     def write_lens_json(self, filename="./test.json"):
         """Write the lens into .json file."""
@@ -3295,13 +3301,14 @@ class GeoLens(Lens):
     def read_lens_zmx(self, filename="./test.zmx"):
         """Read the lens from .zmx file."""
         from .geolens_utils import read_zmx
-
         loaded_lens = read_zmx(filename)
 
         # Copy all attributes from loaded_lens to self
         for attr_name, attr_value in loaded_lens.__dict__.items():
             setattr(self, attr_name, attr_value)
 
+        # Set sensor size and resolution
+        self.set_sensor(sensor_res=self.sensor_res, r_sensor=self.r_sensor)
         return self
 
     def write_lens_zmx(self, filename="./test.zmx"):
