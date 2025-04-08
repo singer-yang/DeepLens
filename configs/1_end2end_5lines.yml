@@ -11,7 +11,8 @@ network:
   lr: !!float 1e-3
 
 train:
-  train_dir: './datasets/DIV2K_train_HR'
+  # train_dir: './datasets/DIV2K_train_HR'
+  train_dir: './datasets/BSDS300/images/train'
   epochs: 10
   bs: 8
   img_res: !!python/tuple [256, 256]
