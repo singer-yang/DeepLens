@@ -20,7 +20,6 @@ def read_zmx(filename="./test.zmx"):
     """Load the lens from .zmx file."""
     # Initialize a GeoLens
     from .geolens import GeoLens
-
     geolens = GeoLens()
 
     # Read .zmx file
@@ -244,8 +243,7 @@ def create_lens(
     # Lens calculation
     lens = lens.to(lens.device)
     lens.d_sensor = torch.tensor(thickness, dtype=torch.float32).to(lens.device)
-    lens.r_sensor = imgh / 2
-    lens.set_sensor(sensor_res=lens.sensor_res)
+    lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh/2)
     lens.post_computation()
 
     # Save lens
