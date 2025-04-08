@@ -52,15 +52,12 @@ def config():
     logging.info(f"EXP: {args['EXP_NAME']}")
 
     # Device
-    num_gpus = torch.cuda.device_count()
-    args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args["device"] = device
-    
-    # Log the device information
     if torch.cuda.is_available():
+        args["device"] = torch.device("cuda")
+        args["num_gpus"] = torch.cuda.device_count()
         logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
     else:
+        args["device"] = torch.device("cpu")
         logging.info("Using CPU")
 
     # ==> Save config and original code

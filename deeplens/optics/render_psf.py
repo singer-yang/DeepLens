@@ -9,6 +9,15 @@ import torch.nn.functional as F
 # ================================================
 # PSF convolution
 # ================================================
+def conv_psf(img, psf):
+    """Convolve an image with a PSF.
+    
+    Args:
+        img (torch.Tensor): [B, C, H, W]
+        psf (torch.Tensor): [C, ks, ks]
+    """
+    return render_psf(img, psf)
+
 def render_psf(img, psf):
     """Render rgb image batch with rgb PSF.
 
@@ -30,6 +39,14 @@ def render_psf(img, psf):
     img_render = F.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
     return img_render
 
+def conv_psf_map(img, psf_map):
+    """Convolve an image with a PSF map.
+    
+    Args:
+        img (torch.Tensor): [B, 3, H, W]
+        psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
+    """
+    return render_psf_map(img, psf_map)
 
 def render_psf_map(img, psf_map):
     """Render a rgb image batch with PSF map using patch convolution.

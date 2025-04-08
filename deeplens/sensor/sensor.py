@@ -327,9 +327,10 @@ class RGBSensor(Sensor):
     
     def to(self, device):
         super().to(device)
-        self.red_response = self.red_response.to(device)
-        self.green_response = self.green_response.to(device)
-        self.blue_response = self.blue_response.to(device)
+        if self.wavelengths is not None:
+            self.red_response = self.red_response.to(device)
+            self.green_response = self.green_response.to(device)
+            self.blue_response = self.blue_response.to(device)
         return self
 
     def response_curve(self, img_spectral):
