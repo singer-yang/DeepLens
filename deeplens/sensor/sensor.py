@@ -3,6 +3,7 @@
 import math
 import torch
 import torch.nn as nn
+import json
 
 from .isp import InvertibleISP
 from .isp_modules.black_level import BlackLevelCompensation
@@ -13,6 +14,7 @@ class Sensor(nn.Module):
         self,
         bit=10,
         black_level=64,
+        size=(8.0, 6.0),
         res=(4000, 3000),
         read_noise_std=0.5,
         shot_noise_std_alpha=0.4,
@@ -22,6 +24,7 @@ class Sensor(nn.Module):
         super().__init__()
 
         # Sensor resolution and normalized pixel size
+        self.size = size
         self.res = res
         self.pixel_size = 2 / math.sqrt(self.res[0] ** 2 + self.res[1] ** 2)
 
@@ -45,6 +48,7 @@ class Sensor(nn.Module):
         bit = config.get("bit", 10)
         black_level = config.get("black_level", 64)
         res = config.get("res", (4000, 3000))
+        size = config.get("size", (8.0, 6.0))
         read_noise_std = config.get("read_noise_std", 0.5)
         shot_noise_std_alpha = config.get("shot_noise_std_alpha", 0.5)
         shot_noise_std_beta = config.get("shot_noise_std_beta", 0.0)
@@ -53,6 +57,7 @@ class Sensor(nn.Module):
             bit=bit,
             black_level=black_level,
             res=res,
+            size=size,
             read_noise_std=read_noise_std,
             shot_noise_std_alpha=shot_noise_std_alpha,
             shot_noise_std_beta=shot_noise_std_beta,
@@ -144,7 +149,9 @@ class Sensor(nn.Module):
             0.0,
         )
         if (iso > 400).any():
-            raise ValueError(f"Currently noise model only works for low ISO <= 400, got {iso}")
+            raise ValueError(
+                f"Currently noise model only works for low ISO <= 400, got {iso}"
+            )
         gain_analog = 1.0  # we only measured analog gain = 1.0
         gain_digit = (iso / self.iso_base).view(-1, 1, 1, 1)
         noise_std = torch.sqrt(
@@ -193,6 +200,7 @@ class MonoSensor(Sensor):
         bit=10,
         black_level=64,
         res=(4000, 3000),
+        size=(8.0, 6.0),
         iso_base=100,
         read_noise_std=0.5,
         shot_noise_std_alpha=0.4,
@@ -202,6 +210,7 @@ class MonoSensor(Sensor):
             bit=bit,
             black_level=black_level,
             res=res,
+            size=size,
             iso_base=iso_base,
             read_noise_std=read_noise_std,
             shot_noise_std_alpha=shot_noise_std_alpha,
@@ -234,38 +243,138 @@ class RGBSensor(Sensor):
         bit=10,
         black_level=64,
         res=(4000, 3000),
+        size=(8.0, 6.0),
         bayer_pattern="rggb",
         iso_base=100,
         read_noise_std=0.5,
         shot_noise_std_alpha=0.4,
         shot_noise_std_beta=0.0,
+        wavelengths=None,
+        red_response=None,
+        green_response=None,
+        blue_response=None,
     ):
         super().__init__(
             bit=bit,
             black_level=black_level,
             res=res,
+            size=size,
             iso_base=iso_base,
             read_noise_std=read_noise_std,
             shot_noise_std_alpha=shot_noise_std_alpha,
             shot_noise_std_beta=shot_noise_std_beta,
         )
+
+        # Initialize ISP
         self.isp = InvertibleISP(
             bit=bit,
             black_level=black_level,
             bayer_pattern=bayer_pattern,
         )
 
+        # Initialize spectral response curves
+        self.wavelengths = wavelengths
+        self.red_response = red_response
+        self.green_response = green_response
+        self.blue_response = blue_response
+        if self.wavelengths is not None:
+            self.red_response = torch.tensor(red_response) / sum(red_response)
+            self.green_response = torch.tensor(green_response) / sum(green_response)
+            self.blue_response = torch.tensor(blue_response) / sum(blue_response)
+
+    @classmethod
+    def from_config(cls, config):
+        """Create a sensor from a config file or dictionary.
+
+        Args:
+            config_path: Path to the JSON config file (optional if config is provided)
+            config: Configuration dictionary (optional if config_path is provided)
+
+        Returns:
+            An instance of RGBSensor initialized with the config parameters
+        """
+        # Extract parameters with defaults
+        res = config.get("res", (4000, 3000))
+        size = config.get("size", (8.0, 6.0))
+        bit = config.get("bit", 10)
+        black_level = config.get("black_level", 64)
+        iso_base = config.get("iso_base", 100)
+        read_noise_std = config.get("read_noise_std", 0.5)
+        shot_noise_std_alpha = config.get("shot_noise_std_alpha", 0.4)
+        bayer_pattern = config.get("bayer_pattern", "rggb")
+
+        # Get spectral response curves
+        wavelengths = config.get("wavelengths", None)
+        red_response = config.get("red_response", None)
+        green_response = config.get("green_response", None)
+        blue_response = config.get("blue_response", None)
+
+        # Create and return a new sensor instance
+        return cls(
+            res=res,
+            size=size,
+            bit=bit,
+            black_level=black_level,
+            iso_base=iso_base,
+            read_noise_std=read_noise_std,
+            shot_noise_std_alpha=shot_noise_std_alpha,
+            bayer_pattern=bayer_pattern,
+            wavelengths=wavelengths,
+            red_response=red_response,
+            green_response=green_response,
+            blue_response=blue_response,
+        )
+    
+    def to(self, device):
+        super().to(device)
+        if self.wavelengths is not None:
+            self.red_response = self.red_response.to(device)
+            self.green_response = self.green_response.to(device)
+            self.blue_response = self.blue_response.to(device)
+        return self
+
+    def response_curve(self, img_spectral):
+        """Apply response curve to the spectral image to get the raw image.
+
+        Args:
+            img_spectral: Spectral image
+
+        Returns:
+            img_raw: Raw image
+        """
+        if self.wavelengths is not None:
+            img_raw = torch.zeros(
+                (
+                    img_spectral.shape[0],
+                    3,
+                    img_spectral.shape[2],
+                    img_spectral.shape[3],
+                ),
+                device=img_spectral.device,
+            )
+            img_raw[:, 0, :, :] = (img_spectral * self.red_response.view(1, -1, 1, 1)).sum(dim=1)
+            img_raw[:, 1, :, :] = (img_spectral * self.green_response.view(1, -1, 1, 1)).sum(dim=1)
+            img_raw[:, 2, :, :] = (img_spectral * self.blue_response.view(1, -1, 1, 1)).sum(dim=1)
+        else:
+            assert img_spectral.shape[1] == 3, (
+                "No spectral response curves provided, input image must have 3 channels"
+            )
+            img_raw = img_spectral
+
+        return img_raw
+
     def forward(self, img_nbit, iso):
         """Simulate sensor output with noise and ISP.
 
         Args:
-            img: Tensor of shape (B, 3, H, W), range [~black_level, 2**bit - 1]
+            img_nbit: Tensor of shape (B, 3, H, W), range [~black_level, 2**bit - 1]
             iso: ISO value as int
 
         Returns:
             img_noise: Tensor of shape (B, 3, H, W), range [0, 1]
         """
-        img_noise = self.simu_noise(img_nbit, iso)
+        img_raw = self.response_curve(img_nbit)
+        img_noise = self.simu_noise(img_raw, iso)
         img_noise = self.isp(img_noise)
         return img_noise
 
@@ -362,7 +471,7 @@ class RGBSensor(Sensor):
             image = self.isp(bayer)
         else:
             raise ValueError(f"Invalid input type: {in_type}")
-        
+
         return image
 
     def bayer2rggb(self, bayer_nbit):

@@ -64,10 +64,14 @@ def config():
         raise Exception("Add your wandb logging config here.")
 
     # Configure device
-    args["num_gpus"] = torch.cuda.device_count()
-    args["ddp"] = args["num_gpus"] > 1
-    args["device"] = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    if torch.cuda.is_available():
+        args["device"] = torch.device("cuda")
+        args["num_gpus"] = torch.cuda.device_count()
+        args["ddp"] = args["num_gpus"] > 1
+        logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    else:
+        args["device"] = torch.device("cpu")
+        logging.info("Using CPU")
 
     # Save config and code
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -168,8 +172,7 @@ class Trainer:
         self.lpips_loss = PerceptualLoss(device=self.device)
 
         # Create metrics
-
-        self.lpips_metric = lpips.LPIPS(net="vgg").to(self.device)
+        self.lpips_metric = lpips.LPIPS(net="alex").to(self.device)
 
     def _init_data(self, train_set_config, eval_set_config):
         """Initialize data loaders."""

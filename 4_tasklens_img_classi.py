@@ -63,11 +63,13 @@ def config():
         raise Exception("Add your wandb logging config here.")
 
     # ==> Device
-    num_gpus = torch.cuda.device_count()
-    args["num_gpus"] = num_gpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args["device"] = device
-    logging.info(f"Using {num_gpus} {torch.cuda.get_device_name(0)} GPU(s)")
+    if torch.cuda.is_available():
+        args["device"] = torch.device("cuda")
+        args["num_gpus"] = torch.cuda.device_count()
+        logging.info(f"Using {args['num_gpus']} {torch.cuda.get_device_name(0)} GPU(s)")
+    else:
+        args["device"] = torch.device("cpu")
+        logging.info("Using CPU")
 
     # ==> Save config
     with open(f"{result_dir}/config.yml", "w") as f:
@@ -209,7 +211,7 @@ def validate(lens, net, epoch, args, val_loader):
         wandb.log({"classi_acc": acc})
 
 
-def train(args, lens, net):
+def train(args, lens:GeoLens, net):
     device = args["device"]
     result_dir = args["result_dir"]
     bs = args["train"]["bs"]

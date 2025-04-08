@@ -19,7 +19,7 @@ from deeplens import GeoLens
 def main():
     # Better to use a high sensor resolution (4000x4000 is small!)
     lens = GeoLens(filename="./lenses/cellphone/cellphone80deg.json")
-    lens.set_sensor(sensor_res=[4000, 4000])
+    lens.set_sensor(sensor_res=[4000, 4000], sensor_size=lens.sensor_size)
     lens.double()
 
     # Calculate the pupil field
