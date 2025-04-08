@@ -20,7 +20,6 @@ def read_zmx(filename="./test.zmx"):
     """Load the lens from .zmx file."""
     # Initialize a GeoLens
     from .geolens import GeoLens
-
     geolens = GeoLens()
 
     # Read .zmx file
@@ -162,7 +161,7 @@ DIAM {geolens.r_sensor}
 
 
 # ====================================================================================
-# Create lens
+# Lens starting point generation
 # ====================================================================================
 def create_lens(
     foclen,
@@ -173,7 +172,7 @@ def create_lens(
     lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
     save_dir="./",
 ):
-    """Create a flat starting point for camera lens design.
+    """Create a lens design starting point with flat surfaces.
 
     Contributor: Rayengineer
 
@@ -244,8 +243,7 @@ def create_lens(
     # Lens calculation
     lens = lens.to(lens.device)
     lens.d_sensor = torch.tensor(thickness, dtype=torch.float32).to(lens.device)
-    lens.r_sensor = imgh / 2
-    lens.set_sensor(sensor_res=lens.sensor_res)
+    lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh/2)
     lens.post_computation()
 
     # Save lens
@@ -629,3 +627,86 @@ def draw_layout_3d(geolens, filename=None, figsize=(10, 6), view_angle=30, show=
         plt.close()
 
     return fig, ax
+
+
+# ====================================================================================
+# Lens 3D barrier generation
+# ====================================================================================
+def create_barrier(geolens, filename, barrier_thickness=1.0, ring_height=0.5, ring_size=1.0):
+    """Create a 3D barrier for the lens system.
+
+    Args:
+        geolens: GeoLens instance
+        filename: Path to save the figure
+        barrier_thickness: Thickness of the barrier
+        ring_height: Height of the annular ring
+        ring_size: Size of the annular ring
+    """
+    barriers = []
+    rings = []
+
+    # Create barriers
+    barrier_z = 0.0
+    barrier_r = 0.0
+    barrier_length = 0.0
+    for i in range(len(geolens.surfaces)):
+        
+        # if i == 
+        barrier_r = max(geolens.surfaces[i].r, barrier_r)
+        
+        if geolens.surfaces[i].mat2.get_name() != "air":
+            # Update the barrier radius
+            # barrier_r = max(geolens.surfaces[i].r, barrier_r)
+            pass
+        else:
+            # Extend the barrier till middle of the air space to the next surface
+            max_curr_surf_d = geolens.surfaces[i].d.item() + max(geolens.surfaces[i].surface_sag(0.0, geolens.surfaces[i].r), 0.0)
+            if i < len(geolens.surfaces) - 1:
+                min_next_surf_d = geolens.surfaces[i+1].d.item() + min(geolens.surfaces[i+1].surface_sag(0.0, geolens.surfaces[i+1].r), 0.0)
+                extra_space = (min_next_surf_d - max_curr_surf_d) / 2
+            else:
+                min_next_surf_d = geolens.d_sensor.item()
+                extra_space = min_next_surf_d - max_curr_surf_d
+            
+            barrier_length = max_curr_surf_d + extra_space - barrier_z
+
+            # Create a barrier
+            barrier = {
+                "pos_z": barrier_z,
+                "pos_r": barrier_r,
+                "length": barrier_length,
+                "thickness": barrier_thickness
+            }
+            barriers.append(barrier)
+
+            # Reset the barrier parameters
+            barrier_z = barrier_length + barrier_z
+            barrier_r = 0.0
+            barrier_length = 0.0
+    
+    # # Create rings
+    # for i in range(len(geolens.surfaces)):
+    #     if geolens.surfaces[i].mat2.get_name() != "air":
+    #         ring = {
+    #             "pos_z": geolens.surfaces[i].d.item(),
+
+    # Plot lens layout
+    ax, fig = draw_setup_2d(geolens)
+    
+    # Plot barrier
+    barrier_z_ls = []
+    barrier_r_ls = []
+    for b in barriers:
+        barrier_z_ls.append(b["pos_z"])
+        barrier_z_ls.append(b["pos_z"] + b["length"])
+        barrier_r_ls.append(b["pos_r"])
+        barrier_r_ls.append(b["pos_r"])
+    ax.plot(barrier_z_ls, barrier_r_ls, "green", linewidth=1.0)
+    ax.plot(barrier_z_ls, [-i for i in barrier_r_ls], "green", linewidth=1.0)
+
+    # Plot rings
+
+    fig.savefig(filename, format="png", dpi=300)
+    plt.close()
+
+    pass

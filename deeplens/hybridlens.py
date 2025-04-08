@@ -33,7 +33,7 @@ from .optics.monte_carlo import forward_integral
 from .optics.geometric_surface import Diffractive_GEO
 from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from .optics.wave import AngularSpectrumMethod
-from .optics.waveoptics_utils import diff_float
+from .optics.utils import diff_float
 from .geolens_utils import draw_setup_2d, draw_raytraces_2d
 
 
@@ -44,45 +44,62 @@ class HybridLens(Lens):
         1. Aberration of the refractive lens
         2. DOE phase modulation
     """
-    def __init__(self, lens_path):
-        super().__init__(lens_path)
+
+    def __init__(
+        self,
+        filename=None,
+        sensor_res=(2000, 2000),
+        sensor_size=(8.0, 8.0),
+        device=None,
+    ):
+        super().__init__(device=device)
+
+        # Lens sensor size and resolution
+        self.sensor_res = sensor_res
+        self.sensor_size = sensor_size
+
+        # Load lens file
+        if filename is not None:
+            self.read_lens_json(filename)
+        else:
+            self.geolens = None
+            self.doe = None
+
         self.double()
 
-    def double(self):
-        self.geolens.double()
-        self.doe.double()
-
-    def read_lens_json(self, lens_path):
+    def read_lens_json(self, filename):
         """Read the lens from .json file."""
         # Load geolens
-        geolens0 = GeoLens(filename=lens_path)
+        geolens = GeoLens(filename=filename)
 
-        with open(lens_path, "r") as f:
+        with open(filename, "r") as f:
             data = json.load(f)
 
             # Load DOE
             doe_dict = data["DOE"]
             if doe_dict["param_model"] == "binary2":
-                doe0 = Binary2.init_from_dict(doe_dict)
+                doe = Binary2.init_from_dict(doe_dict)
             elif doe_dict["param_model"] == "pixel2d":
-                doe0 = Pixel2D.init_from_dict(doe_dict)
+                doe = Pixel2D.init_from_dict(doe_dict)
             elif doe_dict["param_model"] == "fresnel":
-                doe0 = Fresnel.init_from_dict(doe_dict)
+                doe = Fresnel.init_from_dict(doe_dict)
             elif doe_dict["param_model"] == "zernike":
-                doe0 = Zernike.init_from_dict(doe_dict)
+                doe = Zernike.init_from_dict(doe_dict)
             else:
-                raise ValueError(f"Unsupported DOE parameter model: {doe_dict['param_model']}")
+                raise ValueError(
+                    f"Unsupported DOE parameter model: {doe_dict['param_model']}"
+                )
+            self.doe = doe
 
-            self.doe = doe0
+            # Add a geometric DOE surface to GeoLens
+            r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
+            geolens.surfaces.append(Diffractive_GEO(r=r_doe, d=doe.d))
+            self.geolens = geolens
 
-            # Add a DOE surface to GeoLens
-            geolens0.surfaces.append(Diffractive_GEO(r=doe0.size[0] / float(np.sqrt(2)), d=doe0.d))
-            self.geolens = geolens0
-
-            #
-            self.sensor_res = geolens0.sensor_res
-            self.pixel_size = geolens0.pixel_size
-
+        # Update hybrid lens sensor resolution and pixel size
+        self.set_sensor(sensor_size=geolens.sensor_size, sensor_res=geolens.sensor_res)
+        self.to(self.device)
+        
     def write_lens_json(self, lens_path):
         """Write the lens into .json file."""
         geolens = self.geolens
@@ -120,98 +137,25 @@ class HybridLens(Lens):
             json.dump(data, f, indent=4)
 
     # =====================================================================
-    # Lens operation
+    # Utils
     # =====================================================================
     def analysis(self, save_name="./test.png"):
         self.draw_layout(save_name=save_name)
         self.doe.draw_phase_map(save_name=f"{save_name}_doe.png")
 
-    def prepare_sensor(self, sensor_res):
-        self.geolens.prepare_sensor(sensor_res)
-
-        self.sensor_res = self.geolens.sensor_res
-        self.pixel_size = self.geolens.pixel_size
+    def double(self):
+        self.geolens.double()
+        self.doe.double()
 
     def refocus(self, foc_dist):
         """Refocus the DoeLens to a given depth. Donot move DOE because DOE is installed with geolens in the Siggraph Asia 2024 paper."""
         self.geolens.refocus(foc_dist)
 
-    def draw_layout(self, save_name="./DOELens.png", depth=-10000.0, ax=None, fig=None):
-        """Draw DOELens layout with ray-tracing and wave-propagation."""
-        geolens = self.geolens
-
-        # Draw lens layout
-        if ax is None:
-            ax, fig = draw_setup_2d(geolens)
-            save_fig = True
-        else:
-            save_fig = False
-
-        # Draw light path
-        color_list = ["#CC0000", "#006600", "#0066CC"]
-        views = [0.0, float(np.rad2deg(geolens.hfov) * 0.707), float(np.rad2deg(geolens.hfov) * 0.99)]
-        arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
-        num_rays = 5
-        for i, view in enumerate(views):
-            # Draw ray tracing
-            ray = geolens.sample_point_source_2D(
-                depth=depth, fov=view, num_rays=num_rays, entrance_pupil=True, wvln=WAVE_RGB[2 - i]
-            )
-            ray, ray_o_record = geolens.trace(ray=ray, record=True)
-            ax, fig = draw_raytraces_2d(ray_o_record, ax=ax, fig=fig, color=color_list[i])
-
-            # Draw wave propagation
-            ray.prop_to(geolens.d_sensor) # shape [num_rays, 3]
-            arc_center = (ray.o[:, 0] * ray.ra).sum() / ray.ra.sum()
-            arc_center = arc_center.item()
-            # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
-            arc_radi = geolens.d_sensor.item() - self.doe.d.item()
-            chief_theta = np.rad2deg(
-                    np.arctan2(
-                        ray.o[0, 0].item() - ray_o_record[-1][num_rays//2, 0].item(),
-                        ray.o[0, 2].item() - ray_o_record[-1][num_rays//2, 2].item(),
-                )
-            )
-            theta1 = chief_theta - 10
-            theta2 = chief_theta + 10
-
-            for j in arc_radi_list:
-                arc_radi_j = arc_radi * j
-                arc = patches.Arc(
-                    (geolens.d_sensor.item(), arc_center),
-                    arc_radi_j,
-                    arc_radi_j,
-                    angle=180.0,
-                    theta1=theta1,
-                    theta2=theta2,
-                    color=color_list[i],
-                )
-                ax.add_patch(arc)
-
-        if save_fig:
-            # Save figure
-            ax.axis("off")
-            ax.set_title("DOE Lens")
-            fig.savefig(save_name, bbox_inches="tight", format="png", dpi=600)
-            plt.close()
-        else:
-            return ax, fig
-
-    def get_optimizer(
-        self, doe_lr=1e-4, lens_lr=[1e-4, 1e-4, 1e-2, 1e-5], lr_decay=0.01
-    ):
-        params = []
-        params += self.geolens.get_optimizer_params(lr=lens_lr, decay=lr_decay)
-        params += self.doe.get_optimizer_params(lr=doe_lr)
-
-        optimizer = torch.optim.Adam(params)
-        return optimizer
-
     # =====================================================================
     # PSF-related functions
     # =====================================================================
     def doe_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
-        """Compute the complex wavefront at the DOE plane using coherent ray tracing. This function reimplements geolens.pupil_field() by changing the wavefront computation position to the last surface.
+        """Compute the complex wave field at DOE plane using coherent ray tracing. This function reimplements geolens.pupil_field() by changing the computation position from pupil plane to the last surface (DOE).
 
         Args:
             point (torch.Tensor): Tensor of shape (3,) representing the point source position. Defaults to torch.tensor([0.0, 0.0, -10000.0]).
@@ -227,9 +171,9 @@ class HybridLens(Lens):
             "Coherent ray tracing spp is too small, "
             "which may lead to inaccurate simulation."
         )
-        assert (
-            torch.get_default_dtype() == torch.float64
-        ), "Default dtype must be set to float64 for accurate phase tracing."
+        assert torch.get_default_dtype() == torch.float64, (
+            "Default dtype must be set to float64 for accurate phase tracing."
+        )
 
         geolens, doe = self.geolens, self.doe
 
@@ -259,9 +203,7 @@ class HybridLens(Lens):
             ks=doe.res[0],
             pointc=torch.zeros_like(point[:, :2]),
             coherent=True,
-        ).squeeze(
-            0
-        )  # shape [H, W]
+        ).squeeze(0)  # shape [H, W]
 
         # Compute PSF center based on chief ray
         psf_center = [
@@ -300,9 +242,9 @@ class HybridLens(Lens):
             )
 
         # Check lens last surface
-        assert isinstance(
-            self.geolens.surfaces[-1], Diffractive_GEO
-        ), "The last lens surface should be a DOE."
+        assert isinstance(self.geolens.surfaces[-1], Diffractive_GEO), (
+            "The last lens surface should be a DOE."
+        )
         geolens, doe = self.geolens, self.doe
 
         # Compute pupil field by coherent ray tracing
@@ -370,5 +312,91 @@ class HybridLens(Lens):
 
         # Normalize and convert to float precision
         psf /= psf.sum()  # shape of [ks, ks] or [h, w]
-        psf = diff_float(psf)
-        return psf
+        return diff_float(psf)
+
+    # =====================================================================
+    # Visualization
+    # =====================================================================
+    def draw_layout(self, save_name="./DOELens.png", depth=-10000.0, ax=None, fig=None):
+        """Draw DOELens layout with ray-tracing and wave-propagation."""
+        geolens = self.geolens
+
+        # Draw lens layout
+        if ax is None:
+            ax, fig = draw_setup_2d(geolens)
+            save_fig = True
+        else:
+            save_fig = False
+
+        # Draw light path
+        color_list = ["#CC0000", "#006600", "#0066CC"]
+        views = [
+            0.0,
+            float(np.rad2deg(geolens.hfov) * 0.707),
+            float(np.rad2deg(geolens.hfov) * 0.99),
+        ]
+        arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
+        num_rays = 5
+        for i, view in enumerate(views):
+            # Draw ray tracing
+            ray = geolens.sample_point_source_2D(
+                depth=depth,
+                fov=view,
+                num_rays=num_rays,
+                entrance_pupil=True,
+                wvln=WAVE_RGB[2 - i],
+            )
+            ray, ray_o_record = geolens.trace(ray=ray, record=True)
+            ax, fig = draw_raytraces_2d(
+                ray_o_record, ax=ax, fig=fig, color=color_list[i]
+            )
+
+            # Draw wave propagation
+            ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
+            arc_center = (ray.o[:, 0] * ray.ra).sum() / ray.ra.sum()
+            arc_center = arc_center.item()
+            # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
+            arc_radi = geolens.d_sensor.item() - self.doe.d.item()
+            chief_theta = np.rad2deg(
+                np.arctan2(
+                    ray.o[0, 0].item() - ray_o_record[-1][num_rays // 2, 0].item(),
+                    ray.o[0, 2].item() - ray_o_record[-1][num_rays // 2, 2].item(),
+                )
+            )
+            theta1 = chief_theta - 10
+            theta2 = chief_theta + 10
+
+            for j in arc_radi_list:
+                arc_radi_j = arc_radi * j
+                arc = patches.Arc(
+                    (geolens.d_sensor.item(), arc_center),
+                    arc_radi_j,
+                    arc_radi_j,
+                    angle=180.0,
+                    theta1=theta1,
+                    theta2=theta2,
+                    color=color_list[i],
+                )
+                ax.add_patch(arc)
+
+        if save_fig:
+            # Save figure
+            ax.axis("off")
+            ax.set_title("DOE Lens")
+            fig.savefig(save_name, bbox_inches="tight", format="png", dpi=600)
+            plt.close()
+        else:
+            return ax, fig
+
+    # =====================================================================
+    # Optimization
+    # =====================================================================
+    def get_optimizer(
+        self, doe_lr=1e-4, lens_lr=[1e-4, 1e-4, 1e-2, 1e-5], lr_decay=0.01
+    ):
+        params = []
+        params += self.geolens.get_optimizer_params(lr=lens_lr, decay=lr_decay)
+        params += self.doe.get_optimizer_params(lr=doe_lr)
+
+        optimizer = torch.optim.Adam(params)
+        return optimizer

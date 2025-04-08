@@ -11,7 +11,7 @@ from ..materials import Material
 
 
 class DiffractiveSurface(DeepObj):
-    def __init__(self, d, size, res=(2000, 2000), wvln0=0.55, mat="fused_silica", fab_ps=0.001, device="cpu"):
+    def __init__(self, d, res=(2000, 2000), fab_ps=0.001, wvln0=0.55, mat="fused_silica", design_ps=None, device="cpu"):
         """
         Args:
             d (float): Distance of the DOE surface. [mm]
@@ -23,15 +23,11 @@ class DiffractiveSurface(DeepObj):
         """
         # Geometry
         self.d = torch.tensor(d) if not isinstance(d, torch.Tensor) else d
-        if isinstance(size, int) or isinstance(size, float):
-            self.size = [size, size]
-        else:
-            self.size = size
-        self.w = self.size[0]
-        self.h = self.size[1]
         self.res = [res, res] if isinstance(res, int) else res
-        self.ps = self.w / self.res[0] # pixel size
-
+        self.ps = fab_ps if design_ps is None else design_ps
+        self.w = self.res[0] * self.ps
+        self.h = self.res[1] * self.ps
+        
         # Phase map
         self.mat = Material(mat)
         self.wvln0 = wvln0  # [um], design wavelength. Sometimes the maximum working wavelength is preferred.
@@ -106,32 +102,41 @@ class DiffractiveSurface(DeepObj):
         return phase_map
 
     def forward(self, wave):
-        """1, Propagate to DOE.
-            2, Apply phase modulation.
-
-            Recommaneded field has [B, 1, H, W] shape.
-
-            Consider input field has different pixel size ad physical size with the DOE.
-
-            Reference: https://github.com/vsitzmann/deepoptics function phaseshifts_from_height_map
-
+        """Propagate wave field to the DOE and apply phase modulation. Input wave field can have different pixel size and physical size with the DOE.
+        
         Args:
-            wave (Wave): Input complex wave field.
+            wave (Wave): Input complex wave field. Shape of [B, 1, H, W].
+
+        Returns:
+            wave (Wave): Output complex wave field. Shape of [B, 1, H, W].
+
+        Reference: 
+            [1] https://github.com/vsitzmann/deepoptics function phaseshifts_from_height_map
         """
-        # ==> 1. Propagate to DOE
+        # Propagate to DOE
         wave.prop_to(self.d)
 
-        # ==> 2. Compute and resize phase map
-        phase_map = self.get_phase_map(
-            wave.wvln
-        )  # recommanded to have [1, H, W] shape
-        assert self.h == wave.phy_size[0], (
-            "Wave field and DOE physical should have the same physical size."
-        )
-        if not wave.u.shape[-2:] == phase_map.shape[-2:]:
-            raise Exception(
-                "Field and phase map resolution should be the same. Interpolation can be done but not a desired way."
-            )
+        # Compute phase map at the wave field wavelength, shape of [H, W]
+        phase_map = self.get_phase_map(wave.wvln)
+        
+        # Consider the different pixel size between the wave field and the DOE
+        if self.ps != wave.ps:
+            scale = self.ps / wave.ps
+            phase_map = F.interpolate(phase_map.unsqueeze(0), scale_factor=scale, mode="nearest").squeeze(0)
+
+        # Check if the field and phase map resolution (physical size) are the same
+        wave_h, wave_w = wave.u.shape[-2:]
+        phase_h, phase_w = phase_map.shape[-2:]
+        if phase_h > wave_h or phase_w > wave_w:
+            start_h = (phase_h - wave_h) // 2
+            start_w = (phase_w - wave_w) // 2
+            phase_map = phase_map[..., start_h : start_h + wave_h, start_w : start_w + wave_w]
+        elif phase_h < wave_h or phase_w < wave_w:
+            pad_top = (wave_h - phase_h) // 2
+            pad_bottom = wave_h - phase_h - pad_top
+            pad_left = (wave_w - phase_w) // 2
+            pad_right = wave_w - phase_w - pad_left
+            phase_map = F.pad(phase_map, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
 
         wave.u = wave.u * torch.exp(1j * phase_map)
         return wave

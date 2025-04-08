@@ -42,7 +42,7 @@ class PSFNet(DeepObj):
 
         # Load lens
         self.lens = GeoLens(filename=filename)
-        self.lens.change_sensor_res(sensor_res)
+        self.lens.set_sensor(sensor_res=sensor_res, sensor_size=self.lens.sensor_size)
         device = init_device()
         self.to(device)
 

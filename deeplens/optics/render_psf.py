@@ -9,6 +9,15 @@ import torch.nn.functional as F
 # ================================================
 # PSF convolution
 # ================================================
+def conv_psf(img, psf):
+    """Convolve an image with a PSF.
+    
+    Args:
+        img (torch.Tensor): [B, C, H, W]
+        psf (torch.Tensor): [C, ks, ks]
+    """
+    return render_psf(img, psf)
+
 def render_psf(img, psf):
     """Render rgb image batch with rgb PSF.
 
@@ -30,6 +39,14 @@ def render_psf(img, psf):
     img_render = F.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
     return img_render
 
+def conv_psf_map(img, psf_map):
+    """Convolve an image with a PSF map.
+    
+    Args:
+        img (torch.Tensor): [B, 3, H, W]
+        psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
+    """
+    return render_psf_map(img, psf_map)
 
 def render_psf_map(img, psf_map):
     """Render a rgb image batch with PSF map using patch convolution.
@@ -69,17 +86,18 @@ def render_psf_map(img, psf_map):
     return render_img
 
 
-def local_psf_render(input, psf):
+def local_psf_render(input, psf,expand=False):
     """Render an image with pixel-wise PSF. Use the different PSF kernel for different pixels (folding approach).
 
         Application example: Blurs image with dynamic Gaussian blur.
 
     Args:
         input (Tensor): The image to be blurred (B, C, H, W).
-        psf (Tensor): Per pixel local PSFs (H, W, 3, ks, ks)
+        psf (Tensor): Per pixel local PSFs (H, W, C, Ks, Ks)
+        expand (bool): Whether to expand image for the final output. Default is False.
 
     Returns:
-        output (Tensor): Rendered image (B, C, H, W)
+        output (Tensor): Rendered image (B, C, H, W). (if expand is True, the output will be (B, C, H+pad*2, W+pad*2))
     """
     # Folding for convolution
     B, Cimg, Himg, Wimg = input.shape
@@ -87,51 +105,36 @@ def local_psf_render(input, psf):
     assert Cimg == Cpsf and Himg == Hpsf and Wimg == Wpsf, (
         "Input and PSF shape mismatch"
     )
+    
+
+    # do the scattering
+    input = input.unsqueeze(-1).unsqueeze(-1)  # [B, C, H, W, 1, 1]
+    kernels = psf.permute(2, 0, 1, 3, 4).unsqueeze(0)  # [1, C, H, W, Ks, Ks]
+    y = input * kernels # [B, C, H, W, Ks, Ks]
+
+    # permute and fold the result
+    y = y.permute(0, 1, 4, 5, 2,3).reshape(B, Cimg * Ks * Ks, Himg*Wimg) # [B,C*Ks*Ks,H,W]
+
+    # output processing
     pad = int((Ks - 1) / 2)
-
-    # 1. Pad the input with replicated values
-    inp_pad = F.pad(input, pad=(pad, pad, pad, pad), mode="replicate")
-
-    # 2. Create a Tensor of varying Gaussian Kernel
-    kernels = psf.reshape(Himg * Wimg, 3, Ks, Ks)
-    kernels_flip = torch.flip(kernels, [-2, -1])
-
-    # 3. Unfold input
-    inp_unf = F.unfold(inp_pad, (Ks, Ks))  # [B, C*Ks*Ks, H*W]
-
-    # 4. Reshape for efficient computation
-    inp_unf = inp_unf.view(B, Cimg, Ks * Ks, Himg * Wimg)  # [B, C, Ks*Ks, H*W]
-    kernels_flip = kernels_flip.view(Himg * Wimg, 3, Ks * Ks)  # [H*W, 3, Ks*Ks]
-
-    # 5. Use einsum for efficient batch-wise multiplication and summation
-    # This computes the dot product between each unfolded patch and its corresponding kernel
-    # for each batch and channel
-    y = torch.zeros(B, 3, Himg * Wimg, device=input.device)
-
-    for b in range(B):  # Still need one loop for batch, but channels are vectorized
-        # einsum: 'ckp,pck->cp' means:
-        # c: channel dimension
-        # k: kernel elements (Ks*Ks)
-        # p: pixel positions (H*W)
-        # Multiply corresponding elements and sum over k
-        y[b] = torch.einsum("ckp,pck->cp", inp_unf[b], kernels_flip)
-
-    # 6. Fold and return
-    img = F.fold(y, (Himg, Wimg), (1, 1))
+    if expand:
+        img = F.fold(y, (Himg+pad*2, Wimg+pad*2), (Ks, Ks),padding=0)
+    else:
+        img = F.fold(y, (Himg, Wimg), (Ks, Ks),padding=pad)
     return img
 
 
-def local_psf_render_high_res(input, psf, patch_num=[4, 4], overlap=0.2):
+def local_psf_render_high_res(input, psf, patch_num=[4, 4],expand=False):
     """Render an image with pixel-wise PSF using patch-wise rendering. Overlapping windows are used to avoid boundary artifacts.
 
     Args:
         input (Tensor): The image to be blurred (N, C, H, W).
         psf (Tensor): Per pixel local PSFs (H, W, 3, ks, ks)
         patch_num (list): Number of patches in each dimension. Defaults to [4, 4].
-        overlap (float): Fraction of overlap between adjacent patches (0-1). Defaults to 0.2.
+        expand (bool): Whether to expand image for the final output. Default is False.
 
     Returns:
-        Tensor: Rendered image with same shape as input.
+        Tensor: Rendered image with same shape (N, C, H, W) as input. if expand is True, the output will be (N, C, H+pad*2, W+pad*2)
     """
     B, Cimg, Himg, Wimg = input.shape
     Hpsf, Wpsf, Cpsf, Ks, Ks = psf.shape
@@ -139,66 +142,46 @@ def local_psf_render_high_res(input, psf, patch_num=[4, 4], overlap=0.2):
         "Input and PSF shape mismatch"
     )
 
-    # Calculate base patch size
-    base_patch_h = Himg // patch_num[0]
-    base_patch_w = Wimg // patch_num[1]
-
-    # Calculate overlap in pixels
-    overlap_h = int(base_patch_h * overlap)
-    overlap_w = int(base_patch_w * overlap)
+    # Calculate base patch size and image padding
+    patch_h, patch_w = patch_num
+    base_patch_h = Himg // patch_h
+    base_patch_w = Wimg // patch_w
+    pad = int((Ks - 1) / 2)
 
     # Initialize output and weight accumulation tensors
-    img_render = torch.zeros_like(input)
-    weight_accumulation = torch.zeros((B, 1, Himg, Wimg), device=input.device)
-
-    # Create weight mask for blending (higher weight in center, lower at edges)
-    def create_weight_mask(h, w):
-        y = torch.linspace(0, 1, h, device=input.device)
-        x = torch.linspace(0, 1, w, device=input.device)
-
-        # Create 2D weight grid (higher in center, lower at edges)
-        y = torch.min(y, 1 - y) * 2  # Transform to [0->1->0]
-        x = torch.min(x, 1 - x) * 2  # Transform to [0->1->0]
-
-        # Create 2D weight grid
-        y_grid, x_grid = torch.meshgrid(y, x, indexing="ij")
-
-        # Combine weights (multiply or min for smoother transition)
-        weights = torch.min(y_grid, x_grid).unsqueeze(0).unsqueeze(0)
-
-        # Apply non-linearity for sharper transition
-        weights = weights**2
-
-        return weights
+    img_render = torch.zeros_like(input) # [B, C, Himg, Wimg  ]
+    img_render = F.pad(img_render, (pad, pad, pad, pad), mode="reflect") # [B, C, Himg+pad*2, Wimg+pad*2]
+    
 
     # Process each patch with overlap
-    for pi in range(patch_num[0]):
-        for pj in range(patch_num[1]):
+    for pi in range(patch_h):
+        for pj in range(patch_w):
             # Calculate patch boundaries with overlap
-            low_i = max(0, pi * base_patch_h - overlap_h)
-            up_i = min(Himg, (pi + 1) * base_patch_h + overlap_h)
-            low_j = max(0, pj * base_patch_w - overlap_w)
-            up_j = min(Wimg, (pj + 1) * base_patch_w + overlap_w)
+            low_i = pi * base_patch_h 
+            up_i = (pi + 1) * base_patch_h
+            low_j = pj * base_patch_w 
+            up_j = (pj+1) * base_patch_w
+
+            # take care of the residual on last patch
+            # for example, if Himg=100, patch_h=3, then the last patch will be [66:100] instead of [66:99]
+            if pi == patch_h - 1:
+                up_i = Himg
+            if pj == patch_w - 1:
+                up_j = Wimg
 
             # Extract patches
             img_patch = input[:, :, low_i:up_i, low_j:up_j]
             psf_patch = psf[low_i:up_i, low_j:up_j, :, :, :]
 
-            # Process patch
-            rendered_patch = local_psf_render(img_patch, psf_patch)
-
-            # Create weight mask for this patch
-            patch_h, patch_w = up_i - low_i, up_j - low_j
-            weight_mask = create_weight_mask(patch_h, patch_w)
+            # Process patch, expand boundary to [B, C, Himg+pad*2, Wimg+pad*2]
+            rendered_patch = local_psf_render(img_patch, psf_patch, expand=True) # 
 
             # Accumulate weighted result
-            img_render[:, :, low_i:up_i, low_j:up_j] += rendered_patch * weight_mask
-            weight_accumulation[:, :, low_i:up_i, low_j:up_j] += weight_mask
+            img_render[:, :, low_i:up_i  + pad *2, low_j:up_j  + pad *2] += rendered_patch 
 
-    # Normalize by accumulated weights to blend patches
-    # Add small epsilon to avoid division by zero
-    epsilon = 1e-6
-    img_render = img_render / (weight_accumulation + epsilon)
+    if expand==False:
+        # Remove padding
+        img_render = img_render[:, :, pad:-pad, pad:-pad]
 
     return img_render
 
