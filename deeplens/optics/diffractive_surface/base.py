@@ -11,7 +11,16 @@ from ..materials import Material
 
 
 class DiffractiveSurface(DeepObj):
-    def __init__(self, d, res=(2000, 2000), fab_ps=0.001, wvln0=0.55, mat="fused_silica", design_ps=None, device="cpu"):
+    def __init__(
+        self,
+        d,
+        res=(2000, 2000),
+        fab_ps=0.001,
+        wvln0=0.55,
+        mat="fused_silica",
+        design_ps=None,
+        device="cpu",
+    ):
         """
         Args:
             d (float): Distance of the DOE surface. [mm]
@@ -27,7 +36,7 @@ class DiffractiveSurface(DeepObj):
         self.ps = fab_ps if design_ps is None else design_ps
         self.w = self.res[0] * self.ps
         self.h = self.res[1] * self.ps
-        
+
         # Phase map
         self.mat = Material(mat)
         self.wvln0 = wvln0  # [um], design wavelength. Sometimes the maximum working wavelength is preferred.
@@ -36,13 +45,13 @@ class DiffractiveSurface(DeepObj):
         )  # refractive index at design wavelength
 
         # Fabrication for DOE
-        self.fab_ps = fab_ps # [mm], fabrication pixel size
+        self.fab_ps = fab_ps  # [mm], fabrication pixel size
         self.fab_step = 16
 
         # x, y coordinates
         self.x, self.y = torch.meshgrid(
-            torch.linspace(-self.w/2, self.w/2, self.res[1]),
-            torch.linspace(self.h/2, -self.h/2, self.res[0]),
+            torch.linspace(-self.w / 2, self.w / 2, self.res[1]),
+            torch.linspace(self.h / 2, -self.h / 2, self.res[0]),
             indexing="xy",
         )
 
@@ -60,7 +69,7 @@ class DiffractiveSurface(DeepObj):
             phase0 (tensor): phase map at design wavelength, range [0, 2pi].
         """
         raise NotImplementedError
-    
+
     def get_phase_map0(self):
         """Calculate phase map at design wavelength.
 
@@ -70,7 +79,7 @@ class DiffractiveSurface(DeepObj):
         phase0 = self._phase_map0()
         phase0 = torch.remainder(phase0, 2 * torch.pi)
         return phase0
-    
+
     def get_phase_map(self, wvln=0.55):
         """Calculate phase map at the given wavelength.
 
@@ -85,7 +94,7 @@ class DiffractiveSurface(DeepObj):
         """
         # Phase map at design wavelength
         phase_map0 = self.get_phase_map0()
-        
+
         # Phase map at given wavelength
         n = self.mat.refractive_index(wvln)
         phase_map = phase_map0 * (self.wvln0 / wvln) * (n - 1) / (self.n0 - 1)
@@ -103,14 +112,14 @@ class DiffractiveSurface(DeepObj):
 
     def forward(self, wave):
         """Propagate wave field to the DOE and apply phase modulation. Input wave field can have different pixel size and physical size with the DOE.
-        
+
         Args:
             wave (Wave): Input complex wave field. Shape of [B, 1, H, W].
 
         Returns:
             wave (Wave): Output complex wave field. Shape of [B, 1, H, W].
 
-        Reference: 
+        Reference:
             [1] https://github.com/vsitzmann/deepoptics function phaseshifts_from_height_map
         """
         # Propagate to DOE
@@ -118,11 +127,19 @@ class DiffractiveSurface(DeepObj):
 
         # Compute phase map at the wave field wavelength, shape of [H, W]
         phase_map = self.get_phase_map(wave.wvln)
-        
+
         # Consider the different pixel size between the wave field and the DOE
         if self.ps != wave.ps:
             scale = self.ps / wave.ps
-            phase_map = F.interpolate(phase_map.unsqueeze(0), scale_factor=scale, mode="nearest").squeeze(0)
+            phase_map = (
+                F.interpolate(
+                    phase_map.unsqueeze(0).unsqueeze(0),
+                    scale_factor=(scale, scale),
+                    mode="nearest",
+                )
+                .squeeze(0)
+                .squeeze(0)
+            )
 
         # Check if the field and phase map resolution (physical size) are the same
         wave_h, wave_w = wave.u.shape[-2:]
@@ -130,20 +147,27 @@ class DiffractiveSurface(DeepObj):
         if phase_h > wave_h or phase_w > wave_w:
             start_h = (phase_h - wave_h) // 2
             start_w = (phase_w - wave_w) // 2
-            phase_map = phase_map[..., start_h : start_h + wave_h, start_w : start_w + wave_w]
+            phase_map = phase_map[
+                ..., start_h : start_h + wave_h, start_w : start_w + wave_w
+            ]
         elif phase_h < wave_h or phase_w < wave_w:
             pad_top = (wave_h - phase_h) // 2
             pad_bottom = wave_h - phase_h - pad_top
             pad_left = (wave_w - phase_w) // 2
             pad_right = wave_w - phase_w - pad_left
-            phase_map = F.pad(phase_map, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+            phase_map = F.pad(
+                phase_map,
+                (pad_left, pad_right, pad_top, pad_bottom),
+                mode="constant",
+                value=0,
+            )
 
         wave.u = wave.u * torch.exp(1j * phase_map)
         return wave
-    
+
     def __call__(self, wave):
         """Forward function.
-        
+
         Args:
             wave (Wave): Input complex wave field.
 
