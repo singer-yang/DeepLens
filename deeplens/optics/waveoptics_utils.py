@@ -75,7 +75,7 @@ def point_source_field(
     phy_size=[2, 2],
     res=[1024, 1024],
     wvln=0.589,
-    z=0,
+    z=0.0,
     device="cpu",
     dtype=torch.float32,
 ):
@@ -107,7 +107,7 @@ def point_source_field(
         ),
         indexing="xy",
     )
-    z = torch.full_like(x, z, dtype=dtype)
+    # z = torch.full_like(x, z, dtype=dtype)
 
     # Calculate distance and phase
     if dtype != torch.float64:
