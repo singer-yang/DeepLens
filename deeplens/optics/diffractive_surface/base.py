@@ -1,4 +1,4 @@
-"""Base class for diffractive surfaces. Here we assume all diffractive surfaces are DOE/Multi-layer optical elemnents."""
+"""Base class for diffractive surfaces (DOE)."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +10,7 @@ from ..basics import EPSILON, DeepObj
 from ..materials import Material
 
 
-class DiffractiveSurface(DeepObj):
+class DOE(DeepObj):
     def __init__(
         self,
         d,
@@ -182,9 +182,7 @@ class DiffractiveSurface(DeepObj):
     def pmap_quantize(self, bits=16):
         """Quantize phase map to bits levels."""
         pmap = self.get_phase_map0()
-        pmap_q = torch.round(pmap / (2 * float(np.pi) / bits)) * (
-            2 * float(np.pi) / bits
-        )
+        pmap_q = torch.round(pmap / (2 * torch.pi / bits)) * (2 * torch.pi / bits)
         return pmap_q
 
     def pmap_fab(self, bits=16, save_path=None):
@@ -202,9 +200,7 @@ class DiffractiveSurface(DeepObj):
             .squeeze(0)
             .squeeze(0)
         )
-        pmap_q = torch.round(pmap / (2 * float(np.pi) / bits)) * (
-            2 * float(np.pi) / bits
-        )
+        pmap_q = torch.round(pmap / (2 * torch.pi / bits)) * (2 * torch.pi / bits)
 
         # Save phase map
         if save_path is None:
@@ -218,88 +214,10 @@ class DiffractiveSurface(DeepObj):
     # =======================================
     def activate_grad(self, activate=True):
         """Activate gradient for phase map parameters."""
-        if self.param_model == "fresnel":
-            self.f0.requires_grad = activate
-
-        elif self.param_model == "cubic":
-            self.a3.requires_grad = activate
-
-        elif self.param_model == "binary2":
-            self.order2.requires_grad = activate
-            self.order4.requires_grad = activate
-            self.order6.requires_grad = activate
-            self.order8.requires_grad = activate
-
-        elif self.param_model == "binary2_fast":
-            self.order2.requires_grad = activate
-            self.order4.requires_grad = activate
-            self.order6.requires_grad = activate
-            self.order8.requires_grad = activate
-
-        elif self.param_model == "poly1d":
-            self.order2.requires_grad = activate
-            self.order3.requires_grad = activate
-            self.order4.requires_grad = activate
-            self.order5.requires_grad = activate
-            self.order6.requires_grad = activate
-            self.order7.requires_grad = activate
-
-        elif self.param_model == "zernike":
-            self.z_coeff.requires_grad = activate
-
-        elif self.param_model == "pixel2d":
-            self.pmap.requires_grad = activate
-
-        else:
-            raise NotImplementedError
+        raise NotImplementedError
 
     def get_optimizer_params(self, lr=None):
-        self.activate_grad()
-        params = []
-
-        if self.param_model == "fresnel":
-            lr = 0.001 if lr is None else lr
-            params.append({"params": [self.f0], "lr": lr})
-
-        elif self.param_model == "cubic":
-            lr = 0.1 if lr is None else lr
-            params.append({"params": [self.a3], "lr": lr})
-
-        elif self.param_model == "binary2":
-            lr = 0.1 if lr is None else lr
-            params.append({"params": [self.order2], "lr": lr})
-            params.append({"params": [self.order4], "lr": lr})
-            params.append({"params": [self.order6], "lr": lr})
-            params.append({"params": [self.order8], "lr": lr})
-
-        elif self.param_model == "binary2_fast":
-            lr = 0.1 if lr is None else lr
-            params.append({"params": [self.order2], "lr": lr})
-            params.append({"params": [self.order4], "lr": lr})
-            params.append({"params": [self.order6], "lr": lr})
-            params.append({"params": [self.order8], "lr": lr})
-
-        elif self.param_model == "poly1d":
-            lr = 0.1 if lr is None else lr
-            params.append({"params": [self.order2], "lr": lr})
-            params.append({"params": [self.order3], "lr": lr})
-            params.append({"params": [self.order4], "lr": lr})
-            params.append({"params": [self.order5], "lr": lr})
-            params.append({"params": [self.order6], "lr": lr})
-            params.append({"params": [self.order7], "lr": lr})
-
-        elif self.param_model == "zernike":
-            lr = 0.01 if lr is None else lr
-            params.append({"params": [self.z_coeff], "lr": lr})
-
-        elif self.param_model == "pixel2d":
-            lr = 0.01 if lr is None else lr
-            params.append({"params": [self.pmap], "lr": lr})
-
-        else:
-            raise NotImplementedError
-
-        return params
+        raise NotImplementedError
 
     def get_optimizer(self, lr=None):
         """Generate optimizer for DOE.
@@ -405,8 +323,8 @@ class DiffractiveSurface(DeepObj):
         sag = max_offset - torch.fmod(sag, max_offset)
         return sag
 
-    def draw_wedge(self, ax, color="black"):
-        """Draw 2d wedge in the plot."""
+    def draw_widget(self, ax, color="black"):
+        """Draw 2d widget in the plot."""
         # Create radius points
         r = torch.linspace(-self.r, self.r, 256, device=self.device)
         offset = 0.1
