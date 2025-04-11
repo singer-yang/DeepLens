@@ -2,7 +2,7 @@
     <img src="imgs/logo.png"/>
 </div>
 
-**DeepLens** is an open-source differentiable lens simulator. It is designed for automated optical design, and end-to-end optics-sensor-network optimization. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
+**DeepLens** is an open-source differentiable lens simulator. It is designed for automated optical design and end-to-end optics-sensor-network optimization. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
 
 ## Contact
 
@@ -13,7 +13,7 @@
 
 ## What is DeepLens
 
-DeepLens aims to combine **deep learning** and **optical design** for:
+DeepLens combines **deep learning** and **optical design** for:
 
 1. More powerful **optical design algorithms** enhanced by deep learning.
 2. Next-generation **computational cameras** integrating optical encoding with deep learning decoding.
@@ -24,8 +24,8 @@ DeepLens differs from other optical software in:
 
 1. **Differentiable** design with outstanding optimization capabilities.
 2. **Open-source** optical simulator (ray-tracing, wave optics) with validated accuracy.
-3. **End-to-end imaging** with sensor statistics and image signal processing (ISP).
-4. **Fast computation** with core functions customized for GPU parallelization.
+3. **End-to-end imaging** with sensor and image signal processing (ISP) simulation.
+4. **GPU parallelization** with customized core functions.
 
 Additional features:
 
@@ -98,7 +98,7 @@ DeepLens repo is structured as follows:
 DeepLens/
 │
 ├── deeplens/
-│   ├── optics/ (optical simulation)
+│   ├── optics/ (optics simulation)
 |   ├── sensor/ (sensor simulation)
 |   ├── network/ (network architectures)
 |   ├── ...
