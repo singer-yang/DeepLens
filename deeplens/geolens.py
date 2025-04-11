@@ -2829,7 +2829,7 @@ class GeoLens(Lens):
         loss_avg = sum(loss) / len(loss)
         return loss_avg
 
-    def loss_rms(self, num_rays=SPP_CALC, num_grid=GEO_GRID, depth=DEPTH, importance_sampling=False):
+    def loss_rms(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC, importance_sampling=False):
         """Compute RGB RMS error per pixel, forward rms error.
 
         Can also revise this function to plot PSF.
@@ -2861,13 +2861,13 @@ class GeoLens(Lens):
 
             rms_error = torch.mean((((o2_norm ** 2).sum(-1) * ray.ra).sum(-1) /
                          (ray.ra.sum(-1) + EPSILON)).sqrt()
-                       ) * 1e3
+                       )
             all_rms_errors.append(rms_error)
 
         avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
         return avg_rms_error
 
-    def loss_rms_infinite(self, num_fields=3, depth=DEPTH):
+    def loss_rms_infinite(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC):
         """Compute RGB RMS error per pixel using Zernike polynomials.
 
         Args:
@@ -2880,8 +2880,8 @@ class GeoLens(Lens):
         tan_fov_x = np.sqrt(np.tan(self.hfov)**2 - tan_fov_y**2)
         fov_y = np.rad2deg(np.arctan(tan_fov_y))
         fov_x = np.rad2deg(np.arctan(tan_fov_x))
-        fov_y = torch.linspace(0.0, fov_y, num_fields).tolist()
-        fov_x = torch.linspace(0.0, fov_x, num_fields).tolist()
+        fov_y = torch.linspace(0.0, fov_y, num_grid).tolist()
+        fov_x = torch.linspace(0.0, fov_x, num_grid).tolist()
         
         # calculate RMS error
         all_rms_errors = []
@@ -2889,7 +2889,7 @@ class GeoLens(Lens):
         for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
             # Ray tracing
             ray = self.sample_parallel(
-                fov_x=fov_x, fov_y=fov_y, num_rays=SPP_PSF, wvln=wvln, depth=depth
+                fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth
             )
             ray = self.trace2sensor(ray)
 
