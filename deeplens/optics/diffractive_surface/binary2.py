@@ -1,13 +1,23 @@
 """Binary2 DOE parameterization."""
 
 import torch
-from .base import DiffractiveSurface
+from .base import DOE
 
 
-class Binary2(DiffractiveSurface):
-    def __init__(self, d, res=(2000, 2000), mat="fused_silica", wvln0=0.55, fab_ps=0.001, device="cpu"):
+class Binary2(DOE):
+    def __init__(
+        self,
+        d,
+        res=(2000, 2000),
+        mat="fused_silica",
+        wvln0=0.55,
+        fab_ps=0.001,
+        device="cpu",
+    ):
         """Initialize Binary DOE."""
-        super().__init__(d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, device=device)
+        super().__init__(
+            d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, device=device
+        )
 
         # Initialize with random small values
         self.alpha2 = (torch.rand(1) - 0.5) * 0.02
@@ -17,8 +27,8 @@ class Binary2(DiffractiveSurface):
         self.alpha10 = (torch.rand(1) - 0.5) * 0.000002
 
         self.x, self.y = torch.meshgrid(
-            torch.linspace(-self.w/2, self.w/2, self.res[1]),
-            torch.linspace(self.h/2, -self.h/2, self.res[0]),
+            torch.linspace(-self.w / 2, self.w / 2, self.res[1]),
+            torch.linspace(self.h / 2, -self.h / 2, self.res[0]),
             indexing="xy",
         )
 
@@ -55,35 +65,31 @@ class Binary2(DiffractiveSurface):
         )
 
         return phase
-    
-
 
     # =======================================
     # Optimization
     # =======================================
-    def activate_grad(self):
-        """Activate gradients for optimization."""
+    def get_optimizer_params(self, lr=0.001):
+        """Get parameters for optimization.
+
+        Args:
+            lr (float): Base learning rate for alpha2. Learning rates for higher-order parameters will be scaled progressively (10x, 100x, 1000x, 10000x).
+        """
         self.alpha2.requires_grad = True
         self.alpha4.requires_grad = True
         self.alpha6.requires_grad = True
         self.alpha8.requires_grad = True
         self.alpha10.requires_grad = True
 
-    def get_optimizer_params(self, lr=0.001):
-        """Get parameters for optimization."""
-        self.activate_grad()
-        return [
-            {
-                "params": [
-                    self.alpha2,
-                    self.alpha4,
-                    self.alpha6,
-                    self.alpha8,
-                    self.alpha10,
-                ],
-                "lr": lr,
-            }
+        optimizer_params = [
+            {"params": [self.alpha2], "lr": lr},
+            {"params": [self.alpha4], "lr": lr * 10},
+            {"params": [self.alpha6], "lr": lr * 100},
+            {"params": [self.alpha8], "lr": lr * 1000},
+            {"params": [self.alpha10], "lr": lr * 10000},
         ]
+
+        return optimizer_params
 
     # =======================================
     # IO

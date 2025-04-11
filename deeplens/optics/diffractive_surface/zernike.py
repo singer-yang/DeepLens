@@ -2,26 +2,39 @@
 
 import math
 import torch
-from .base import DiffractiveSurface
+from .base import DOE
 
-class Zernike(DiffractiveSurface):
+
+class Zernike(DOE):
     """DOE parameterized by Zernike polynomials."""
-    
-    def __init__(self, d, z_coeff=None, zernike_order=37, res=(2000, 2000), mat="fused_silica", fab_ps=0.001, wvln0=0.55, device="cpu"):
+
+    def __init__(
+        self,
+        d,
+        z_coeff=None,
+        zernike_order=37,
+        res=(2000, 2000),
+        mat="fused_silica",
+        fab_ps=0.001,
+        wvln0=0.55,
+        device="cpu",
+    ):
         """Initialize Zernike DOE.
-        
+
         Args:
-            r: DOE radius
             d: DOE position
             res: DOE resolution
-            n_coeffs: Number of Zernike coefficients to use
+            z_coeff: Zernike coefficients
+            zernike_order: Number of Zernike coefficients to use
             fab_ps: Fabrication pixel size
             device: Computation device
         """
-        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, wvln0=wvln0, device=device)
-        
+        super().__init__(
+            d=d, res=res, mat=mat, fab_ps=fab_ps, wvln0=wvln0, device=device
+        )
+
         # Initialize Zernike coefficients with random values
-        assert zernike_order==37, "Currently, Zernike DOE only supports 37 orders"
+        assert zernike_order == 37, "Currently, Zernike DOE only supports 37 orders"
         self.zernike_order = zernike_order
         if z_coeff is None:
             self.z_coeff = torch.randn(zernike_order, device=self.device) * 1e-3
@@ -34,9 +47,10 @@ class Zernike(DiffractiveSurface):
     def init_from_dict(cls, doe_dict):
         """Initialize Zernike DOE from a dict."""
         d = doe_dict["d"]
+        z_coeff = doe_dict.get("z_coeff", None)
+        zernike_order = doe_dict.get("zernike_order", 37)
         res = doe_dict.get("res", (2000, 2000))
         fab_ps = doe_dict.get("fab_ps", 0.001)
-        z_coeff = doe_dict.get("z_coeff", None)
         wvln0 = doe_dict.get("wvln0", 0.55)
         mat = doe_dict.get("mat", "fused_silica")
         return cls(
@@ -45,6 +59,7 @@ class Zernike(DiffractiveSurface):
             mat=mat,
             fab_ps=fab_ps,
             z_coeff=z_coeff,
+            zernike_order=zernike_order,
             wvln0=wvln0,
         )
 
@@ -55,16 +70,12 @@ class Zernike(DiffractiveSurface):
     # =======================================
     # Optimization
     # =======================================
-    def activate_grad(self):
-        """Activate gradients for optimization."""
-        self.z_coeff.requires_grad = True
-        
-    def get_optimizer_params(self, lr=None):
+    def get_optimizer_params(self, lr=0.01):
         """Get parameters for optimization."""
-        self.activate_grad()
-        lr = 0.01 if lr is None else lr
-        return [{"params": [self.z_coeff], "lr": lr}]
-    
+        self.z_coeff.requires_grad = True
+        optimizer_params = [{"params": [self.z_coeff], "lr": lr}]
+        return optimizer_params
+
     # =======================================
     # IO
     # =======================================
@@ -78,11 +89,11 @@ class Zernike(DiffractiveSurface):
 
 def calculate_zernike_phase(z_coeff, grid=256):
     """Calculate phase map produced by Zernike polynomials.
-    
+
     Args:
         z_coeff: Zernike coefficients
         grid: Grid size for phase map
-        
+
     Returns:
         Phase map
     """
@@ -148,10 +159,43 @@ def calculate_zernike_phase(z_coeff, grid=256):
 
     # Sum all Zernike terms
     ZW = (
-        Z1 + Z2 + Z3 + Z4 + Z5 + Z6 + Z7 + Z8 + Z9 + Z10 +
-        Z11 + Z12 + Z13 + Z14 + Z15 + Z16 + Z17 + Z18 + Z19 + Z20 +
-        Z21 + Z22 + Z23 + Z24 + Z25 + Z26 + Z27 + Z28 + Z29 + Z30 +
-        Z31 + Z32 + Z33 + Z34 + Z35 + Z36 + Z37
+        Z1
+        + Z2
+        + Z3
+        + Z4
+        + Z5
+        + Z6
+        + Z7
+        + Z8
+        + Z9
+        + Z10
+        + Z11
+        + Z12
+        + Z13
+        + Z14
+        + Z15
+        + Z16
+        + Z17
+        + Z18
+        + Z19
+        + Z20
+        + Z21
+        + Z22
+        + Z23
+        + Z24
+        + Z25
+        + Z26
+        + Z27
+        + Z28
+        + Z29
+        + Z30
+        + Z31
+        + Z32
+        + Z33
+        + Z34
+        + Z35
+        + Z36
+        + Z37
     )
 
     # Apply circular mask
