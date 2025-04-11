@@ -2,10 +2,10 @@
 
 import torch
 import torch.nn.functional as F
-from .base import DiffractiveSurface
+from .base import DOE
 
 
-class ThinLens(DiffractiveSurface):
+class ThinLens(DOE):
     def __init__(
         self,
         d,
@@ -58,7 +58,7 @@ class ThinLens(DiffractiveSurface):
 
         # Same focal length for all wavelengths
         wvln_mm = wvln * 1e-3
-        phase_map = -2*torch.pi * (self.x**2 + self.y**2) / (2 * self.f0 * wvln_mm)
+        phase_map = -2 * torch.pi * (self.x**2 + self.y**2) / (2 * self.f0 * wvln_mm)
         phase_map = torch.remainder(phase_map, 2 * torch.pi)
 
         # Interpolate to the desired resolution
@@ -75,14 +75,11 @@ class ThinLens(DiffractiveSurface):
     # =======================================
     # Optimization
     # =======================================
-    def activate_grad(self):
-        """Activate gradients for optimization."""
-        self.f0.requires_grad = True
-
     def get_optimizer_params(self, lr=0.1):
         """Get parameters for optimization."""
-        self.activate_grad()
-        return [{"params": [self.f0], "lr": lr}]
+        self.f0.requires_grad = True
+        optimizer_params = [{"params": [self.f0], "lr": lr}]
+        return optimizer_params
 
     # =======================================
     # IO
