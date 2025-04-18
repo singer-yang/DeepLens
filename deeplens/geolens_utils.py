@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 from .optics.geometric_surface import Aperture, Aspheric, Spheric
-from .optics.materials import SELLMEIER_TABLE
+from .optics.materials import MATERIAL_data
 from .optics.basics import WAVE_RGB
 
 
@@ -194,7 +194,7 @@ def create_lens(
     d_opt = thickness - flange
 
     # Materials
-    mat_names = list(SELLMEIER_TABLE.keys())
+    mat_names = list(MATERIAL_data.keys())
     remove_materials = ["air", "vacuum", "occluder"]
     for mat in remove_materials:
         if mat in mat_names:
