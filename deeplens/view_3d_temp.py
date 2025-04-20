@@ -58,13 +58,42 @@ class LineSeg(LineMesh):
         self.vertices[1] = self.origin + self.direction * self.length
 
 class Circle(LineMesh):
-    def __init__(self, n_vertices, direction, radius):
+    def __init__(self, n_vertices, origin, direction, radius):
+        """
+        Create a circle mesh with normal direction and radius.\\
+        The normal direciton is defined right-hand rule.\\
+        
+        """
         self.direction = direction
         self.radius = radius
+        self.origin = origin
         super().__init__(n_vertices, is_loop=True)
         
     def create_data(self):
-        pass
+        # Normalize the direction vector
+        direction = np.array(self.direction, dtype=np.float32)
+        direction = direction / np.linalg.norm(direction)
+        
+        # Find a vector that is not parallel to the direction
+        if np.abs(direction[0]) < 0.9:
+            v1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        else:
+            v1 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        
+        # Use cross product to get perpendicular vectors
+        u = np.cross(direction, v1)
+        u = u / np.linalg.norm(u)
+        v = np.cross(direction, u)
+        v = v / np.linalg.norm(v)
+        
+        # Generate points on the circle
+        origin = np.array(self.origin, dtype=np.float32)
+        for i in range(self.n_vertices):
+            angle = 2 * np.pi * i / self.n_vertices
+            x = self.radius * (u[0] * np.cos(angle) + v[0] * np.sin(angle))
+            y = self.radius * (u[1] * np.cos(angle) + v[1] * np.sin(angle))
+            z = self.radius * (u[2] * np.cos(angle) + v[2] * np.sin(angle))
+            self.vertices[i] = origin + np.array([x, y, z])
 
 class FaceMesh(CrossPoly):
     def __init__(self, n_vertices: int, n_faces: int):
@@ -119,6 +148,50 @@ class Rectangle(FaceMesh):
         
         self.faces[0] = [0, 1, 2]
         self.faces[1] = [0, 2, 3]
+
+class ApertureMesh(FaceMesh):
+    def __init__(self, origin: np.ndarray,
+                 direction: np.ndarray,
+                 aperture_radius: float,
+                 radius: float,
+                 n_vertices: int = 64):
+        """
+        Define a circular aperture with radius.\\
+        The aperture is defined by the center and radius.\\
+        ## Parameters
+        - origin: np.ndarray, shape (3,)
+            The center of the aperture.
+        - direction: np.ndarray, shape (3,)
+            Normal direction. Right-hand rule.
+        - aperture_radius: float
+            The radius of the clear aperture.
+        - radius: float
+            The radius of the aperture outer rim.
+        - n_vertices: int
+            The number of vertices in one circle.
+        """
+        self.origin = origin
+        self.direction = direction
+        self.aperture_radius = aperture_radius
+        self.radius = radius
+        super().__init__(n_vertices, n_vertices*2)
+    
+    def create_data(self):
+        inner_circ = Circle(self.n_vertices,
+                            self.origin,
+                            self.direction,
+                            self.aperture_radius)
+        outer_circ = Circle(self.n_vertices,
+                            self.origin,
+                            self.direction,
+                            self.radius)
+        # bridge the two circles
+        bridge_mesh = bridge(inner_circ, outer_circ)
+        self.vertices = bridge_mesh.vertices
+        self.faces = bridge_mesh.faces
+        self.rim = outer_circ
+        
+        
 
 class HeightMapAngular(FaceMesh):
     """
@@ -320,11 +393,24 @@ def geolens_poly(lens: GeoLens,
     surf_poly = [None for _ in range(n_surf)]
     bridge_idx = []
     bridge_poly = []
+    ap_poly = []
     sensor_poly = None
+    
+    radius_list = [surf.r for surf in lens.surfaces]
+    max_barrel_r = max(radius_list)
     
     for i, surf in enumerate(lens.surfaces):
         if isinstance(surf, Aperture):
-            pass
+            # generate the aperture mesh
+            ap_origin = np.array([0, 0, surf.d.item()])
+            ap_dir = np.array([0, 0, -1])
+            ap_radius = surf.r
+            outer_radius = max_barrel_r
+            ap_poly.append(ApertureMesh(ap_origin,
+                                        ap_dir,
+                                        ap_radius,
+                                        outer_radius,
+                                        n_vertices=32)) 
         elif isinstance(surf, Spheric):
             # record the idx of the two surf
             # NOTICE:
@@ -373,7 +459,7 @@ def geolens_poly(lens: GeoLens,
                              np.array([0, 1, 0]),
                              w, h)
     
-    return surf_poly, bridge_poly, sensor_poly
+    return surf_poly, bridge_poly, sensor_poly, ap_poly
 
 def geolens_ray_poly(lens: GeoLens,
                      fovs: List[float],
