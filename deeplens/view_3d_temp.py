@@ -4,8 +4,22 @@ from math import pi, sqrt
 from typing import List
 
 from deeplens.geolens import GeoLens
-from deeplens.optics import *
-from deeplens.optics.surfaces import Aperture
+from deeplens.optics.basics import (
+    DEFAULT_WAVE
+)
+from deeplens.optics import (
+    Ray,
+)
+from .optics.geometric_surface import (
+    Aperture,
+    Aspheric,
+    Cubic,
+    Diffractive_GEO,
+    Plane,
+    Spheric,
+    ThinLens,
+)
+
 import torch
 
 class CrossPoly:
@@ -428,14 +442,7 @@ def geolens_poly(lens: GeoLens,
             surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func)
         elif isinstance(surf, Cubic):
             pass
-        elif isinstance(surf, Diffractive_GEO):
-            pass
-        elif isinstance(surf, Plane):
-            pass
-        elif isinstance(surf, ThinLens):
-            pass
         else:
-            
             raise NotImplementedError("Surface type not implemented in 3D visualization")
     
     print(f"Finishing creating {n_surf} surfaces")
@@ -534,42 +541,41 @@ def sample_parallel_3D(lens: GeoLens,
     """
     pass
     if entrance_pupil:
-            # Sample 2nd points on the pupil
-            pupilz, pupilx = lens.entrance_pupil()
+        # Sample 2nd points on the pupil
+        pupilz, pupilx = lens.calc_entrance_pupil()
+    else:
+        pupilz, pupilx = 0, lens.surfaces[0].r
 
-            # x2 = torch.linspace(-pupilx, pupilx, M) * 0.99
-            rho2 = torch.linspace(0, pupilx, rings+1) * 0.99
-            rho2 = rho2[1:] # remove the central spot
-            phi2 = torch.linspace(0, 2*pi, arms+1)
-            phi2 = phi2[:-1]
-            RHO2, PHI2 = torch.meshgrid(rho2, phi2)
-            X2, Y2 = RHO2*torch.cos(PHI2), RHO2*torch.sin(PHI2)
-            x2, y2 = torch.flatten(X2), torch.flatten(Y2)
-            
-            # add the central spot back
-            x2 = torch.concat((torch.tensor([0]), x2))
-            y2 = torch.concat((torch.tensor([0]), y2))
-            
-            z2 = torch.full_like(x2, pupilz)
-            o2 = torch.stack((x2, y2, z2), axis=-1)  # shape [M, 3]
+    # x2 = torch.linspace(-pupilx, pupilx, M) * 0.99
+    rho2 = torch.linspace(0, pupilx, rings+1) * 0.99
+    rho2 = rho2[1:] # remove the central spot
+    phi2 = torch.linspace(0, 2*pi, arms+1)
+    phi2 = phi2[:-1]
+    RHO2, PHI2 = torch.meshgrid(rho2, phi2)
+    X2, Y2 = RHO2*torch.cos(PHI2), RHO2*torch.sin(PHI2)
+    x2, y2 = torch.flatten(X2), torch.flatten(Y2)
+    
+    # add the central spot back
+    x2 = torch.concat((torch.tensor([0]), x2))
+    y2 = torch.concat((torch.tensor([0]), y2))
+    
+    z2 = torch.full_like(x2, pupilz)
+    o2 = torch.stack((x2, y2, z2), axis=-1)  # shape [M, 3]
 
-            view_polar = view_polar / 57.3
-            view_azi = view_azi / 57.3
-            dx = torch.full_like(x2, np.sin(view_polar)*np.cos(view_azi))
-            dy = torch.full_like(x2, np.sin(view_polar)*np.sin(view_azi))
-            dz = torch.full_like(x2, np.cos(view_polar))
-            d = torch.stack((dx, dy, dz), axis=-1)
+    view_polar = view_polar / 57.3
+    view_azi = view_azi / 57.3
+    dx = torch.full_like(x2, np.sin(view_polar)*np.cos(view_azi))
+    dy = torch.full_like(x2, np.sin(view_polar)*np.sin(view_azi))
+    dz = torch.full_like(x2, np.cos(view_polar))
+    d = torch.stack((dx, dy, dz), axis=-1)
 
-            # Move ray origins to z = - 0.1 for tracing
-            if pupilz > 0:
-                o = o2 - d * ((z2 + 0.1) / dz).unsqueeze(-1)
-            else:
-                o = o2
+    # Move ray origins to z = - 0.1 for tracing
+    if pupilz > 0:
+        o = o2 - d * ((z2 + 0.1) / dz).unsqueeze(-1)
+    else:
+        o = o2
 
-            return Ray(o, d, wvln, device=lens.device)
-
-    else:        
-        raise NotImplementedError("None entrance pupil enter is not implemented yet")
+    return Ray(o, d, wvln, device=lens.device)
 
 
 def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
@@ -588,15 +594,18 @@ def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
     - rays_curve: List[Curve]
         Traced ray represented by curves
     """
-    ray, ray_records = lens.trace2sensor(ray=ray, record=True)
+    ray, ray_o_records = lens.trace2sensor(ray=ray, record=True)
     n_surf = lens.surfaces.__len__()
     rays_curve = []
+    # the shape of ray_o_records if [n_surf, M, 3] ?
+    ray_o_records = torch.stack(ray_o_records, dim=0)
+    ray_o_records = ray_o_records.permute(1, 0, 2).cpu().numpy()
     if delete_vignetting:
-        for record in ray_records:
-            if len(record) < n_surf-1:
-                continue
-            curve = Curve(np.array(record), False)
-            rays_curve.append(curve)
-    else:
-        raise NotImplementedError("Non vignetting rays are not implemented yet")
+        # how to handle the vignetting rays?
+        # currently all rays with "nan" are passed to poly
+        # this need to be fixed
+        pass
+    for record in ray_o_records:
+        curve = Curve(record, False)
+        rays_curve.append(curve)        
     return rays_curve
