@@ -41,7 +41,8 @@ class PSFNet(DeepObj):
         super().__init__()
 
         # Load lens
-        self.lens = GeoLens(filename=filename, sensor_res=sensor_res)
+        self.lens = GeoLens(filename=filename)
+        self.lens.set_sensor(sensor_res=sensor_res, sensor_size=self.lens.sensor_size)
         device = init_device()
         self.to(device)
 
@@ -147,7 +148,7 @@ class PSFNet(DeepObj):
 
     def load_net(self, net_path):
         """Load pretrained network."""
-        psfnet_dict = torch.load(net_path)
+        psfnet_dict = torch.load(net_path, weights_only=True)
         self.psfnet.load_state_dict(psfnet_dict["psfnet"])
 
     def save_psfnet(self, psfnet_path):

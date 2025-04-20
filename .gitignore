@@ -11,7 +11,7 @@ deeplens/do_code/
 !lenses/**/*.png
 !images/*.png
 debug.py
-
+*.log
 
 
 lenses/pancake/
