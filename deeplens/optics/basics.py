@@ -25,7 +25,7 @@ DEPTH = -20000.0 # approximate infinity
 SPP_PSF = 10000 # spp (sample per pixel) for psf calculation
 SPP_COHERENT = 10000000 # spp for coherent optics calculation
 SPP_CALC = 1024 # spp for some computation which doesnot need to be very accurate, e.g., refocusing
-SPP_RENDER = 64 # spp for rendering
+SPP_RENDER = 32 # spp for rendering
 
 PSF_KS = 101 # kernel size for psf calculation, better to be odd number
 GEO_GRID = 21  # grid number for PSF map
@@ -212,6 +212,9 @@ def wave_rgb():
 # Classes
 # ===========================================
 class DeepObj:
+    def __init__(self, dtype=torch.float32):
+        self.dtype = dtype
+
     def __str__(self):
         """Called when using print() and str()"""
         lines = [self.__class__.__name__ + ":"]
@@ -264,9 +267,10 @@ class DeepObj:
 
         torch.set_default_dtype(torch.float64)
         """
-        assert (
-            torch.get_default_dtype() == torch.float64
-        ), "Default dtype should be float64."
+        # assert (
+        #     torch.get_default_dtype() == torch.float64
+        # ), "Default dtype should be float64."
+        self.dtype = torch.float64
 
         for key, val in vars(self).items():
             if torch.is_tensor(val):

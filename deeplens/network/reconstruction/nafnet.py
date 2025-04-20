@@ -106,7 +106,7 @@ class NAFNet(nn.Module):
             x = decoder(x)
 
         x = self.ending(x)
-        x = x + inp
+        x = x + inp[:, :x.shape[1], :, :]
 
         return x[:, :, :H, :W]
 
