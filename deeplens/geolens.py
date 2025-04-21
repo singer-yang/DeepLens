@@ -1453,7 +1453,7 @@ class GeoLens(Lens):
         distortion_grid = torch.stack((x_dist, y_dist), dim=-1)  # shape (H, W, 2)
         return distortion_grid
 
-    def calc_distortion_1D(self, hfov, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=False):
+    def calc_distortion_1D(self, hfov, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=True):
         """Calculate distortion at a specific field angle.
 
         Args:
@@ -1525,9 +1525,8 @@ class GeoLens(Lens):
     def calc_efl(self):
         """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
         # Trace a paraxial chief ray
-        fov = 0.0001  # paraxial fov in radian
-        fov_list = torch.linspace(0, np.rad2deg(fov), 2)
-        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=fov_list, wvln=DEFAULT_WAVE, ray_aiming=False)       
+        small_fov = 0.001  # paraxial fov in radian
+        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=np.rad2deg(small_fov), wvln=DEFAULT_WAVE, ray_aiming=True)       
         ray = Ray(chief_ray_o[1, ...], chief_ray_d[1, ...], wvln=DEFAULT_WAVE, device=self.device)
         ray, _ = self.trace(ray)
 
@@ -1536,7 +1535,7 @@ class GeoLens(Lens):
             ray.o[..., 1]
             + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
         )
-        eff_foclen = image_height / float(np.tan(fov))
+        eff_foclen = image_height / float(np.tan(small_fov))
         return eff_foclen.mean().item()
 
     @torch.no_grad()
@@ -1843,7 +1842,7 @@ class GeoLens(Lens):
         return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
-    def calc_chief_ray_infinite(self, hfov, depth=-5.0, wvln=DEFAULT_WAVE, plane="meridional", num_rays=SPP_CALC, ray_aiming=False):
+    def calc_chief_ray_infinite(self, hfov, depth=0.0, wvln=DEFAULT_WAVE, plane="meridional", num_rays=SPP_CALC, ray_aiming=True):
         """Compute chief ray for an incident angle.
 
         Args:
@@ -1854,6 +1853,8 @@ class GeoLens(Lens):
             num_rays (int): number of rays.
             ray_aiming (bool): whether the chief ray through the center of the stop.
         """
+        if isinstance(hfov, float) and hfov > 0:
+            hfov = torch.linspace(0, hfov, 2).to(self.device)
 
         if not isinstance(depth, torch.Tensor):
             depth = torch.tensor(depth, device=self.device, dtype=torch.float32).repeat(len(hfov))
@@ -1877,13 +1878,8 @@ class GeoLens(Lens):
             hfovs = hfov[1:]
             depths = depth[1:]
 
-        if plane == "sagittal":
-            idx = 0
-        else:
-            idx = 1
-
         if self.aper_idx == 0:
-            if idx == 0:
+            if plane == "sagittal":
                 chief_ray_o[1:, ...] = torch.stack(
                     [depths * torch.tan(hfovs), torch.zeros_like(hfovs), depths], dim=-1
                 )
@@ -1908,7 +1904,7 @@ class GeoLens(Lens):
             delta = scale * y_distance
 
         if not ray_aiming:
-            if idx == 0:
+            if plane == "sagittal":
                 chief_ray_o[1:, ...] = torch.stack(
                     [-y_distance, torch.zeros_like(hfovs), depths], dim=-1
                 )
@@ -1930,16 +1926,21 @@ class GeoLens(Lens):
                 [torch.linspace(min_y[i], max_y[i], num_rays) for i in range(len(min_y))], dim=0)  
 
             o1 = torch.zeros([len(hfovs), num_rays, 3])
-            o1[:, :, idx] = o1_linspace
             o1[:, :, 2] = depths[0]
             
             o2_linspace = torch.stack(
                 [torch.linspace(-delta[i], delta[i], num_rays) for i in range(len(min_y))], dim=0
                 )    
-                      
+                  
             o2 = torch.zeros([len(hfovs), num_rays, 3])
-            o2[:, :, idx] = o2_linspace
             o2[:, :, 2] = pupilz
+
+            if plane == "sagittal":
+                o1[:, :, 0] = o1_linspace
+                o2[:, :, 0] = o2_linspace
+            else:
+                o1[:, :, 1] = o1_linspace
+                o2[:, :, 1] = o2_linspace
 
             # Trace until the aperture
             ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
@@ -1949,13 +1950,15 @@ class GeoLens(Lens):
             )
 
             # Look for the ray that is closest to the optical axis
-            _, center_idx = torch.min(torch.abs(ray.o[..., idx]), dim=1)
-            chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]
-            if idx == 0:
+            if plane == "sagittal":
+                _, center_idx = torch.min(torch.abs(ray.o[..., 0]), dim=1)
+                chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]                
                 chief_ray_d[1:, ...] = torch.stack(
                     [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
                 )
             else:
+                _, center_idx = torch.min(torch.abs(ray.o[..., 1]), dim=1)
+                chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]                  
                 chief_ray_d[1:, ...] = torch.stack(
                     [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
                 )
@@ -2703,9 +2706,9 @@ class GeoLens(Lens):
             )
 
     def draw_distortion_1D(
-        self, hfov, filename=None, num_points=GEO_GRID, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=False
+        self, hfov, filename=None, num_points=GEO_GRID, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=True
     ):
-        """Draw distortion.
+        """Draw distortion. zemax format(default): ray_aiming = False.
 
         Args:
             hfov: view angle (degrees)
