@@ -95,7 +95,9 @@ class Diffractive_GEO(Surface):
         1, The phase φ in radians adds to the optical path length of the ray
         2, The gradient of the phase profile (phase slope) change the direction of rays.
 
-        https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+        Reference:
+            [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+            [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
         """
         forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
 

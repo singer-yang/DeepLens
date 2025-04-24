@@ -97,9 +97,13 @@ def calculate_zernike_phase(z_coeff, grid=256):
     Returns:
         Phase map
     """
+    device = z_coeff.device
+
     # Generate meshgrid
     x, y = torch.meshgrid(
-        torch.linspace(-1, 1, grid), torch.linspace(1, -1, grid), indexing="xy"
+        torch.linspace(-1, 1, grid, device=device),
+        torch.linspace(1, -1, grid, device=device),
+        indexing="xy",
     )
     r = torch.sqrt(x**2 + y**2)
     alpha = torch.atan2(y, x)
