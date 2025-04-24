@@ -232,9 +232,7 @@ class DiffractiveLens(Lens):
                 res=field_res,
                 wvln=wvln,
                 z=0.0,
-                device=self.device,
-                dtype=self.dtype,
-            )
+            ).to(self.device)
         else:
             inp_wave = point_source_field(
                 point=[0.0, 0.0, depth],
@@ -242,9 +240,7 @@ class DiffractiveLens(Lens):
                 res=field_res,
                 wvln=wvln,
                 z=0.0,
-                device=self.device,
-                dtype=self.dtype,
-            )
+            ).to(self.device)
 
         # Calculate intensity on the sensor. Shape [H_sensor, W_sensor]
         output_wave = self.forward(inp_wave)
