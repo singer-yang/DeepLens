@@ -63,7 +63,7 @@ from .utils import (
     normalize_ImageNet,
     set_logger,
 )
-from .geolens_utils import draw_lens_layout, draw_layout_3d
+# from .geolens_utils import draw_lens_layout, draw_layout_3d
 
 
 class GeoLens(Lens):
@@ -2475,6 +2475,7 @@ class GeoLens(Lens):
         lens_title=None,
     ):
         """Plot lens layout with ray tracing."""
+        from deeplens.geolens_utils import draw_lens_layout
         draw_lens_layout(
             self,
             filename,
@@ -2497,6 +2498,7 @@ class GeoLens(Lens):
         Returns:
             fig, ax: Matplotlib figure and axis objects
         """
+        from deeplens.geolens_utils import draw_layout_3d
         return draw_layout_3d(
             self, filename=filename, figsize=figsize, view_angle=view_angle, show=show
         )

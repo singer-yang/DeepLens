@@ -416,17 +416,20 @@ class Surface(DeepObj):
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
         return self.sag(x, y)
 
-    def surface_with_offset(self, x, y):
-        """Calculate z coordinate of the surface at (x, y) with offset.
+    def surface_with_offset(self, x, y, valid_check=True):
+        """Calculate z coordinate of the surface at (x, y).
 
         This function is used in lens setup plotting.
         """
         x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
-        return self.sag(x, y) + self.d
-    
+        if valid_check:
+            return self.sag(x, y) + self.d
+        else:
+            return self._sag(x, y) + self.d
+
     def surface_sag(self, x, y):
-        """Calculate sag (z) of the surface at (x, y)."""
+        """Calculate sag of the surface at (x, y)."""
         x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
         return self.sag(x, y).item()
@@ -483,29 +486,26 @@ class Surface(DeepObj):
             linewidth=0.75,
         )
 
-    def draw_widget3D(self, ax, color="lightblue"):
+    def draw_widget3D(self, ax, color="lightblue", res=128):
         """Draw the surface in a 3D plot."""
-        resolution = 128
+        if self.is_square:
+            x = torch.linspace(-self.r, self.r, res, device=self.device)
+            y = torch.linspace(-self.r, self.r, res, device=self.device)
+            X, Y = torch.meshgrid(x, y, indexing="ij")
+        else:
+            r_coords = torch.linspace(0, self.r, res // 2, device=self.device)
+            theta_coords = torch.linspace(0, 2 * torch.pi, res, device=self.device)
+            R, Theta = torch.meshgrid(r_coords, theta_coords, indexing="ij")
+            X = R * torch.cos(Theta)
+            Y = R * torch.sin(Theta)
 
-        # Create a grid of x, y coordinates
-        x = torch.linspace(-self.r, self.r, resolution, device=self.device)
-        y = torch.linspace(-self.r, self.r, resolution, device=self.device)
-        X, Y = torch.meshgrid(x, y, indexing="ij")
-
-        # Calculate z coordinates (surface height)
-        valid = self.is_within_boundary(X, Y)
-        Z = self.surface_with_offset(X, Y)
+        # Calculate z coordinates
+        Z = self.surface_with_offset(X, Y, valid_check=False)
 
         # Convert to numpy for plotting
         X_np = X.cpu().detach().numpy()
         Y_np = Y.cpu().detach().numpy()
         Z_np = Z.cpu().detach().numpy()
-
-        # Mask out invalid points
-        mask = valid.cpu().detach().numpy()
-        X_np = np.where(mask, X_np, np.nan)
-        Y_np = np.where(mask, Y_np, np.nan)
-        Z_np = np.where(mask, Z_np, np.nan)
 
         # Plot the surface
         surf = ax.plot_surface(
@@ -515,26 +515,44 @@ class Surface(DeepObj):
             alpha=0.5,
             color=color,
             edgecolor="none",
-            rcount=resolution,
-            ccount=resolution,
+            rcount=res,
+            ccount=res,
             antialiased=True,
         )
 
-        # Draw the edge circle
-        theta = np.linspace(0, 2 * np.pi, 100)
-        edge_x = self.r * np.cos(theta)
-        edge_y = self.r * np.sin(theta)
-        edge_z = np.array(
-            [
-                self.surface_with_offset(
-                    torch.tensor(edge_x[i], device=self.device),
-                    torch.tensor(edge_y[i], device=self.device),
-                ).item()
-                for i in range(len(theta))
-            ]
-        )
-
-        ax.plot(edge_z, edge_x, edge_y, color="lightblue", linewidth=1.0, alpha=1.0)
+        # Draw the edge
+        if self.is_square:
+            # Draw square edge
+            w_half, h_half = self.w / 2, self.h / 2
+            edge_x_vals = [-w_half, w_half, w_half, -w_half, -w_half]
+            edge_y_vals = [h_half, h_half, -h_half, -h_half, h_half]
+            edge_x = []
+            edge_y = []
+            edge_z = []
+            # Sample points along the square edges
+            for i in range(4):
+                x_start, x_end = edge_x_vals[i], edge_x_vals[i + 1]
+                y_start, y_end = edge_y_vals[i], edge_y_vals[i + 1]
+                num_steps = res // 4
+                xs = torch.linspace(x_start, x_end, num_steps, device=self.device)
+                ys = torch.linspace(y_start, y_end, num_steps, device=self.device)
+                zs = self.surface_with_offset(xs, ys)
+                edge_x.extend(xs.cpu().numpy())
+                edge_y.extend(ys.cpu().numpy())
+                edge_z.extend(zs.cpu().numpy())
+            ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
+        else:
+            # Draw circular edge
+            theta = torch.linspace(0, 2 * torch.pi, res, device=self.device)
+            edge_x = self.r * torch.cos(theta)
+            edge_y = self.r * torch.sin(theta)
+            edge_z_tensor = self.surface_with_offset(
+                edge_x,
+                edge_y,
+                valid_check=False,
+            )
+            edge_z = edge_z_tensor.cpu().numpy()
+            ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
 
         return surf
 
