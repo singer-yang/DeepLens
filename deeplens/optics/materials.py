@@ -40,11 +40,11 @@ def read_agf(file_path):
         }
     return materials
 
-CDGM_data = read_agf(os.path.dirname(__file__) + "./material/CDGM.AGF")
-SCHOTT_data = read_agf(os.path.dirname(__file__) + "./material/SCHOTT.AGF")
-MISC_data = read_agf(os.path.dirname(__file__) + "./material/MISC.AGF")
-PLASTIC_data = read_agf(os.path.dirname(__file__) + "./material\PLASTIC2022.AGF")
-MATERIAL_data = MISC_data | PLASTIC_data | CDGM_data | SCHOTT_data
+CDGM_data = read_agf(os.path.dirname(__file__) + "/material/CDGM.AGF")
+SCHOTT_data = read_agf(os.path.dirname(__file__) + "/material/SCHOTT.AGF")
+MISC_data = read_agf(os.path.dirname(__file__) + "/material/MISC.AGF")
+PLASTIC_data = read_agf(os.path.dirname(__file__) + "/material/PLASTIC2022.AGF")
+MATERIAL_data = {**MISC_data, **PLASTIC_data, **CDGM_data, **SCHOTT_data}
 
 # Load materials data from JSON file
 MATERIALS_DATA_PATH = os.path.join(os.path.dirname(__file__), "materials_data.json")
