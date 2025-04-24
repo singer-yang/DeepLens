@@ -9,8 +9,98 @@ from .wave import ComplexWave
 
 
 # ==================================
-# Generate wave field
+# Commonly used wave fields
 # ==================================
+def plane_wave_field(
+    phy_size=(2, 2),
+    res=(1000, 1000),
+    wvln=0.589,
+    z=0.0,
+    valid_r=None,
+):
+    """Create a planar wave field on x0y plane.
+
+    Args:
+        phy_size (tuple): Physical size of the field. [mm].
+        res (tuple): Resolution.
+        wvln (float): Wavelength. [um].
+        z (float): Field z position. [mm].
+        valid_r (float): Valid circle radius. [mm].
+
+    Returns:
+        field (ComplexWave): Complex field.
+    """
+    assert wvln > 0.1 and wvln < 1.0, "wvln should be in [um]."
+
+    # Create a plane wave field
+    u = torch.ones(res, dtype=torch.float64) + 0j
+
+    # Apply valid circle if provided
+    if valid_r is not None:
+        x, y = torch.meshgrid(
+            torch.linspace(-0.5 * phy_size[0], 0.5 * phy_size[0], res[0]),
+            torch.linspace(-0.5 * phy_size[1], 0.5 * phy_size[1], res[1]),
+            indexing="xy",
+        )
+        mask = (x**2 + y**2) < valid_r**2
+        u = u * mask
+
+    # Create wave field
+    return ComplexWave(u=u, phy_size=phy_size, wvln=wvln, res=res, z=z)
+
+
+def point_source_field(
+    point=(0, 0, -1000.0),
+    phy_size=(2, 2),
+    res=(1000, 1000),
+    z=0.0,
+    wvln=0.589,
+    valid_r=None,
+):
+    """Create a spherical wave field on x0y plane originating from a point source.
+
+    Args:
+        point (tuple): Point source position in object space. [mm]. Defaults to (0, 0, -1000.0).
+        phy_size (tuple): Valid plane on x0y plane. [mm]. Defaults to (2, 2).
+        res (tuple): Valid plane resoltution. Defaults to (1000, 1000).
+        z (float): Field z position. [mm]. Defaults to 0.0.
+        wvln (float): Wavelength. [um]. Defaults to 0.589.
+        valid_r (float): Valid circle radius. [mm]. Defaults to None.
+
+    Returns:
+        field (ComplexWave): Complex field on x0y plane.
+    """
+    assert wvln > 0.1 and wvln < 1.0, "wvln should be in [um]."
+    k = 2 * torch.pi / (wvln * 1e-3)  # k in [mm^-1]
+
+    # Create meshgrid on target plane
+    x, y = torch.meshgrid(
+        torch.linspace(
+            -0.5 * phy_size[0], 0.5 * phy_size[0], res[0], dtype=torch.float64
+        ),
+        torch.linspace(
+            0.5 * phy_size[1], -0.5 * phy_size[1], res[1], dtype=torch.float64
+        ),
+        indexing="xy",
+    )
+
+    # Calculate distance to point source, and calculate spherical wave phase
+    r = torch.sqrt((x - point[0]) ** 2 + (y - point[1]) ** 2 + (z - point[2]) ** 2)
+    if point[2] < z:
+        phi = k * r
+    else:
+        phi = -k * r
+    u = (r.min() / r) * torch.exp(1j * phi)
+
+    # Apply valid circle if provided
+    if valid_r is not None:
+        mask = (x - point[0]) ** 2 + (y - point[1]) ** 2 < valid_r**2
+        u = u * mask
+
+    # Create wave field
+    return ComplexWave(u=u, wvln=wvln, phy_size=phy_size, res=res, z=z)
+
+
 def square_field(n, W, w, x0=0, y0=0, theta=0):
     """Code copied from yidan's rect function.
 
@@ -25,6 +115,7 @@ def square_field(n, W, w, x0=0, y0=0, theta=0):
     Returns:
         u (torch.Tensor): Rect field.
     """
+    raise Exception("This function is deprecated.")
     x, y = torch.meshgrid(
         torch.linspace(-W / 2, W / 2, n),
         torch.linspace(-W / 2, W / 2, n),
@@ -52,6 +143,7 @@ def circle_field(phy_size, circle_radius, W, H, wvln=DEFAULT_WAVE, center=[0, 0]
     Returns:
         field (ComplexWave): Complex field.
     """
+    raise Exception("This function is deprecated.")
     x, y = torch.meshgrid(
         torch.linspace(-phy_size[0] / 2, phy_size[0] / 2, H),
         torch.linspace(-phy_size[1] / 2, phy_size[1] / 2, W),
@@ -62,64 +154,6 @@ def circle_field(phy_size, circle_radius, W, H, wvln=DEFAULT_WAVE, center=[0, 0]
     u[circle_idx] = 1
 
     return ComplexWave(u=u, phy_size=phy_size, wvln=wvln)
-
-
-def plane_wave_field(phy_size, res, wvln=0.589, z=0.0, device="cpu", dtype=torch.float32):
-    """Create a planar wave field."""
-    u = torch.ones(res, dtype=dtype) + 0j
-    return ComplexWave(u=u, phy_size=phy_size, wvln=wvln, z=z).to(device)
-
-
-def point_source_field(
-    point=[0, 0, -1000.0],
-    phy_size=[2, 2],
-    res=[1024, 1024],
-    wvln=0.589,
-    z=0.0,
-    device="cpu",
-    dtype=torch.float32,
-):
-    """Create a spherical wave field on x0y plane originating from a point source.
-
-    Args:
-        point (list): Point source position in object space. [mm]. Defaults to [0, 0, -1000].
-        phy_size (list): Valid plane on x0y plane. [mm]. Defaults to [5, 5].
-        res (list): Valid plane resoltution. Defaults to [512, 512].
-        wvln (float): wvln. [um]. Defaults to 0.55.
-        z (float): Field z position. [mm]. Defaults to 0.
-        device (str): Device to use. Defaults to "cpu".
-        dtype (torch.dtype): Data type for tensor operations. Defaults to torch.float32.
-
-    Returns:
-        field (ComplexWave): Complex field on x0y plane.
-    """
-    assert wvln > 0.1 and wvln < 1.0, "wvln should be in [um]."
-    k = 2 * torch.pi / (wvln * 1e-3)  # k in [mm^-1]
-    ps = phy_size[0] / res[0]
-    
-    # Create meshgrid
-    x, y = torch.meshgrid(
-        torch.linspace(
-            -0.5 * phy_size[0] + 0.5 * ps, 0.5 * phy_size[1] - 0.5 * ps, res[0], dtype=dtype
-        ),
-        torch.linspace(
-            0.5 * phy_size[1] - 0.5 * ps, -0.5 * phy_size[0] + 0.5 * ps, res[1], dtype=dtype
-        ),
-        indexing="xy",
-    )
-    # z = torch.full_like(x, z, dtype=dtype)
-
-    # Calculate distance and phase
-    if dtype != torch.float64:
-        raise Warning("dtype is not float64. This may lead to numerical inaccuracies.")
-    r = torch.sqrt((x - point[0]) ** 2 + (y - point[1]) ** 2 + (z - point[2]) ** 2)
-    phi = torch.remainder(k * r, 2 * torch.pi)
-
-    # Calculate field
-    u = r.min() / r * torch.exp(1j * phi)
-    field = ComplexWave(u=u, wvln=wvln, phy_size=phy_size, res=res, z=z)
-    field = field.to(device)
-    return field
 
 
 def sphere_wave(
@@ -142,6 +176,7 @@ def sphere_wave(
     Returns:
         field (ComplexWave): Complex field.
     """
+    raise Exception("This function is deprecated.")
     x, y = torch.meshgrid(
         torch.linspace(x_range[0], x_range[1], res[1], dtype=torch.float64),
         torch.linspace(y_range[1], y_range[0], res[0], dtype=torch.float64),
