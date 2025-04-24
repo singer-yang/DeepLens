@@ -3,8 +3,48 @@
 import json
 import os
 import torch
-
+import re
 from .basics import DeepObj
+
+# Load materials data from AGF file
+def read_agf(file_path):
+    encodings = ['utf-8', 'utf-16']
+    for enc in encodings:
+        try:
+            with open(file_path, 'r', encoding=enc) as f:
+                lines = f.readlines()
+                break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError("error!")
+
+    nm_lines = [line for line in lines if re.match(r'^NM\b', line)]
+    cd_lines = [line for line in lines if re.match(r'^CD\b', line)]
+
+    materials = {}
+    for i in range(len(nm_lines)):
+        nm_parts = nm_lines[i].strip().split()
+        cd_parts = cd_lines[i].strip().split()
+
+        materials[nm_parts[1].lower()] = {
+            "calculate_mode": float(nm_parts[2]),
+            "nd": float(nm_parts[4]),
+            "vd": float(nm_parts[5]),
+            "a_coeff": float(cd_parts[1]),
+            "b_coeff": float(cd_parts[2]),
+            "c_coeff": float(cd_parts[3]),
+            "d_coeff": float(cd_parts[4]),
+            "e_coeff": float(cd_parts[5]),
+            "f_coeff": float(cd_parts[6])
+        }
+    return materials
+
+CDGM_data = read_agf(os.path.dirname(__file__) + "/material/CDGM.AGF")
+SCHOTT_data = read_agf(os.path.dirname(__file__) + "/material/SCHOTT.AGF")
+MISC_data = read_agf(os.path.dirname(__file__) + "/material/MISC.AGF")
+PLASTIC_data = read_agf(os.path.dirname(__file__) + "/material/PLASTIC2022.AGF")
+MATERIAL_data = {**MISC_data, **PLASTIC_data, **CDGM_data, **SCHOTT_data}
 
 # Load materials data from JSON file
 MATERIALS_DATA_PATH = os.path.join(os.path.dirname(__file__), "materials_data.json")
@@ -30,6 +70,35 @@ class Material(DeepObj):
         self.load_dispersion()
         self.device = device
 
+    def set_material_parameter(self, material_data, material_name):
+
+        if material_name in material_data:
+            material = material_data[material_name]
+
+            if material['calculate_mode'] == 1:
+                self.dispersion = "schott"
+                self.a0 = material['a_coeff']
+                self.a1 = material['b_coeff']
+                self.a2 = material['c_coeff']
+                self.a3 = material['d_coeff']
+                self.a4 = material['e_coeff']
+                self.a5 = material['f_coeff']
+            elif material['calculate_mode'] == 2:
+                self.dispersion = "sellmeier"
+                self.k1 = material['a_coeff']
+                self.l1 = material['b_coeff']
+                self.k2 = material['c_coeff']
+                self.l2 = material['d_coeff']
+                self.k3 = material['e_coeff']
+                self.l3 = material['f_coeff']
+            else:
+                raise NotImplementedError(f"error: {material_name} calculate_mode {material['calculate_mode']}")
+
+            self.n = material['nd']
+            self.V = material['vd']
+        else:
+            print(f"error: not {material_name}")
+
     def get_name(self):
         if self.dispersion == "optimizable":
             return f"{self.n.item():.4f}/{self.V.item():.2f}"
@@ -38,24 +107,13 @@ class Material(DeepObj):
 
     def load_dispersion(self):
         """Load material dispersion equation."""
-        if self.name in SELLMEIER_TABLE:
+        if self.name == 'air' or self.name == 'vacuum' or self.name == 'occluder':
             self.dispersion = "sellmeier"
-            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = SELLMEIER_TABLE[
-                self.name
-            ]
-            self.n, self.V = MATERIAL_TABLE[self.name]
+            self.k1,self.l1, self.k2, self.l2, self.k3, self.l3 = 0,0,0,0,0,0
+            self.n, self.V = 1, 1e38
 
-        elif self.name in SCHOTT_TABLE:
-            self.dispersion = "schott"
-            self.a0, self.a1, self.a2, self.a3, self.a4, self.a5 = SCHOTT_TABLE[
-                self.name
-            ]
-            self.n, self.V = MATERIAL_TABLE[self.name]
-
-        elif self.name in MATERIAL_TABLE or self.name in CDGM_GLASS:
-            self.dispersion = "cauchy"
-            self.n, self.V = MATERIAL_TABLE[self.name]
-            self.A, self.B = self.nV_to_AB(self.n, self.V)
+        elif self.name in MATERIAL_data:
+            self.set_material_parameter(MATERIAL_data, self.name)
 
         elif self.name in INTERP_TABLE:
             self.dispersion = "interp"

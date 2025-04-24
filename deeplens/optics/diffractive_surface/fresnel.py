@@ -5,10 +5,10 @@ Reference:
 """
 
 import torch
-from .base import DiffractiveSurface
+from .base import DOE
 
 
-class Fresnel(DiffractiveSurface):
+class Fresnel(DOE):
     def __init__(
         self,
         d,
@@ -69,15 +69,11 @@ class Fresnel(DiffractiveSurface):
     # =======================================
     # Optimization
     # =======================================
-    def activate_grad(self):
-        """Activate gradients for optimization."""
-        self.f0.requires_grad = True
-
-    def get_optimizer_params(self, lr=None):
+    def get_optimizer_params(self, lr=0.001):
         """Get parameters for optimization."""
-        self.activate_grad()
-        lr = 0.001 if lr is None else lr
-        return [{"params": [self.f0], "lr": lr}]
+        self.f0.requires_grad = True
+        optimizer_params = [{"params": [self.f0], "lr": lr}]
+        return optimizer_params
 
     # =======================================
     # IO

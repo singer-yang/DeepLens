@@ -1,10 +1,10 @@
 """Pixel2D DOE parameterization. Each pixel is an independent parameter."""
 
 import torch
-from .base import DiffractiveSurface
+from .base import DOE
 
 
-class Pixel2D(DiffractiveSurface):
+class Pixel2D(DOE):
     """Pixel2D DOE parameterization - direct phase map representation."""
 
     def __init__(
@@ -64,15 +64,11 @@ class Pixel2D(DiffractiveSurface):
     # =======================================
     # Optimization
     # =======================================
-    def activate_grad(self):
-        """Activate gradients for optimization."""
-        self.phase_map.requires_grad = True
-
-    def get_optimizer_params(self, lr=None):
+    def get_optimizer_params(self, lr=0.01):
         """Get parameters for optimization."""
-        self.activate_grad()
-        lr = 0.01 if lr is None else lr
-        return [{"params": [self.phase_map], "lr": lr}]
+        self.phase_map.requires_grad = True
+        optimizer_params = [{"params": [self.phase_map], "lr": lr}]
+        return optimizer_params
 
     # =======================================
     # IO
