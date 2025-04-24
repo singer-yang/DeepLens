@@ -170,10 +170,10 @@ class DiffractiveLens(Lens):
         """Propagate a wave through the optical element.
 
         Args:
-            wave (Wave): Input wavefront.
+            wave (Wave): Input wave field.
 
         Returns:
-            wave (Wave): Output wavefront.
+            wave (Wave): Output wave field at sensor plane.
         """
         # Propagate to DOE
         for surf in self.surfaces:
@@ -232,40 +232,55 @@ class DiffractiveLens(Lens):
                 res=field_res,
                 wvln=wvln,
                 z=0.0,
-                device=self.device,
-                dtype=self.dtype,
-            )
+            ).to(self.device)
         else:
             inp_wave = point_source_field(
                 point=[0.0, 0.0, depth],
                 phy_size=field_size,
                 res=field_res,
                 wvln=wvln,
-                fieldz=self.surfaces[0].d.item(),
-                device=self.device,
-                dtype=self.dtype,
-            )
+                z=0.0,
+            ).to(self.device)
 
         # Calculate intensity on the sensor. Shape [H_sensor, W_sensor]
         output_wave = self.forward(inp_wave)
-        intensity_full_res = output_wave.u.abs() ** 2
-        intensity_full_res = F.interpolate(
-            intensity_full_res,
-            size=self.sensor_res,
+        intensity = output_wave.u.abs() ** 2
+        
+        # Interpolate wave to have the same pixel size as the sensor
+        factor = output_wave.ps / self.pixel_size
+        intensity = F.interpolate(
+            intensity,
+            scale_factor=(factor, factor),
             mode="bilinear",
             align_corners=False,
         )[0, 0, :, :]
 
+        # Crop or pad wave to the sensor resolution
+        intensity_h, intensity_w = intensity.shape[-2:]
+        sensor_h, sensor_w = self.sensor_res
+        if sensor_h < intensity_h or sensor_w < intensity_w:
+            # crop
+            start_h = (intensity_h - sensor_h) // 2
+            start_w = (intensity_w - sensor_w) // 2
+            intensity = intensity[start_h : start_h + sensor_h, start_w : start_w + sensor_w]
+        elif sensor_h > intensity_h or sensor_w > intensity_w:
+            # pad
+            pad_top = (sensor_h - intensity_h) // 2
+            pad_bottom = sensor_h - intensity_h - pad_top
+            pad_left = (sensor_w - intensity_w) // 2
+            pad_right = sensor_w - intensity_w - pad_left
+            intensity = F.pad(intensity, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+
         # Crop the valid patch from the full-resolution intensity map as the PSF
         coord_c_i = int(self.sensor_res[1] / 2)
         coord_c_j = int(self.sensor_res[0] / 2)
-        intensity_full_res = F.pad(
-            intensity_full_res,
+        intensity = F.pad(
+            intensity,
             [ks // 2, ks // 2, ks // 2, ks // 2],
             mode="constant",
             value=0,
         )
-        psf = intensity_full_res[coord_c_i : coord_c_i + ks, coord_c_j : coord_c_j + ks]
+        psf = intensity[coord_c_i : coord_c_i + ks, coord_c_j : coord_c_j + ks]
 
         # Normalize PSF
         psf /= psf.sum()
