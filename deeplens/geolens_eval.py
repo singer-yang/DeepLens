@@ -37,21 +37,20 @@ class GeoLensEval:
         # Sample and trace rays, shape [num_fields, num_fields, num_rays, 3]
         ray = self.sample_point_source(
             depth=depth,
-            num_rays=SPP_CALC,
+            num_rays=SPP_PSF,
             num_grid=[num_fields * 2 - 1, num_fields * 2 - 1],
             wvln=wvln,
         )
         ray = self.trace2sensor(ray)
         ray_o = torch.flip(ray.o.clone(), [0, 1]).cpu().numpy()
         ray_ra = torch.flip(ray.ra.clone(), [0, 1]).cpu().numpy()
-        # breakpoint()
 
         # Plot multiple spot diagrams in one figure
-        _, axs = plt.subplots(1, num_fields, figsize=(num_fields * 5, 5))
+        _, axs = plt.subplots(1, num_fields, figsize=(num_fields * 4, 4))
         center_idx = num_fields - 1  # Index corresponding to the center of the grid
         for i in range(num_fields):
             # Select spots along the y-axis (meridional direction) starting from the center
-            row_idx = center_idx + i
+            row_idx = center_idx - i
             col_idx = center_idx
 
             # Calculate center of mass
@@ -63,13 +62,9 @@ class GeoLensEval:
             # Plot points and center of mass
             axs[i].scatter(x, y, 3, "black", alpha=0.5)
             axs[i].scatter([xc], [yc], 100, "r", "x")
-
-            # Visualization
             axs[i].set_aspect("equal", adjustable="datalim")
-            axs[i].tick_params(axis="both", which="major", labelsize=10)
-            for spine in axs[i].spines.values():
-                spine.set_linewidth(2)
-
+            axs[i].tick_params(axis="both", which="major", labelsize=6)
+            
         # Save plot
         if save_name is None:
             save_name = f"./spot_meridional_{-depth}mm.png"
@@ -82,32 +77,42 @@ class GeoLensEval:
         plt.close()
 
     @torch.no_grad()
-    def draw_spot_diagram(self, M=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
-        """Draw spot diagram of the lens. Shot rays from grid points in object space, trace to sensor and visualize."""
+    def draw_spot_diagram(self, num_fields=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
+        """Draw spot diagram of the lens. 
+        
+        Shot rays from grid points in object space, trace to sensor.
+
+        Args:
+            num_fields (int, optional): number of grid points. Defaults to 5.
+            depth (float, optional): depth of the point source. Defaults to DEPTH.
+            wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
+            save_name (string, optional): filename to save. Defaults to None.
+        """
         # Sample and trace rays from grid points
         ray = self.sample_point_source(
             depth=depth,
-            num_rays=SPP_CALC,
-            num_grid=GEO_GRID,
+            num_rays=SPP_PSF,
+            num_grid=[num_fields, num_fields],
             wvln=wvln,
         )
         ray = self.trace2sensor(ray)
-        o2 = -ray.o.clone().cpu().numpy()
-        ra = ray.ra.clone().cpu().numpy()
+        ray_o = torch.flip(ray.o.clone(), [0, 1]).cpu().numpy()
+        ray_ra = torch.flip(ray.ra.clone(), [0, 1]).cpu().numpy()
 
         # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(M, M, figsize=(30, 30))
-        for i in range(M):
-            for j in range(M):
-                ra_ = ra[:, i, j]
-                x, y = o2[:, i, j, 0], o2[:, i, j, 1]
-                x, y = x[ra_ > 0], y[ra_ > 0]
-                xc, yc = x.sum() / ra_.sum(), y.sum() / ra_.sum()
+        fig, axs = plt.subplots(num_fields, num_fields, figsize=(num_fields * 2, num_fields * 2))
+        for i in range(num_fields):
+            for j in range(num_fields):
+                ra = ray_ra[i, j, :]
+                x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
+                x, y = x[ra > 0], y[ra > 0]
+                xc, yc = x.sum() / ra.sum(), y.sum() / ra.sum()
 
-                # scatter plot
-                axs[i, j].scatter(x, y, 1, "black")
-                axs[i, j].scatter([xc], [yc], None, "r", "x")
+                # Plot points and center of mass
+                axs[i, j].scatter(x, y, 2, "black", alpha=0.5)
+                axs[i, j].scatter([xc], [yc], 100, "r", "x")
                 axs[i, j].set_aspect("equal", adjustable="datalim")
+                axs[i, j].tick_params(axis='both', which='major', labelsize=6)
 
         if save_name is None:
             save_name = f"./spot{-depth}mm.png"
