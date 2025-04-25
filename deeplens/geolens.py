@@ -330,19 +330,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             num_grid = [num_grid, num_grid]
 
         # Sample normalized grid points [-1, 1] * [-1, 1] on the sensor plane
+        num_grid_x, num_grid_y = num_grid
         x, y = torch.meshgrid(
-            torch.linspace(
-                -1,
-                1,
-                num_grid[1],
-                device=self.device,
-            ),
-            torch.linspace(
-                -1,
-                1,
-                num_grid[0],
-                device=self.device,
-            ),
+            torch.linspace(-1, 1, num_grid_x, device=self.device),
+            torch.linspace(1, -1, num_grid_y, device=self.device),
             indexing="xy",
         )
 
