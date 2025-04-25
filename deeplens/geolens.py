@@ -134,62 +134,66 @@ class GeoLens(Lens):
         depth=0.0,
         num_rays=7,
         wvln=DEFAULT_WAVE,
-        plane="sagittal",
-        entrance_pupil=False,
-        forward=True,
+        plane="meridional",
+        entrance_pupil=True,
     ):
-        """Sample 2D parallel rays. Used for (1) drawing lens setup, (2) 2D geometric optics calculation, for example, refocusing to infinity
+        """Sample 2D parallel rays from object space to sensor plane.
+        
+        Used for (1) drawing lens setup, (2) 2D geometric optics calculation, for example, refocusing to infinity
 
         Args:
             fov (float, optional): incident angle (in degree). Defaults to 0.0.
             depth (float, optional): sampling depth. Defaults to 0.0.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-            num_rays (int, optional): ray number. Defaults to 15.
+            num_rays (int, optional): ray number. Defaults to 7.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            plane (str, optional): sampling plane. Defaults to "meridional" (y-z plane).
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to True.
 
         Returns:
             ray (Ray object): Ray object. Shape [num_rays, 3]
         """
         # Sample points on the pupil
         if entrance_pupil:
-            pupilz, pupilx = self.calc_entrance_pupil()
+            pupilz, pupilr = self.calc_entrance_pupil()
         else:
-            pupilz, pupilx = 0, self.surfaces[0].r
+            pupilz, pupilr = 0, self.surfaces[0].r
 
-        x = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
-        y = torch.zeros_like(x)
-        z = torch.full_like(x, pupilz)
-
-        # Form ray origins
+        # Sample ray origins, shape [num_rays, 3]
         if plane == "sagittal":
-            ray_o = torch.stack((x, y, z), axis=-1)  # shape [num_rays, 3]
+            ray_o = torch.stack((
+                torch.linspace(-pupilr, pupilr, num_rays) * 0.99,
+                torch.full((num_rays,), 0),
+                torch.full((num_rays,), pupilz)
+            ), axis=-1)
         elif plane == "meridional":
-            ray_o = torch.stack((y, x, z), axis=-1)  # shape [num_rays, 3]
+            ray_o = torch.stack((
+                torch.full((num_rays,), 0),
+                torch.linspace(-pupilr, pupilr, num_rays) * 0.99,
+                torch.full((num_rays,), pupilz)
+            ), axis=-1)
         else:
             raise ValueError(f"Invalid plane: {plane}")
 
-        # Sample ray directions
-        if forward:
-            dx = torch.full_like(x, np.sin(fov / 57.3))
-            dy = torch.zeros_like(x)
-            dz = torch.full_like(x, np.cos(fov / 57.3))
-        else:
-            dx = torch.full_like(x, -np.sin(fov / 57.3))
-            dy = torch.zeros_like(x)
-            dz = torch.full_like(x, -np.cos(fov / 57.3))
-
-        # Form ray directions
+        # Sample ray directions, shape [num_rays, 3]
         if plane == "sagittal":
-            ray_d = torch.stack((dx, dy, dz), axis=-1)  # shape [num_rays, 3]
+            ray_d = torch.stack((
+                torch.full((num_rays,), float(np.sin(np.deg2rad(fov)))),
+                torch.zeros((num_rays,)),
+                torch.full((num_rays,), float(np.cos(np.deg2rad(fov))))
+            ), axis=-1)        
         elif plane == "meridional":
-            ray_d = torch.stack((dy, dx, dz), axis=-1)  # shape [num_rays, 3]
+            ray_d = torch.stack((
+                torch.zeros((num_rays,)),
+                torch.full((num_rays,), float(np.sin(np.deg2rad(fov)))),
+                torch.full((num_rays,), float(np.cos(np.deg2rad(fov))))
+            ), axis=-1)
         else:
             raise ValueError(f"Invalid plane: {plane}")
 
         # Form rays
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
 
-        # Propagate rays to the sampling depth
+        # Propagate rays to the target depth
         rays.propagate_to(depth)
         return rays
 
@@ -1679,36 +1683,36 @@ class GeoLens(Lens):
 
         return fov
 
-    @torch.no_grad()
-    def calc_principal(self):
-        """Compute principal (front and back) planes."""
-        # Backward ray tracing to compute first principal point
-        ray = self.sample_parallel_2D(
-            fov=0.0,
-            depth=self.d_sensor.item(),
-            num_rays=SPP_CALC,
-            wvln=DEFAULT_WAVE,
-            forward=False,
-        )
-        inc_ray = ray.clone()
-        out_ray, _ = self.trace(ray)
+    # @torch.no_grad()
+    # def calc_principal(self):
+    #     """Compute principal (front and back) planes."""
+    #     # Backward ray tracing to compute first principal point
+    #     ray = self.sample_parallel_2D(
+    #         fov=0.0,
+    #         depth=self.d_sensor.item(),
+    #         num_rays=SPP_CALC,
+    #         wvln=DEFAULT_WAVE,
+    #         forward=False,
+    #     )
+    #     inc_ray = ray.clone()
+    #     out_ray, _ = self.trace(ray)
 
-        t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
-        z = out_ray.o[..., 2] - out_ray.d[..., 2] * t
-        front_principal = np.nanmean(z[ray.ra > 0].cpu().numpy())
+    #     t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
+    #     z = out_ray.o[..., 2] - out_ray.d[..., 2] * t
+    #     front_principal = np.nanmean(z[ray.ra > 0].cpu().numpy())
 
-        # Forward ray tracing to compute second principal point
-        ray = self.sample_parallel_2D(
-            fov=0.0, depth=0.0, num_rays=SPP_CALC, wvln=DEFAULT_WAVE, forward=True
-        )
-        inc_ray = ray.clone()
-        out_ray, _ = self.trace(ray)
+    #     # Forward ray tracing to compute second principal point
+    #     ray = self.sample_parallel_2D(
+    #         fov=0.0, depth=0.0, num_rays=SPP_CALC, wvln=DEFAULT_WAVE, forward=True
+    #     )
+    #     inc_ray = ray.clone()
+    #     out_ray, _ = self.trace(ray)
 
-        t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
-        z = out_ray.o[..., 2] - out_ray.d[..., 2] * t
-        back_principal = np.nanmean(z[ray.ra > 0].cpu().numpy())
+    #     t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
+    #     z = out_ray.o[..., 2] - out_ray.d[..., 2] * t
+    #     back_principal = np.nanmean(z[ray.ra > 0].cpu().numpy())
 
-        return front_principal, back_principal
+    #     return front_principal, back_principal
 
     @torch.no_grad()
     def calc_scale(self, depth, method="pinhole"):
@@ -1812,7 +1816,9 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def calc_chief_ray(self, fov, plane="sagittal"):
-        """Compute chief ray for an incident angle. TODO: if chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
+        """Compute chief ray for an incident angle. 
+        
+        TODO: if chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
 
         Args:
             fov (float): incident angle in degree.
@@ -1831,12 +1837,12 @@ class GeoLens(Lens):
         )
         inc_ray = ray.clone()
 
-        # Trace until the aperture
+        # Trace to the aperture
         ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
 
         # Look for the ray that is closest to the optical axis
         center_x = torch.min(torch.abs(ray.o[:, 0]))
-        center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item()  # int
+        center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item()
         chief_ray_o, chief_ray_d = inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
 
         return chief_ray_o, chief_ray_d
@@ -2031,10 +2037,12 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def calc_entrance_pupil(self, shrink_pupil=False):
-        """Sample **backward** rays, return z coordinate and radius of entrance pupil.
+        """Caclulate entrance pupil of the lens.
+        
+        Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2]. We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
 
         Args:
-            shrink_pupil (bool): shrink the pupil.
+            shrink_pupil (bool): shrink the pupil. Used when we want to calculate chief rays.
 
         Returns:
             avg_pupilz (float): z coordinate of entrance pupil.

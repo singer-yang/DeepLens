@@ -322,6 +322,7 @@ def draw_lens_layout(
                     num_rays=num_rays,
                     entrance_pupil=entrance_pupil,
                     depth=-1.0,
+                    plane="sagittal",
                 )  # shape (num_rays, 3)
             else:
                 ray = geolens.sample_point_source_2D(
@@ -363,6 +364,7 @@ def draw_lens_layout(
                         num_rays=num_rays,
                         wvln=wvln,
                         entrance_pupil=entrance_pupil,
+                        plane="sagittal",
                     )  # shape (num_rays, 3)
                 else:
                     ray = geolens.sample_point_source_2D(
