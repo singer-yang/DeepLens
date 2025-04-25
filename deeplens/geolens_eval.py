@@ -25,65 +25,60 @@ class GeoLensEval:
     # Spot diagram
     # ================================================================
     @torch.no_grad()
-    def draw_spot_radial(self, M=4, depth=DEPTH, save_name=None):
-        """Draw radial spot diagram of the lens.
+    def draw_spot_radial(self, num_fields=4, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
+        """Draw spot diagram of the lens at different fields along meridional direction.
 
         Args:
-            M (int, optional): field number. Defaults to 3.
+            num_fields (int, optional): field number. Defaults to 4.
             depth (float, optional): depth of the point source. Defaults to DEPTH.
+            wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
         """
-        # Sample and trace rays
+        # Sample and trace rays, shape [num_fields, num_fields, num_rays, 3]
         ray = self.sample_point_source(
             depth=depth,
-            num_rays=1024,
-            num_grid=M * 2 - 1,
-            wvln=DEFAULT_WAVE,
+            num_rays=SPP_CALC,
+            num_grid=[num_fields * 2 - 1, num_fields * 2 - 1],
+            wvln=wvln,
         )
-        ray, _ = self.trace(ray)
-        ray.propagate_to(self.d_sensor)
-        o2 = torch.flip(ray.o.clone(), [1, 2]).cpu().numpy()
-        ra = torch.flip(ray.ra.clone(), [1, 2]).cpu().numpy()
+        ray = self.trace2sensor(ray)
+        ray_o = torch.flip(ray.o.clone(), [0, 1]).cpu().numpy()
+        ray_ra = torch.flip(ray.ra.clone(), [0, 1]).cpu().numpy()
+        # breakpoint()
 
         # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(1, M, figsize=(M * 12, 10))
-        for i in range(M):
-            i_bias = i + M - 1
+        _, axs = plt.subplots(1, num_fields, figsize=(num_fields * 5, 5))
+        center_idx = num_fields - 1  # Index corresponding to the center of the grid
+        for i in range(num_fields):
+            # Select spots along the y-axis (meridional direction) starting from the center
+            row_idx = center_idx + i
+            col_idx = center_idx
 
-            # calculate center of mass
-            ra_ = ra[:, i_bias, i_bias]
-            x, y = o2[:, i_bias, i_bias, 0], o2[:, i_bias, i_bias, 1]
-            x, y = x[ra_ > 0], y[ra_ > 0]
-            xc, yc = x.sum() / ra_.sum(), y.sum() / ra_.sum()
+            # Calculate center of mass
+            ra = ray_ra[row_idx, col_idx, :]
+            x, y = ray_o[row_idx, col_idx, :, 0], ray_o[row_idx, col_idx, :, 1]
+            x, y = x[ra > 0], y[ra > 0]
+            xc, yc = x.sum() / ra.sum(), y.sum() / ra.sum()
 
-            # scatter plot
-            axs[i].scatter(x, y, 12, "black")
-            axs[i].scatter([xc], [yc], 400, "r", "x")
+            # Plot points and center of mass
+            axs[i].scatter(x, y, 3, "black", alpha=0.5)
+            axs[i].scatter([xc], [yc], 100, "r", "x")
 
-            # visualization
+            # Visualization
             axs[i].set_aspect("equal", adjustable="datalim")
-            axs[i].tick_params(axis="both", which="major", labelsize=18)
-            axs[i].spines["top"].set_linewidth(4)
-            axs[i].spines["bottom"].set_linewidth(4)
-            axs[i].spines["left"].set_linewidth(4)
-            axs[i].spines["right"].set_linewidth(4)
+            axs[i].tick_params(axis="both", which="major", labelsize=10)
+            for spine in axs[i].spines.values():
+                spine.set_linewidth(2)
 
-        # Save figure
+        # Save plot
         if save_name is None:
-            plt.savefig(
-                f"./spot{-depth}mm_radial.svg",
-                bbox_inches="tight",
-                format="svg",
-                dpi=1200,
-            )
+            save_name = f"./spot_meridional_{-depth}mm.png"
         else:
-            plt.savefig(
-                f"{save_name}_spot{-depth}mm_radial.svg",
-                bbox_inches="tight",
-                format="svg",
-                dpi=1200,
-            )
+            if save_name.endswith('.png'):
+                save_name = save_name[:-4]
+            save_name = f"{save_name}_meridional_{-depth}mm.png"
 
+        plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         plt.close()
 
     @torch.no_grad()
