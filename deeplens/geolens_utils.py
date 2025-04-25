@@ -190,7 +190,7 @@ def create_lens(
 
     # Compute lens parameters
     aper_r = foclen / fnum / 2
-    imgh = 2 * foclen * float(np.tan(fov / 2 / 57.3))
+    imgh = 2 * foclen * float(np.tan(np.deg2rad(fov / 2)))
     if thickness is None:
         thickness = foclen + flange
     d_opt = thickness - flange
@@ -303,9 +303,9 @@ def draw_lens_layout(
     if lens_title is None:
         if geolens.aper_idx is not None:
             fnum = geolens.foclen / geolens.calc_entrance_pupil()[1] / 2
-            lens_title = f"FoV{round(2 * geolens.hfov * 57.3, 1)}({int(geolens.calc_eqfl())}mm EQFL)_F/{round(fnum, 2)}_DIAG{round(geolens.r_sensor * 2, 2)}mm_FFL{round(geolens.foclen, 2)}mm"
+            lens_title = f"FoV{round(2 * geolens.hfov * 180 / torch.pi, 1)}({int(geolens.calc_eqfl())}mm EQFL)_F/{round(fnum, 2)}_DIAG{round(geolens.r_sensor * 2, 2)}mm_FFL{round(geolens.foclen, 2)}mm"
         else:
-            lens_title = f"FoV{round(2 * geolens.hfov * 57.3, 1)}({int(geolens.calc_eqfl())}mm EQFL)_DIAG{round(geolens.r_sensor * 2, 2)}mm_FFL{round(geolens.foclen, 2)}mm"
+            lens_title = f"FoV{round(2 * geolens.hfov * 180 / torch.pi, 1)}({int(geolens.calc_eqfl())}mm EQFL)_DIAG{round(geolens.r_sensor * 2, 2)}mm_FFL{round(geolens.foclen, 2)}mm"
 
     # Draw lens layout
     if not multi_plot:

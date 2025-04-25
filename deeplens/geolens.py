@@ -68,12 +68,11 @@ from .utils import (
 
 class GeoLens(Lens):
     def __init__(self, filename=None, sensor_res=(1000, 1000), sensor_size=(8.0, 8.0), device=None):
-        """Initialize a geometric lens.
+        """Initialize a refractive lens.
         
         There are three ways to initialize a GeoLens:
-            1. Load a lens from .json file
-            2. Load a lens from .zmx/.seq file
-            3. Initialize a lens with no lens file, then manually add surfaces and materials
+            1. Read a lens from .json/.zmx/.seq file
+            2. Initialize a lens with no lens file, then manually add surfaces and materials
         """
         super().__init__(device)
 
@@ -90,7 +89,10 @@ class GeoLens(Lens):
             self.to(self.device)
 
     def read_lens(self, filename):
-        """Read a GeoLens from a file. In this step, sensor size and resolution will usually be overwritten."""
+        """Read a GeoLens from a file. 
+        
+        In this step, sensor size and resolution will usually be overwritten.
+        """
         # Load lens file
         if filename[-4:] == ".txt":
             raise ValueError("File format .txt has been deprecated.")
@@ -124,6 +126,10 @@ class GeoLens(Lens):
         for surf in self.surfaces:
             surf.double()
 
+    def __call__(self, ray):
+        """The input and output of a GeoLens object are both Ray objects."""
+        return self.trace(ray)
+
     # ====================================================================================
     # Ray sampling
     # ====================================================================================
@@ -135,7 +141,7 @@ class GeoLens(Lens):
         num_rays=7,
         wvln=DEFAULT_WAVE,
         plane="meridional",
-        entrance_pupil=True,
+        entrance_pupil=False,
     ):
         """Sample 2D parallel rays from object space to sensor plane.
         
@@ -190,10 +196,8 @@ class GeoLens(Lens):
         else:
             raise ValueError(f"Invalid plane: {plane}")
 
-        # Form rays
+        # Form rays and propagate to the target depth
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
-
-        # Propagate rays to the target depth
         rays.propagate_to(depth)
         return rays
 
@@ -207,51 +211,47 @@ class GeoLens(Lens):
         wvln=DEFAULT_WAVE,
         entrance_pupil=False,
     ):
-        """Sample parallel rays from object space. Returns rays for each combination of fov_x and fov_y. Used for geometric optics calculation.
+        """Sample 3D parallel rays from object space to sensor plane. 
+
+        Used for geometric optics calculation.
 
         Args:
-            fov_x (float or list): angle rotated from z-axis to ray direction in x0z plane, positive is clockwise.
-            fov_y (float or list): angle rotated from z-axis to ray direction in y0z plane, positive is clockwise.
+            fov_x (float or list): degree angle in x0z plane.
+            fov_y (float or list): degree angle in y0z plane.
             depth (float, optional): sampling depth. Defaults to 0.0.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
             num_rays (int, optional): number of rays. Defaults to SPP_PSF.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
 
         Returns:
             ray (Ray object): Ray object. Shape [num_fov_x, num_fov_y, num_rays, 3]
         """
+        # Preprocess fov angles
         if isinstance(fov_x, float):
             fov_x = [fov_x]
         if isinstance(fov_y, float):
             fov_y = [fov_y]
 
-        # Create meshgrid of fov angles
-        fx_grid, fy_grid = torch.meshgrid(
-            torch.tensor([fx / 57.3 for fx in fov_x]),
-            torch.tensor([fy / 57.3 for fy in fov_y]),
-            indexing="ij",
-        )
+        fov_x = torch.tensor([fx * torch.pi / 180 for fx in fov_x])
+        fov_y = torch.tensor([fy * torch.pi / 180 for fy in fov_y])
 
-        # Sample points on the pupil
+        # Sample ray origins on the pupil, shape [num_fov_x, num_fov_y, num_rays, 3]
         if entrance_pupil:
             pupilz, pupilr = self.calc_entrance_pupil()
         else:
             pupilz, pupilr = 0, self.surfaces[0].r
 
-        ray_o = self.sample_circle(
-            pupilr, pupilz, shape=[len(fov_x), len(fov_y), num_rays]
-        )  # [num_fov_x, num_fov_y, num_rays, 3]
+        ray_o = self.sample_circle(pupilr, pupilz, shape=[len(fov_x), len(fov_y), num_rays])
 
-        # Calculate ray directions
-        dx = torch.tan(-fx_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
-        dy = torch.tan(-fy_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
+        # Sample ray directions, shape [num_fov_x, num_fov_y, num_rays, 3]
+        fx_grid, fy_grid = torch.meshgrid(fov_x, -fov_y, indexing="xy")
+        dx = torch.tan(fx_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
+        dy = torch.tan(fy_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
         dz = torch.ones_like(ray_o[..., 2])
-        ray_d = torch.stack((dx, dy, dz), dim=-1)  # [num_fov_x, num_fov_y, num_rays, 3]
+        ray_d = torch.stack((dx, dy, dz), dim=-1)
 
-        # Form rays
+        # Form rays and propagate to the target depth
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
-
-        # Propagate rays to the sampling depth
         rays.propagate_to(depth)
         return rays
 
@@ -264,10 +264,13 @@ class GeoLens(Lens):
         wvln=DEFAULT_WAVE,
         entrance_pupil=False,
     ):
-        """Sample point source 2D rays. Used for (1) drawing lens setup.
+        """Sample 2D point source rays from object space to sensor plane.
+        
+        Used for (1) drawing lens setup.
 
         Args:
-            depth (float, optional): sampling depth.
+            fov (float, optional): incident angle (in degree). Defaults to 0.0.
+            depth (float, optional): sampling depth. Defaults to DEPTH.
             num_rays (int, optional): ray number. Defaults to 7.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
             entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
@@ -276,7 +279,7 @@ class GeoLens(Lens):
             ray (Ray object): Ray object. Shape [num_rays, 3]
         """
         # Sample point on the object plane
-        ray_o = torch.tensor([depth * float(np.tan(fov / 57.3)), 0, depth])
+        ray_o = torch.tensor([depth * float(np.tan(np.deg2rad(fov))), 0, depth])
         ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
 
         # Sample points (second point) on the pupil
@@ -307,7 +310,9 @@ class GeoLens(Lens):
         wvln=DEFAULT_WAVE,
         importance_sampling=False,
     ):
-        """Sample forward rays from 2D grid in the object space. Used for (1) spot/rms/magnification calculation, (2) distortion/sensor sampling
+        """Sample 2D grid rays from object space to sensor plane. 
+        
+        Used for (1) spot/rms/magnification calculation, (2) distortion/sensor sampling. 
 
         This function is equivalent to self.point_source_grid() + self.sample_from_points().
 
@@ -522,10 +527,6 @@ class GeoLens(Lens):
     # ====================================================================================
     # Ray tracing
     # ====================================================================================
-    def __call__(self, ray):
-        """Forward ray tracing. The input and output of a GeoLens object are both Ray objects."""
-        return self.trace(ray)
-
     def trace(self, ray, lens_range=None, record=False):
         """Ray tracing function. Forward or backward ray tracing is automatically determined by ray directions.
 
@@ -1254,7 +1255,7 @@ class GeoLens(Lens):
         if depth == float("inf"):
             num_fields = 3
             fov_x = [0.0]
-            fov_y = torch.linspace(0.0, self.hfov * 57.3, num_fields).tolist()
+            fov_y = torch.linspace(0.0, self.hfov * 180 / torch.pi, num_fields).tolist()
 
             all_rms_errors = []
             all_rms_radii = []
@@ -2289,7 +2290,7 @@ class GeoLens(Lens):
             raise ValueError("Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time.")
 
     @torch.no_grad()
-    def prune_surf(self, expand_surf=None, surface_range=None):
+    def prune_surf(self, expand_surf=None):
         """Prune surfaces to the minimum height that allows all valid rays to go through.
 
         Args:
@@ -2299,9 +2300,8 @@ class GeoLens(Lens):
             surface_range (list): surface range to prune.
         """
         # Settings
-        surface_range = (
-            self.find_diff_surf() if surface_range is None else surface_range
-        )
+        surface_range = self.find_diff_surf()
+        
         if self.is_cellphone:
             expand_surf = 0.05 if expand_surf is None else expand_surf
 
@@ -2312,14 +2312,14 @@ class GeoLens(Lens):
         else:
             expand_surf = 0.2 if expand_surf is None else expand_surf
 
-        # Sample full-fov rays to compute valid surface height
+        # Sample maximum fov rays to cut valid surface height
         if self.hfov is not None:
-            fov = self.hfov
+            fov_deg = self.hfov * 180 / torch.pi
         else:
-            fov = float(np.arctan(self.r_sensor / self.d_sensor.item()))
+            fov_deg = float(np.arctan(self.r_sensor / self.d_sensor.item())) * 180 / torch.pi
 
         ray = self.sample_parallel_2D(
-            fov=fov * 57.3, num_rays=GEO_GRID, entrance_pupil=True
+            fov=fov_deg, num_rays=GEO_GRID, entrance_pupil=True
         )
 
         ray_out, ray_o_record = self.trace2sensor(ray=ray, record=True)
@@ -2659,7 +2659,7 @@ class GeoLens(Lens):
                 psf = self.psf(points=point, wvln=wvln, ks=256)
                 freq, mtf_tan, mtf_sag = self.psf2mtf(psf)
 
-                fov_deg = round(fov * self.hfov * 57.3, 1)
+                fov_deg = round(fov * self.hfov * 180 / torch.pi, 1)
                 plt.plot(
                     freq,
                     mtf_tan,
