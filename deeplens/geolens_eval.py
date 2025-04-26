@@ -108,29 +108,12 @@ class GeoLensEval:
         Shot rays from grid points in object space, trace to sensor.
 
         Args:
-            num_fields (int, optional): number of grid points. Defaults to 5.
+            num_grid (int, optional): number of grid points. Defaults to 5.
             depth (float, optional): depth of the point source. Defaults to DEPTH.
             wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
         """
-        # Sample rays, shape [num_fields, num_fields, num_rays, 3]
-        # if depth == float("inf"):
-        #     # Create fov lists matching plot axes (y: top-to-bottom, x: left-to-right)
-        #     hfov_x = np.rad2deg(self.hfov_x)
-        #     hfov_y = np.rad2deg(self.hfov_y)
-        #     fov_x_list = [float(x) for x in np.linspace(-hfov_x, hfov_x, num_grid)]
-        #     fov_y_list = [float(y) for y in np.linspace(hfov_y, -hfov_y, num_grid)]
-
-        #     ray = self.sample_parallel(
-        #         fov_x=fov_y_list, fov_y=fov_x_list, num_rays=SPP_PSF, wvln=wvln
-        #     )
-        # else:
-        #     ray = self.sample_point_source(
-        #         depth=depth,
-        #         num_rays=SPP_PSF,
-        #         num_grid=[num_grid, num_grid],
-        #         wvln=wvln,
-        #     )
+        # Sample rays, shape [num_grid, num_grid, num_rays, 3]
         ray = self.sample_grid_source(
             depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
         )
@@ -226,6 +209,40 @@ class GeoLensEval:
         )
 
         return rms_map_rgb
+
+    @torch.no_grad()
+    def rms_map(self, num_grid=64, depth=DEPTH, wvln=DEFAULT_WAVE):
+        """Calculate the RMS spot error map for a specific wavelength.
+
+        Args:
+            num_grid (int, optional): Resolution of the grid used for sampling fields/points. Defaults to 64.
+            depth (float, optional): Depth of the point source. Defaults to DEPTH.
+            wvln (float, optional): Wavelength of the ray. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            rms_map (torch.Tensor): RMS map for the specified wavelength. Shape [num_grid, num_grid].
+        """
+        # Sample and trace rays, shape [num_grid, num_grid, spp, 3]
+        ray = self.sample_grid_source(
+            depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
+        )
+        ray = self.trace2sensor(ray)
+        ray_xy = ray.o[..., :2]  # Shape [num_grid, num_grid, spp, 2]
+        ray_ra = ray.ra  # Shape [num_grid, num_grid, spp]
+
+        # Calculate centroid for each field point for this wavelength
+        ray_o_center = (ray_xy * ray_ra.unsqueeze(-1)).sum(-2) / ray_ra.sum(-1).add(
+            EPSILON
+        ).unsqueeze(-1)
+        # Shape [num_grid, num_grid, 2]
+
+        # Calculate RMS error relative to its own centroid
+        rms_map = torch.sqrt(
+            (((ray_xy - ray_o_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(-1)
+            / (ray_ra.sum(-1) + EPSILON)
+        )  # Shape [num_grid, num_grid]
+
+        return rms_map
 
     # ================================================================
     # PSF
