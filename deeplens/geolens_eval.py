@@ -16,6 +16,7 @@ from deeplens.optics.basics import (
     PSF_KS,
     SPP_CALC,
     SPP_PSF,
+    WAVE_RGB,
 )
 from deeplens.optics.ray import Ray
 
@@ -25,7 +26,9 @@ class GeoLensEval:
     # Spot diagram
     # ================================================================
     @torch.no_grad()
-    def draw_spot_radial(self, num_fields=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None):
+    def draw_spot_radial(
+        self, num_fields=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None
+    ):
         """Draw spot diagram of the lens at different fields along meridional direction.
 
         Args:
@@ -36,30 +39,44 @@ class GeoLensEval:
         """
         # Sample rays along meridional (y) direction, shape [1, num_fields, num_rays, 3]
         if depth == float("inf"):
-            fov_y_list = torch.linspace(0, float(np.rad2deg(self.hfov)), num_fields, device=self.device)
-            ray = self.sample_parallel(fov_x=[0.0], fov_y=fov_y_list, num_rays=SPP_PSF, wvln=wvln)
+            fov_y_list = torch.linspace(
+                0, float(np.rad2deg(self.hfov)), num_fields, device=self.device
+            )
+            ray = self.sample_parallel(
+                fov_x=[0.0], fov_y=fov_y_list, num_rays=SPP_PSF, wvln=wvln
+            )
         else:
             scale = self.calc_scale_pinhole(depth)
             point_obj_x = torch.zeros(num_fields, device=self.device)
-            point_obj_y = torch.linspace(0, -1, num_fields, device=self.device) * scale * self.r_sensor
-            point_obj = torch.stack([point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1)
-            ray = self.sample_from_points(points=point_obj.unsqueeze(0), num_rays=SPP_PSF, wvln=wvln)
+            point_obj_y = (
+                torch.linspace(0, -1, num_fields, device=self.device)
+                * scale
+                * self.r_sensor
+            )
+            point_obj = torch.stack(
+                [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
+            )
+            ray = self.sample_from_points(
+                points=point_obj.unsqueeze(0), num_rays=SPP_PSF, wvln=wvln
+            )
 
         # Trace rays to sensor plane
         ray = self.trace2sensor(ray)
-        ray_o = ray.o.clone().cpu().numpy().squeeze(0) # Shape [num_fields, num_rays, 3]
-        ray_ra = ray.ra.clone().cpu().numpy().squeeze(0) # Shape [num_fields, num_rays]
+        ray_o = (
+            ray.o.clone().cpu().numpy().squeeze(0)
+        )  # Shape [num_fields, num_rays, 3]
+        ray_ra = ray.ra.clone().cpu().numpy().squeeze(0)  # Shape [num_fields, num_rays]
 
         # Plot multiple spot diagrams in one figure
         _, axs = plt.subplots(1, num_fields, figsize=(num_fields * 4, 4))
         for i in range(num_fields):
             ra = ray_ra[i, :]
             x, y = ray_o[i, :, 0], ray_o[i, :, 1]
-            
+
             # Filter valid rays
             x_valid, y_valid = x[ra > 0], y[ra > 0]
             ra_valid = ra[ra > 0]
-            
+
             # Calculate center of mass for valid rays
             if ra_valid.sum() > EPSILON:
                 xc, yc = x_valid.sum() / ra_valid.sum(), y_valid.sum() / ra_valid.sum()
@@ -71,13 +88,13 @@ class GeoLensEval:
             axs[i].scatter([xc], [yc], 100, "r", "x")
             axs[i].set_aspect("equal", adjustable="datalim")
             axs[i].tick_params(axis="both", which="major", labelsize=6)
-            
+
         # Save plot
         depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
         if save_name is None:
             save_name = f"./spot_meridional_{depth_str}.png"
         else:
-            if save_name.endswith('.png'):
+            if save_name.endswith(".png"):
                 save_name = save_name[:-4]
             save_name = f"{save_name}_meridional_{depth_str}.png"
 
@@ -85,9 +102,9 @@ class GeoLensEval:
         plt.close()
 
     @torch.no_grad()
-    def draw_spot_map(self, num_fields=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
-        """Draw spot diagram of the lens. 
-        
+    def draw_spot_map(self, num_grid=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
+        """Draw spot diagram of the lens.
+
         Shot rays from grid points in object space, trace to sensor.
 
         Args:
@@ -97,43 +114,53 @@ class GeoLensEval:
             save_name (string, optional): filename to save. Defaults to None.
         """
         # Sample rays, shape [num_fields, num_fields, num_rays, 3]
-        if depth == float("inf"):
-            # Create fov lists matching plot axes (y: top-to-bottom, x: left-to-right)
-            hfov_x = np.rad2deg(self.hfov_x)
-            hfov_y = np.rad2deg(self.hfov_y)
-            fov_x_list = [float(x) for x in np.linspace(-hfov_x, hfov_x, num_fields)]
-            fov_y_list = [float(y) for y in np.linspace(hfov_y, -hfov_y, num_fields)]
-            
-            ray = self.sample_parallel(fov_x=fov_y_list, fov_y=fov_x_list, num_rays=SPP_PSF, wvln=wvln)
-        else:
-            ray = self.sample_point_source(
-                depth=depth,
-                num_rays=SPP_PSF,
-                num_grid=[num_fields, num_fields],
-                wvln=wvln,
-            )
+        # if depth == float("inf"):
+        #     # Create fov lists matching plot axes (y: top-to-bottom, x: left-to-right)
+        #     hfov_x = np.rad2deg(self.hfov_x)
+        #     hfov_y = np.rad2deg(self.hfov_y)
+        #     fov_x_list = [float(x) for x in np.linspace(-hfov_x, hfov_x, num_grid)]
+        #     fov_y_list = [float(y) for y in np.linspace(hfov_y, -hfov_y, num_grid)]
+
+        #     ray = self.sample_parallel(
+        #         fov_x=fov_y_list, fov_y=fov_x_list, num_rays=SPP_PSF, wvln=wvln
+        #     )
+        # else:
+        #     ray = self.sample_point_source(
+        #         depth=depth,
+        #         num_rays=SPP_PSF,
+        #         num_grid=[num_grid, num_grid],
+        #         wvln=wvln,
+        #     )
+        ray = self.sample_grid_source(
+            depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
+        )
 
         # Trace rays to sensor
         ray = self.trace2sensor(ray)
-        
-        # Convert to numpy (no flip needed)
-        ray_o = - ray.o.clone().cpu().numpy() # Shape [num_fields, num_fields, num_rays, 3]
-        ray_ra = ray.ra.clone().cpu().numpy() # Shape [num_fields, num_fields, num_rays]
+
+        # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
+        ray_o = -ray.o.clone().cpu().numpy()
+        ray_ra = ray.ra.clone().cpu().numpy()
 
         # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(num_fields, num_fields, figsize=(num_fields * 2, num_fields * 2))
-        for i in range(num_fields):
-            for j in range(num_fields):
+        fig, axs = plt.subplots(
+            num_grid, num_grid, figsize=(num_grid * 2, num_grid * 2)
+        )
+        for i in range(num_grid):
+            for j in range(num_grid):
                 ra = ray_ra[i, j, :]
                 x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
-                
+
                 # Filter valid rays
                 x_valid, y_valid = x[ra > 0], y[ra > 0]
                 ra_valid = ra[ra > 0]
 
                 # Calculate center of mass for valid rays
                 if ra_valid.sum() > EPSILON:
-                    xc, yc = x_valid.sum() / ra_valid.sum(), y_valid.sum() / ra_valid.sum()
+                    xc, yc = (
+                        x_valid.sum() / ra_valid.sum(),
+                        y_valid.sum() / ra_valid.sum(),
+                    )
                 else:
                     xc, yc = 0.0, 0.0
 
@@ -141,56 +168,64 @@ class GeoLensEval:
                 axs[i, j].scatter(x_valid, y_valid, 2, "black", alpha=0.5)
                 axs[i, j].scatter([xc], [yc], 100, "r", "x")
                 axs[i, j].set_aspect("equal", adjustable="datalim")
-                axs[i, j].tick_params(axis='both', which='major', labelsize=6)
+                axs[i, j].tick_params(axis="both", which="major", labelsize=6)
 
         # Save plot
         depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
         if save_name is None:
             save_name = f"./spot_{depth_str}.png"
         else:
-            if save_name.endswith('.png'):
-                 save_name = save_name[:-4]
+            if save_name.endswith(".png"):
+                save_name = save_name[:-4]
             save_name = f"{save_name}_spot_{depth_str}.png"
 
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         plt.close()
 
     @torch.no_grad()
-    def rms_map(self, res=(128, 128), depth=DEPTH):
-        """Calculate the RMS spot error map as a weight mask for lens design.
+    def rms_map_rgb(self, num_grid=64, depth=DEPTH):
+        """Calculate the RMS spot error map across RGB wavelengths relative to the green centroid.
 
         Args:
-            res (tuple, optional): resolution of the RMS map. Defaults to (32, 32).
-            depth (float, optional): depth of the point source. Defaults to DEPTH.
+            num_fields (int, optional): Resolution of the grid used for sampling fields/points. Defaults to 64.
+            depth (float, optional): Depth of the point source. Defaults to DEPTH.
 
         Returns:
-            rms_map (torch.Tensor): RMS map normalized to [0, 1].
+            rms_map (torch.Tensor): RMS map for RGB channels. Shape [3, num_fields, num_fields].
         """
-        ray = self.sample_point_source(depth=depth, num_rays=SPP_PSF, num_grid=64)
-        ray, _ = self.trace(ray)
-        o2 = ray.project_to(self.d_sensor)
-        o2_center = (o2 * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(
-            EPSILON
-        ).unsqueeze(-1)
-        # normalized to center (0, 0)
-        o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)
+        all_rms_maps = []
 
-        rms_map = torch.sqrt(
-            ((o2_norm**2).sum(-1) * ray.ra).sum(0) / (ray.ra.sum(0) + EPSILON)
-        )
-        rms_map = (
-            F.interpolate(
-                rms_map.unsqueeze(0).unsqueeze(0),
-                res,
-                mode="bilinear",
-                align_corners=True,
+        # Iterate G, R, B
+        for i, wvln_current in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
+            # Sample and trace rays, shape [num_grid, num_grid, spp, 3]
+            ray = self.sample_grid_source(
+                depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln_current
             )
-            .squeeze(0)
-            .squeeze(0)
-        )
-        rms_map /= rms_map.max()
+            ray = self.trace2sensor(ray)
+            ray_xy = ray.o[..., :2]
+            ray_ra = ray.ra
 
-        return rms_map
+            # Calculate green centroid, shape [num_grid, num_grid, 2]
+            if i == 0:
+                ray_o_center_green = (ray_xy * ray_ra.unsqueeze(-1)).sum(
+                    -2
+                ) / ray_ra.sum(-1).add(EPSILON).unsqueeze(-1)
+
+            # Calculate RMS relative to green centroid, shape [num_grid, num_grid]
+            rms_map = torch.sqrt(
+                (
+                    ((ray_xy - ray_o_center_green.unsqueeze(-2)) ** 2).sum(-1) * ray_ra
+                ).sum(-1)
+                / (ray_ra.sum(-1) + EPSILON)
+            )
+            all_rms_maps.append(rms_map)
+
+        # Stack the RMS maps for R, G, B, shape [3, num_grid, num_grid]
+        rms_map_rgb = torch.stack(
+            [all_rms_maps[1], all_rms_maps[0], all_rms_maps[2]], dim=0
+        )
+
+        return rms_map_rgb
 
     # ================================================================
     # PSF

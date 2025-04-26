@@ -263,13 +263,35 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
     ):
-        """Sample 3D grid rays from object space to sensor plane."""
+        """Sample 3D grid rays from object space to sensor plane.
+
+        This function is used for RMS and spot diagram calculation.
+        
+        Args:
+            depth (float, optional): sampling depth. Defaults to float("inf").
+            num_grid (list, optional): number of grid points. Defaults to [11, 11].
+            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+        """
+        if isinstance(num_grid, int):
+            num_grid = [num_grid, num_grid]
+
         if depth == float("inf"):
-            fov_x_ls = torch.linspace(-self.hfov_x, self.hfov_x, num_grid[0])
-            fov_y_ls = torch.linspace(-self.hfov_y, self.hfov_y, num_grid[1])
-            return self.sample_parallel(fov_x=fov_x_ls, fov_y=fov_y_ls, depth=depth, num_rays=num_rays, wvln=wvln)
+            hfov_x = np.rad2deg(self.hfov_x)
+            hfov_y = np.rad2deg(self.hfov_y)
+            fov_x_list = [float(x) for x in np.linspace(-hfov_x, hfov_x, num_grid[0])]
+            fov_y_list = [float(y) for y in np.linspace(hfov_y, -hfov_y, num_grid[1])]
+            rays = self.sample_parallel(
+                fov_x=fov_y_list, fov_y=fov_x_list, num_rays=num_rays, wvln=wvln
+            )
         else:
-            return self.sample_point_source(depth=depth, num_grid=num_grid, num_rays=num_rays, wvln=wvln)
+            rays = self.sample_point_source(
+                depth=depth,
+                num_rays=num_rays,
+                num_grid=num_grid,
+                wvln=wvln,
+            )
+        return rays
 
     @torch.no_grad()
     def sample_point_source_2D(
