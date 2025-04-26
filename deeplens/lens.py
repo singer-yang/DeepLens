@@ -18,6 +18,8 @@ from .optics import (
     WAVE_RED,
     WAVE_RGB,
     DeepObj,
+    EPSILON,
+    PSF_KS,
     init_device,
 )
 from .optics.render_psf import conv_psf_map, conv_psf
@@ -275,7 +277,7 @@ class Lens(DeepObj):
     def draw_psf_map(
         self,
         grid=(7, 7),
-        ks=101,
+        ks=PSF_KS,
         depth=DEPTH,
         log_scale=False,
         save_name="./psf_map.png",
@@ -349,6 +351,31 @@ class Lens(DeepObj):
         plt.tight_layout(pad=0)
         plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
+
+    @torch.no_grad()
+    def draw_psf_radial(
+        self, M=3, depth=DEPTH, ks=PSF_KS, log_scale=False, save_name="./psf_radial.png"
+    ):
+        """Draw radial PSF (45 deg). Will draw M PSFs, each of size ks x ks."""
+        x = torch.linspace(0, 1, M)
+        y = torch.linspace(0, 1, M)
+        z = torch.full_like(x, depth)
+        points = torch.stack((x, y, z), dim=-1)
+
+        psfs = []
+        for i in range(M):
+            # Scale PSF for a better visualization
+            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=4096)
+            psf /= psf.max()
+
+            if log_scale:
+                psf = torch.log(psf + EPSILON)
+                psf = (psf - psf.min()) / (psf.max() - psf.min())
+
+            psfs.append(psf)
+
+        psf_grid = make_grid(psfs, nrow=M, padding=1, pad_value=0.0)
+        save_image(psf_grid, save_name, normalize=True)
 
     # ===========================================
     # Image simulation-ralated functions
@@ -473,8 +500,12 @@ class Lens(DeepObj):
     # ===========================================
     # Visualization-ralated functions
     # ===========================================
-    def draw_layout(self):
+    def draw_layout(self, filename=None):
         """Draw lens layout."""
+        raise NotImplementedError
+
+    def draw_layout_3d(self, filename=None):
+        """Draw 3D layout of the lens."""
         raise NotImplementedError
 
     # ===========================================

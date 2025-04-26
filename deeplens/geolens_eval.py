@@ -165,6 +165,9 @@ class GeoLensEval:
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         plt.close()
 
+    # ================================================================
+    # RMS map
+    # ================================================================
     @torch.no_grad()
     def rms_map_rgb(self, num_grid=64, depth=DEPTH):
         """Calculate the RMS spot error map across RGB wavelengths relative to the green centroid.
@@ -190,14 +193,14 @@ class GeoLensEval:
 
             # Calculate green centroid, shape [num_grid, num_grid, 2]
             if i == 0:
-                ray_o_center_green = (ray_xy * ray_ra.unsqueeze(-1)).sum(
+                ray_xy_center_green = (ray_xy * ray_ra.unsqueeze(-1)).sum(
                     -2
                 ) / ray_ra.sum(-1).add(EPSILON).unsqueeze(-1)
 
             # Calculate RMS relative to green centroid, shape [num_grid, num_grid]
             rms_map = torch.sqrt(
                 (
-                    ((ray_xy - ray_o_center_green.unsqueeze(-2)) ** 2).sum(-1) * ray_ra
+                    ((ray_xy - ray_xy_center_green.unsqueeze(-2)) ** 2).sum(-1) * ray_ra
                 ).sum(-1)
                 / (ray_ra.sum(-1) + EPSILON)
             )
@@ -231,46 +234,20 @@ class GeoLensEval:
         ray_ra = ray.ra  # Shape [num_grid, num_grid, spp]
 
         # Calculate centroid for each field point for this wavelength
-        ray_o_center = (ray_xy * ray_ra.unsqueeze(-1)).sum(-2) / ray_ra.sum(-1).add(
+        ray_xy_center = (ray_xy * ray_ra.unsqueeze(-1)).sum(-2) / ray_ra.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
         # Shape [num_grid, num_grid, 2]
 
         # Calculate RMS error relative to its own centroid
         rms_map = torch.sqrt(
-            (((ray_xy - ray_o_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(-1)
+            (((ray_xy - ray_xy_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(
+                -1
+            )
             / (ray_ra.sum(-1) + EPSILON)
         )  # Shape [num_grid, num_grid]
 
         return rms_map
-
-    # ================================================================
-    # PSF
-    # ================================================================
-    @torch.no_grad()
-    def draw_psf_radial(
-        self, M=3, depth=DEPTH, ks=PSF_KS, log_scale=False, save_name="./psf_radial.png"
-    ):
-        """Draw radial PSF (45 deg). Will draw M PSFs, each of size ks x ks."""
-        x = torch.linspace(0, 1, M)
-        y = torch.linspace(0, 1, M)
-        z = torch.full_like(x, depth)
-        points = torch.stack((x, y, z), dim=-1)
-
-        psfs = []
-        for i in range(M):
-            # Scale PSF for a better visualization
-            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=4096)
-            psf /= psf.max()
-
-            if log_scale:
-                psf = torch.log(psf + EPSILON)
-                psf = (psf - psf.min()) / (psf.max() - psf.min())
-
-            psfs.append(psf)
-
-        psf_grid = make_grid(psfs, nrow=M, padding=1, pad_value=0.0)
-        save_image(psf_grid, save_name, normalize=True)
 
     # ================================================================
     # Distortion
