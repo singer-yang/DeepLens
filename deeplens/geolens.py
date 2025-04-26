@@ -141,7 +141,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         num_rays=7,
         wvln=DEFAULT_WAVE,
         plane="meridional",
-        entrance_pupil=False,
+        entrance_pupil=True,
     ):
         """Sample 2D parallel rays from object space to sensor plane.
         
@@ -209,7 +209,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         depth=0.0,
         num_rays=SPP_CALC,
         wvln=DEFAULT_WAVE,
-        entrance_pupil=False,
+        entrance_pupil=True,
     ):
         """Sample 3D parallel rays from object space to sensor plane. 
 
@@ -244,7 +244,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         ray_o = self.sample_circle(pupilr, pupilz, shape=[len(fov_x), len(fov_y), num_rays])
 
         # Sample ray directions, shape [num_fov_x, num_fov_y, num_rays, 3]
-        fx_grid, fy_grid = torch.meshgrid(fov_x, fov_y, indexing="ij")
+        fx_grid, fy_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
         dx = torch.tan(fx_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
         dy = torch.tan(fy_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
         dz = torch.ones_like(ray_o[..., 2])
@@ -254,6 +254,22 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
         rays.propagate_to(depth)
         return rays
+    
+    @torch.no_grad()
+    def sample_grid_source(
+        self,
+        depth=float("inf"),
+        num_grid=[11, 11],
+        num_rays=SPP_PSF,
+        wvln=DEFAULT_WAVE,
+    ):
+        """Sample 3D grid rays from object space to sensor plane."""
+        if depth == float("inf"):
+            fov_x_ls = torch.linspace(-self.hfov_x, self.hfov_x, num_grid[0])
+            fov_y_ls = torch.linspace(-self.hfov_y, self.hfov_y, num_grid[1])
+            return self.sample_parallel(fov_x=fov_x_ls, fov_y=fov_y_ls, depth=depth, num_rays=num_rays, wvln=wvln)
+        else:
+            return self.sample_point_source(depth=depth, num_grid=num_grid, num_rays=num_rays, wvln=wvln)
 
     @torch.no_grad()
     def sample_point_source_2D(
@@ -262,7 +278,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         depth=DEPTH,
         num_rays=7,
         wvln=DEFAULT_WAVE,
-        entrance_pupil=False,
+        entrance_pupil=True,
     ):
         """Sample 2D point source rays from object space to sensor plane.
         
@@ -308,6 +324,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         num_grid=[11, 11],
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
+        entrance_pupil=True,
         importance_sampling=False,
     ):
         """Sample 2D grid rays from object space to sensor plane. 
@@ -354,7 +371,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         )  # shape [num_grid, num_grid, num_rays, 3]
 
         # Sample second points on the pupil
-        pupilz, pupilr = self.calc_entrance_pupil()
+        if entrance_pupil:
+            pupilz, pupilr = self.calc_entrance_pupil()
+        else:
+            pupilz, pupilr = 0, self.surfaces[0].r
+
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(num_grid[0], num_grid[1], num_rays)
         ).to(self.device)  # shape [num_grid, num_grid, num_rays, 3]
@@ -374,10 +395,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         shrink_pupil=False,
         normalized=False,
     ):
-        """Sample forward rays from given point source (un-normalized positions). Used for (1) PSF calculation, (2) chief ray calculation.
+        """Sample forward rays from given point source (absolute coordinates). Used for (1) PSF calculation, (2) chief ray calculation.
 
         Args:
-            points (list): ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
+            points (list): absolute ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
             num_rays (int): sample per pixel. Defaults to 8.
             forward (bool): forward or backward rays. Defaults to True.
             pupil (bool): whether to use pupil. Defaults to True.
@@ -421,7 +442,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         else:
             raise Exception("The shape of input object positions is not supported.")
 
-        # Calculate rays
+        # Calculate rays and propagate to 0.0 (to improve accuracy)
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
         return rays
 
@@ -565,6 +586,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             ray_out (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
+        # Manually propagate ray to a shallow depth to improve accuracy
+        if (ray.o[..., 2].min() < -1000.0).any():
+            ray = ray.propagate_to(-10.0)
+        
+        # Trace rays
         ray, ray_o_record = self.trace(ray, record=record)
         ray = ray.propagate_to(self.d_sensor)
 
@@ -1645,7 +1671,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     @torch.no_grad()
     def calc_hfov(self):
         """Compute half diagonal fov. Shot rays from edge of sensor, trace them to the object space and compute output angel as the fov."""
-        # Sample rays going out from edge of sensor, shape [M, 3]
+        # Sample rays going out from edge of sensor, shape [SPP_CALC, 3]
         o1 = torch.zeros([SPP_CALC, 3])
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
 
@@ -1663,17 +1689,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         ray = Ray(o1, o2 - o1, device=self.device)
         ray = self.trace2obj(ray)
 
-        # compute fov
+        # Compute fov
         tan_fov = ray.d[..., 0] / ray.d[..., 2]
         fov = torch.atan(torch.sum(tan_fov * ray.ra) / torch.sum(ray.ra))
 
         if torch.isnan(fov):
-            fov = float(np.arctan(self.r_sensor / self.d_sensor.item()))
-            print(f"Computing fov failed, set fov to {fov}.")
+            hfov = float(np.arctan(self.r_sensor / self.d_sensor.item()))
+            print(f"Computing fov failed, set fov to {hfov}.")
         else:
-            fov = fov.item()
+            hfov = fov.item()
 
-        return fov
+        # Compute horizontal (x) and vertical (y) fov from diagonal fov
+        diag = math.sqrt(self.sensor_size[0]**2 + self.sensor_size[1]**2)
+        self.hfov_x = math.atan((self.sensor_size[0] * math.tan(hfov)) / diag)
+        self.hfov_y = math.atan((self.sensor_size[1] * math.tan(hfov)) / diag)
+        self.hfov = hfov
+
+        return hfov
 
     # @torch.no_grad()
     # def calc_principal(self):

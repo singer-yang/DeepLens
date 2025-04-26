@@ -40,16 +40,18 @@ class Ray(DeepObj):
         self.to(device)
         self.d = F.normalize(self.d, p=2, dim=-1)
 
-    def prop_to(self, z, n=1):
+    def propagate_to(self, z, n=1):
         """Ray propagates to a given depth plane.
+
+        TODO: this function will be deprecated in the future.
 
         Args:
             z (float): depth.
             n (float, optional): refractive index. Defaults to 1.
         """
-        return self.propagate_to(z, n)
+        return self.prop_to(z, n)
 
-    def propagate_to(self, z, n=1):
+    def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
 
         Args:

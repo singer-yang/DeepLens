@@ -25,59 +25,67 @@ class GeoLensEval:
     # Spot diagram
     # ================================================================
     @torch.no_grad()
-    def draw_spot_radial(self, num_fields=4, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
+    def draw_spot_radial(self, num_fields=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None):
         """Draw spot diagram of the lens at different fields along meridional direction.
 
         Args:
             num_fields (int, optional): field number. Defaults to 4.
-            depth (float, optional): depth of the point source. Defaults to DEPTH.
+            depth (float, optional): depth of the point source. Defaults to float("inf").
             wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
         """
-        # Sample and trace rays, shape [num_fields, num_fields, num_rays, 3]
-        ray = self.sample_point_source(
-            depth=depth,
-            num_rays=SPP_PSF,
-            num_grid=[num_fields * 2 - 1, num_fields * 2 - 1],
-            wvln=wvln,
-        )
+        # Sample rays along meridional (y) direction, shape [1, num_fields, num_rays, 3]
+        if depth == float("inf"):
+            fov_y_list = torch.linspace(0, float(np.rad2deg(self.hfov)), num_fields, device=self.device)
+            ray = self.sample_parallel(fov_x=[0.0], fov_y=fov_y_list, num_rays=SPP_PSF, wvln=wvln)
+        else:
+            scale = self.calc_scale_pinhole(depth)
+            point_obj_x = torch.zeros(num_fields, device=self.device)
+            point_obj_y = torch.linspace(0, -1, num_fields, device=self.device) * scale * self.r_sensor
+            point_obj = torch.stack([point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1)
+            ray = self.sample_from_points(points=point_obj.unsqueeze(0), num_rays=SPP_PSF, wvln=wvln)
+
+        # Trace rays to sensor plane
         ray = self.trace2sensor(ray)
-        ray_o = torch.flip(ray.o.clone(), [0, 1]).cpu().numpy()
-        ray_ra = torch.flip(ray.ra.clone(), [0, 1]).cpu().numpy()
+        ray_o = ray.o.clone().cpu().numpy().squeeze(0) # Shape [num_fields, num_rays, 3]
+        ray_ra = ray.ra.clone().cpu().numpy().squeeze(0) # Shape [num_fields, num_rays]
 
         # Plot multiple spot diagrams in one figure
         _, axs = plt.subplots(1, num_fields, figsize=(num_fields * 4, 4))
-        center_idx = num_fields - 1  # Index corresponding to the center of the grid
         for i in range(num_fields):
-            # Select spots along the y-axis (meridional direction) starting from the center
-            row_idx = center_idx - i
-            col_idx = center_idx
-
-            # Calculate center of mass
-            ra = ray_ra[row_idx, col_idx, :]
-            x, y = ray_o[row_idx, col_idx, :, 0], ray_o[row_idx, col_idx, :, 1]
-            x, y = x[ra > 0], y[ra > 0]
-            xc, yc = x.sum() / ra.sum(), y.sum() / ra.sum()
+            ra = ray_ra[i, :]
+            x, y = ray_o[i, :, 0], ray_o[i, :, 1]
+            
+            # Filter valid rays
+            x_valid, y_valid = x[ra > 0], y[ra > 0]
+            ra_valid = ra[ra > 0]
+            
+            # Calculate center of mass for valid rays
+            if ra_valid.sum() > EPSILON:
+                xc, yc = x_valid.sum() / ra_valid.sum(), y_valid.sum() / ra_valid.sum()
+            else:
+                xc, yc = 0.0, 0.0
 
             # Plot points and center of mass
-            axs[i].scatter(x, y, 3, "black", alpha=0.5)
+            axs[i].scatter(x_valid, y_valid, 3, "black", alpha=0.5)
             axs[i].scatter([xc], [yc], 100, "r", "x")
             axs[i].set_aspect("equal", adjustable="datalim")
             axs[i].tick_params(axis="both", which="major", labelsize=6)
             
         # Save plot
+        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
         if save_name is None:
-            save_name = f"./spot_meridional_{-depth}mm.png"
+            save_name = f"./spot_meridional_{depth_str}.png"
         else:
             if save_name.endswith('.png'):
                 save_name = save_name[:-4]
-            save_name = f"{save_name}_meridional_{-depth}mm.png"
+            save_name = f"{save_name}_meridional_{depth_str}.png"
 
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         plt.close()
 
     @torch.no_grad()
-    def draw_spot_diagram(self, num_fields=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
+    def draw_spot_map(self, num_fields=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
         """Draw spot diagram of the lens. 
         
         Shot rays from grid points in object space, trace to sensor.
@@ -88,16 +96,29 @@ class GeoLensEval:
             wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
         """
-        # Sample and trace rays from grid points
-        ray = self.sample_point_source(
-            depth=depth,
-            num_rays=SPP_PSF,
-            num_grid=[num_fields, num_fields],
-            wvln=wvln,
-        )
+        # Sample rays, shape [num_fields, num_fields, num_rays, 3]
+        if depth == float("inf"):
+            # Create fov lists matching plot axes (y: top-to-bottom, x: left-to-right)
+            hfov_x = np.rad2deg(self.hfov_x)
+            hfov_y = np.rad2deg(self.hfov_y)
+            fov_x_list = [float(x) for x in np.linspace(-hfov_x, hfov_x, num_fields)]
+            fov_y_list = [float(y) for y in np.linspace(hfov_y, -hfov_y, num_fields)]
+            
+            ray = self.sample_parallel(fov_x=fov_y_list, fov_y=fov_x_list, num_rays=SPP_PSF, wvln=wvln)
+        else:
+            ray = self.sample_point_source(
+                depth=depth,
+                num_rays=SPP_PSF,
+                num_grid=[num_fields, num_fields],
+                wvln=wvln,
+            )
+
+        # Trace rays to sensor
         ray = self.trace2sensor(ray)
-        ray_o = torch.flip(ray.o.clone(), [0, 1]).cpu().numpy()
-        ray_ra = torch.flip(ray.ra.clone(), [0, 1]).cpu().numpy()
+        
+        # Convert to numpy (no flip needed)
+        ray_o = - ray.o.clone().cpu().numpy() # Shape [num_fields, num_fields, num_rays, 3]
+        ray_ra = ray.ra.clone().cpu().numpy() # Shape [num_fields, num_fields, num_rays]
 
         # Plot multiple spot diagrams in one figure
         fig, axs = plt.subplots(num_fields, num_fields, figsize=(num_fields * 2, num_fields * 2))
@@ -105,19 +126,31 @@ class GeoLensEval:
             for j in range(num_fields):
                 ra = ray_ra[i, j, :]
                 x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
-                x, y = x[ra > 0], y[ra > 0]
-                xc, yc = x.sum() / ra.sum(), y.sum() / ra.sum()
+                
+                # Filter valid rays
+                x_valid, y_valid = x[ra > 0], y[ra > 0]
+                ra_valid = ra[ra > 0]
+
+                # Calculate center of mass for valid rays
+                if ra_valid.sum() > EPSILON:
+                    xc, yc = x_valid.sum() / ra_valid.sum(), y_valid.sum() / ra_valid.sum()
+                else:
+                    xc, yc = 0.0, 0.0
 
                 # Plot points and center of mass
-                axs[i, j].scatter(x, y, 2, "black", alpha=0.5)
+                axs[i, j].scatter(x_valid, y_valid, 2, "black", alpha=0.5)
                 axs[i, j].scatter([xc], [yc], 100, "r", "x")
                 axs[i, j].set_aspect("equal", adjustable="datalim")
                 axs[i, j].tick_params(axis='both', which='major', labelsize=6)
 
+        # Save plot
+        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
         if save_name is None:
-            save_name = f"./spot{-depth}mm.png"
+            save_name = f"./spot_{depth_str}.png"
         else:
-            save_name = f"{save_name}_spot{-depth}mm.png"
+            if save_name.endswith('.png'):
+                 save_name = save_name[:-4]
+            save_name = f"{save_name}_spot_{depth_str}.png"
 
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         plt.close()

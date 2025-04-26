@@ -101,6 +101,7 @@ class Surface(DeepObj):
             t (tensor): intersection time.
             valid (tensor): valid mask.
         """
+        # Tolerance
         if hasattr(self, "d_offset"):
             d_surf = self.d + self.d_offset
         else:
