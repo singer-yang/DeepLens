@@ -20,6 +20,8 @@ from .optics.geometric_surface import (
     ThinLens,
 )
 
+from .optics.geometric_surface.base import EPSILON
+
 import torch
 
 class CrossPoly:
@@ -205,7 +207,6 @@ class ApertureMesh(FaceMesh):
         self.faces = bridge_mesh.faces
         self.rim = outer_circ
         
-        
 
 class HeightMapAngular(FaceMesh):
     """
@@ -290,6 +291,10 @@ class HeightMapAngular(FaceMesh):
         #     self.rim = np.append(self.rim, start_idx)
         start_idx = 1 + (self.n_rings-1)*self.n_arms
         self.rim = Curve(self.vertices[start_idx:], is_loop=True)
+
+# ====================================================
+# Polydata utils
+# ====================================================
 
 def bridge(l_a: LineMesh,
             l_b: LineMesh,
@@ -377,6 +382,43 @@ def fuse_faces(a: FaceMesh, b: FaceMesh) -> FaceMesh:
     n_a, n_b = a.n_vertices, b.n_vertices
     pass
 
+def bin_linemesh(meshes: List[PolyData]) -> PolyData:
+    """
+    Bin the meshes into one PolyData.\\
+    This function is used to reduce the number of plotting calls.
+    ## Parameters
+    - meshes: List[PolyData]
+        The list of meshes to be binned.
+    ## Returns
+    - PolyData
+        The binned PolyData.
+    """
+    n_mesh = len(meshes)
+    n_vertices = [mesh.n_points for mesh in meshes]
+    n_vertices_total = sum(n_vertices)
+    n_vertices_presum = [0 for _ in range(n_mesh)]
+    for i in range(1,n_mesh):
+        n_vertices_presum[i] = n_vertices_presum[i-1] + n_vertices[i-1]
+    
+    lines = []
+    
+    vertices = np.vstack([mesh.points for mesh in meshes])
+    
+    def increase_idx(line: np.ndarray, idx: int) -> np.ndarray:
+        line[:, 1:] += idx
+        return line
+    
+    for i in range(n_mesh):
+        line = meshes[i].lines
+        line = increase_idx(line, n_vertices_presum[i])
+        lines.append(line)
+    
+    return PolyData(vertices, lines)
+
+# ====================================================
+# Height map generation
+# ====================================================
+
 def gen_sphere_height_map(c: float, d: float):
     if c == 0:
         def height_func(x, y):
@@ -385,9 +427,23 @@ def gen_sphere_height_map(c: float, d: float):
         r = np.abs(1/c)
         sign = c / np.abs(c)
         def height_func(x, y):
-            z = d + sign*(r - np.sqrt(r**2 - x**2 - y**2))
+            z = d + sign*(r - np.sqrt(r**2 - x**2 - y**2 + EPSILON))
             return z
     return height_func
+
+def gen_aspheric_height_map(surf: Aspheric):
+    def height_func(x, y):
+        return surf._sag(x, y).cpu().numpy() + surf.d.item()
+    return height_func
+
+def gen_cubic_height_map(surf: Cubic):
+    def height_func(x, y):
+        return surf._sag(x, y).cpu().numpy() + surf.d.item()
+    return height_func
+
+# ====================================================
+# Polygon generation & visualization
+# ====================================================
 
 def draw_mesh(plotter, mesh: CrossPoly, color):
     poly = mesh.get_poly_data()
@@ -396,7 +452,52 @@ def draw_mesh(plotter, mesh: CrossPoly, color):
     poly["colors"] = np.vstack([color]*n_v)
     plotter.add_mesh(poly, scalars="colors", rgb=True)
     
+def draw_lens_3D(plotter, lens:GeoLens,
+                 fovs: List[float] = [0.],
+                 fov_phis: List[float] = [0.],
+                 ray_rings: int = 6,
+                 ray_arms: int = 8,
+                 mesh_rings: int = 32,
+                 mesh_arms: int = 128,
+                 is_show_bridge: bool = True,
+                 is_show_aperture: bool = True,
+                 is_show_sensor: bool = True,
+                 is_show_rays: bool = True,
+                 surface_color: List[float] = [0.5, 0.5, 0.5],
+                 bridge_color: List[float] = [0., 0., 0.],):
+    n_surf = len(lens.surfaces)
+    surf_poly, bridge_poly, sensor_poly, ap_poly = geolens_poly(lens,
+                                                                mesh_rings,
+                                                                mesh_arms)
 
+    surf_color_rgb = np.array(surface_color) * 255
+    surf_color_rgb = surf_color_rgb.astype(np.uint8)
+    
+    # draw the surfaces
+    for sp in surf_poly:
+        if sp is not None:
+            draw_mesh(plotter, sp, surf_color_rgb)
+
+    if is_show_bridge:
+        for bp in bridge_poly:
+            draw_mesh(plotter, bp, surf_color_rgb)
+    if is_show_aperture:
+        for ap in ap_poly:
+            draw_mesh(plotter, ap, bridge_color)
+    if is_show_sensor:
+        draw_mesh(plotter, sensor_poly, np.array([10, 10, 10]))
+
+    if is_show_rays:
+        rays_poly = geolens_ray_poly(lens, fovs, fov_phis,
+                                               n_rings=ray_rings,
+                                               n_arms=ray_arms)
+        for rays in rays_poly:
+            _ray_color = np.random.randint(0, 255, size=(3,))
+            for r in rays:
+                draw_mesh(plotter, r, _ray_color)
+        
+    
+        
 def geolens_poly(lens: GeoLens,
                  mesh_rings: int = 32,
                  mesh_arms: int = 128,
@@ -440,13 +541,21 @@ def geolens_poly(lens: GeoLens,
             d = surf.d.item()
             height_func = gen_sphere_height_map(c, d)
             surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func)
+        elif isinstance(surf, Aspheric):
+            if i < n_surf-1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i+1])
+            height_func = gen_aspheric_height_map(surf)
+            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
         elif isinstance(surf, Cubic):
-            pass
+            if i < n_surf-1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i+1])
+            height_func = gen_cubic_height_map(surf)
+            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
         else:
             raise NotImplementedError("Surface type not implemented in 3D visualization")
     
     print(f"Finishing creating {n_surf} surfaces")
-    print(surf_poly)
+
     for i, pair in enumerate(bridge_idx):
         print(f"bridging pair: {pair} surfaces")
         
