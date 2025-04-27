@@ -502,7 +502,27 @@ def geolens_poly(lens: GeoLens,
                  mesh_rings: int = 32,
                  mesh_arms: int = 128,
                  ) -> List[CrossPoly]:
+    """
+    Generate the lens/bridge/sensor/aperture meshes.\\
+    The meshes are generated using the height map method.\\
+        
+    ## Parameters
+    - lens: GeoLens
+        The lens object.
+    - mesh_rings: int
+        The number of rings in the mesh.
+    - mesh_arms: int
+        The number of arms in the mesh.
     
+    ## Returns
+    - surf_poly: List[HeightMapAngular]
+        The surface meshes.
+    - bridge_poly: List[FaceMesh]
+        The bridge meshes. (NOT support wrap around for now)
+    - sensor_poly: Rectangle
+        The sensor meshes. (only support rectangular sensor for now)
+    - ap_poly: List[ApertureMesh]
+    """
     n_surf = len(lens.surfaces)
     
     surf_poly = [None for _ in range(n_surf)]
