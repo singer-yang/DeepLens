@@ -382,38 +382,51 @@ def fuse_faces(a: FaceMesh, b: FaceMesh) -> FaceMesh:
     n_a, n_b = a.n_vertices, b.n_vertices
     pass
 
-def bin_linemesh(meshes: List[PolyData]) -> PolyData:
+def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
+    """Convert a list of Curve objects to a list of PolyData objects.
+    
+    Args:
+        meshes: List of Curve objects
+        
+    Returns:
+        List of PolyData objects
     """
-    Bin the meshes into one PolyData.\\
-    This function is used to reduce the number of plotting calls.
-    ## Parameters
-    - meshes: List[PolyData]
-        The list of meshes to be binned.
-    ## Returns
-    - PolyData
-        The binned PolyData.
+    return [c.get_poly_data() for c in meshes]
+    
+def group_linemesh(meshes: List[PolyData]) -> PolyData:
     """
-    n_mesh = len(meshes)
+    Combine multiple line-based PolyData objects into a single PolyData.
+    
+    This function merges multiple PolyData objects containing lines into one
+    cohesive PolyData object while preserving the line connectivity information.
+    The vertex indices in the line connectivity arrays are adjusted to account 
+    for the combined vertex array.
+    
+    ## Parameters:
+    
+    - meshes: List of PolyData objects to be combined
+        
+    ## Returns:
+    
+    - A single PolyData object containing all vertices and lines
+    """
+    if not meshes:
+        return None
+    
+    # Calculate vertex count offsets
     n_vertices = [mesh.n_points for mesh in meshes]
-    n_vertices_total = sum(n_vertices)
-    n_vertices_presum = [0 for _ in range(n_mesh)]
-    for i in range(1,n_mesh):
-        n_vertices_presum[i] = n_vertices_presum[i-1] + n_vertices[i-1]
+    vertex_offsets = np.cumsum([0] + n_vertices[:-1])
     
-    lines = []
+    # Combine all vertices
+    combined_vertices = np.vstack([mesh.points for mesh in meshes])
+    def offset_vertex(x: np.ndarray, offset):
+        x = x.reshape(-1, 3)
+        x[:, 1:] += offset
+        return x
     
-    vertices = np.vstack([mesh.points for mesh in meshes])
-    
-    def increase_idx(line: np.ndarray, idx: int) -> np.ndarray:
-        line[:, 1:] += idx
-        return line
-    
-    for i in range(n_mesh):
-        line = meshes[i].lines
-        line = increase_idx(line, n_vertices_presum[i])
-        lines.append(line)
-    
-    return PolyData(vertices, lines)
+    # Combine all lines with adjusted vertices
+    combined_lines = np.vstack([ offset_vertex(mesh.lines, vertex_offsets[i]) for i, mesh in enumerate(meshes)])
+    return PolyData(combined_vertices, lines=combined_lines)
 
 # ====================================================
 # Height map generation
@@ -463,7 +476,7 @@ def draw_lens_3D(plotter, lens:GeoLens,
                  is_show_aperture: bool = True,
                  is_show_sensor: bool = True,
                  is_show_rays: bool = True,
-                 surface_color: List[float] = [0.5, 0.5, 0.5],
+                 surface_color: List[float] = [0.6, 0.4, 0.3],
                  bridge_color: List[float] = [0., 0., 0.],):
     n_surf = len(lens.surfaces)
     surf_poly, bridge_poly, sensor_poly, ap_poly = geolens_poly(lens,
@@ -480,7 +493,7 @@ def draw_lens_3D(plotter, lens:GeoLens,
 
     if is_show_bridge:
         for bp in bridge_poly:
-            draw_mesh(plotter, bp, surf_color_rgb)
+            draw_mesh(plotter, bp, bridge_color)
     if is_show_aperture:
         for ap in ap_poly:
             draw_mesh(plotter, ap, bridge_color)
@@ -488,13 +501,17 @@ def draw_lens_3D(plotter, lens:GeoLens,
         draw_mesh(plotter, sensor_poly, np.array([10, 10, 10]))
 
     if is_show_rays:
-        rays_poly = geolens_ray_poly(lens, fovs, fov_phis,
-                                               n_rings=ray_rings,
-                                               n_arms=ray_arms)
-        for rays in rays_poly:
-            _ray_color = np.random.randint(0, 255, size=(3,))
-            for r in rays:
-                draw_mesh(plotter, r, _ray_color)
+        rays_curve = geolens_ray_poly(lens, fovs, fov_phis,
+                                    n_rings=ray_rings,
+                                    n_arms=ray_arms)
+        rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
+        rays_poly_fov = [group_linemesh(r) for r in rays_poly_list]
+        for r in rays_poly_fov:
+            plotter.add_mesh(r)
+        # for rays in rays_poly:
+        #     _ray_color = np.random.randint(0, 255, size=(3,))
+        #     for r in rays:
+        #         draw_mesh(plotter, r, _ray_color)
         
     
         
