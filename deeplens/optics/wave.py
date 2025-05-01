@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch.fft import fft2, fftshift, ifft2, ifftshift
 from torchvision.utils import save_image
 
-from basics import DELTA, DeepObj
+from .basics import DELTA, DeepObj
 
 
 # ===================================
