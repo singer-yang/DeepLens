@@ -1,7 +1,9 @@
 import numpy as np
-from pyvista import PolyData
+from pyvista import PolyData, merge
 from math import pi, sqrt
 from typing import List
+from os import mkdir
+from os import path as osp
 
 from deeplens.geolens import GeoLens
 from deeplens.optics.basics import (
@@ -369,19 +371,6 @@ def bridge(l_a: LineMesh,
     
     return face_mesh
 
-def fuse_faces(a: FaceMesh, b: FaceMesh) -> FaceMesh:
-    """
-    Fuse two faces by bridging the edge.\
-    This process save a little memory by reducing the vertices number.
-    ## Parameters
-    - a: FaceMesh
-    - b: FaceMesh
-    ## Returns
-    FaceMesh, fused a + b + rim bridge
-    """
-    n_a, n_b = a.n_vertices, b.n_vertices
-    pass
-
 def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
     """Convert a list of Curve objects to a list of PolyData objects.
     
@@ -476,8 +465,9 @@ def draw_lens_3D(plotter, lens:GeoLens,
                  is_show_aperture: bool = True,
                  is_show_sensor: bool = True,
                  is_show_rays: bool = True,
-                 surface_color: List[float] = [0.6, 0.4, 0.3],
-                 bridge_color: List[float] = [0., 0., 0.],):
+                 surface_color: List[float] = [0.06, 0.3, 0.6],
+                 bridge_color: List[float] = [0., 0., 0.],
+                 save_dir: str = None,):
     n_surf = len(lens.surfaces)
     surf_poly, bridge_poly, sensor_poly, ap_poly = geolens_poly(lens,
                                                                 mesh_rings,
@@ -505,15 +495,28 @@ def draw_lens_3D(plotter, lens:GeoLens,
                                     n_rings=ray_rings,
                                     n_arms=ray_arms)
         rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
-        rays_poly_fov = [group_linemesh(r) for r in rays_poly_list]
+        rays_poly_fov = [merge(r) for r in rays_poly_list]
         for r in rays_poly_fov:
             plotter.add_mesh(r)
-        # for rays in rays_poly:
-        #     _ray_color = np.random.randint(0, 255, size=(3,))
-        #     for r in rays:
-        #         draw_mesh(plotter, r, _ray_color)
         
-    
+    if save_dir is not None:
+        if not osp.exists(save_dir):
+            mkdir(save_dir)
+        # merge meshes
+        merged_surf_poly = merge([sp.get_poly_data() for sp in surf_poly if sp is not None])
+        merged_bridge_poly = merge([bp.get_poly_data() for bp in bridge_poly])
+        merged_ap_poly = merge([ap.get_poly_data() for ap in ap_poly])
+        merged_sensor_poly = sensor_poly.get_poly_data()
+        
+        # save meshes
+        merged_surf_poly.save(osp.join(save_dir, "lens_surf.obj"))
+        merged_bridge_poly.save(osp.join(save_dir, "lens_bridge.obj"))
+        merged_ap_poly.save(osp.join(save_dir, "lens_ap.obj"))
+        merged_sensor_poly.save(osp.join(save_dir, "lens_sensor.obj"))
+        
+        # save rays
+        for i, r in enumerate(rays_poly_fov):
+            r.save(osp.join(save_dir, f"lens_rays_fov_{i}.obj"))        
         
 def geolens_poly(lens: GeoLens,
                  mesh_rings: int = 32,

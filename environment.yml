@@ -183,4 +183,7 @@ dependencies:
       - transformers==4.51.0
       - typing-inspection==0.4.0
       - wandb==0.19.9
+      # additional packages for 3d view
+      - pyvista==0.44.2
+      - pyvistaqt==0.11.2
 prefix: /home/yangx0i/anaconda3/envs/deeplens
