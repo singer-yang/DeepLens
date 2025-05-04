@@ -8,7 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-from .optics.geometric_surface import Aperture, Aspheric, Spheric
+from .optics.geometric_surface import Aperture, Aspheric, Spheric, ThinLens
 from .optics.materials import MATERIAL_data
 from .optics.basics import WAVE_RGB
 from deeplens.geolens import GeoLens
@@ -219,6 +219,11 @@ def create_lens(
                 surfaces.append(Aperture(r=aper_r, d=d_total))
                 d_total += d_next
 
+            elif len(elem_type) == 1 and elem_type[0] == "ThinLens":
+                d_next = (torch.rand(1) + 1.0).item()
+                surfaces.append(ThinLens(r=aper_r, d=d_total))
+                d_total += d_next
+
             elif len(elem_type) in [2, 3]:
                 for i, surface_type in enumerate(elem_type):
                     if i == len(elem_type) - 1:
@@ -321,7 +326,7 @@ def draw_lens_layout(
                     wvln=WAVE_RGB[2 - i],
                     num_rays=num_rays,
                     entrance_pupil=entrance_pupil,
-                    depth=-1.0,
+                    depth=-10.0,
                 )  # shape (num_rays, 3)
             else:
                 ray = geolens.sample_point_source_2D(
