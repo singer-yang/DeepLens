@@ -32,6 +32,7 @@ from .lens import Lens
 from .optics.basics import (
     DEFAULT_WAVE,
     DEPTH,
+    DELTA,
     EPSILON,
     GEO_GRID,
     PSF_KS,
@@ -512,6 +513,9 @@ class GeoLens(Lens):
 
         # Stack to form 3D points
         points = torch.stack((x, y, z_tensor), dim=-1)
+
+        # Fix all chief rays to facilitate the design of telecentricity.
+        points[:,:,0,:2] = 0.0
 
         return points
 
@@ -2093,6 +2097,92 @@ class GeoLens(Lens):
             avg_pupilr *= 0.5
         return avg_pupilz, avg_pupilr
 
+    @torch.no_grad()
+    def calc_entrance_pupil_paraxial(self,):
+        if self.aper_idx is None or hasattr(self, "aper_idx") is False:
+            print("No aperture, use the first surface as entrance pupil.")
+            return self.surfaces[0].d.item(), self.surfaces[0].r
+
+        # Sample rays from edge of aperture
+        aper_idx = self.aper_idx
+        aper_z = self.surfaces[aper_idx].d.item()
+        aper_r = self.surfaces[aper_idx].r
+        delta_r = DELTA
+        ray_o = torch.tensor([[delta_r, 0, aper_z]]).repeat(16, 1)
+
+        # Sample phi ranges from [-0.5rad, 0.5rad]
+        phi = torch.linspace(-0.1, 0.1, 16)/180.0*torch.pi
+        d = torch.stack(
+            (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
+        )
+
+        ray = Ray(ray_o, d, device=self.device)
+
+        # Ray tracing from aperture edge to first surface
+        lens_range = range(0, self.aper_idx)
+        ray, _ = self.trace(ray, lens_range=lens_range)
+
+        # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
+        ray_o = torch.stack(
+            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+        )
+        ray_d = torch.stack(
+            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+        )
+        intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
+
+        # Handle the case where no intersection points are found
+        if len(intersection_points) == 0:
+            print("No intersection points found, use the first surface as pupil.")
+            avg_pupilr = self.surfaces[0].r
+            avg_pupilz = self.surfaces[0].d.item()
+        else:
+            avg_pupilr = torch.abs((torch.mean(intersection_points[:, 0]).item())/delta_r*aper_r)
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+        return avg_pupilz, avg_pupilr
+
+    @torch.no_grad()
+    def calc_entrance_pupil_paraxial_enpd(self, enpd):
+        if self.aper_idx is None or hasattr(self, "aper_idx") is False:
+            print("No aperture, use the first surface as entrance pupil.")
+            return self.surfaces[0].d.item(), self.surfaces[0].r
+
+        # Sample rays from edge of aperture
+        aper_idx = self.aper_idx
+        aper_z = self.surfaces[aper_idx].d.item()
+        ray_o = torch.tensor([[0, 0, aper_z]]).repeat(16, 1)
+
+        # Sample phi ranges from [-0.5rad, 0.5rad]
+        phi = torch.linspace(-0.1, 0.1, 16)/180.0*torch.pi
+        d = torch.stack(
+            (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
+        )
+
+        ray = Ray(ray_o, d, device=self.device)
+
+        # Ray tracing from aperture edge to first surface
+        lens_range = range(0, self.aper_idx)
+        ray, _ = self.trace(ray, lens_range=lens_range)
+
+        # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
+        ray_o = torch.stack(
+            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+        )
+        ray_d = torch.stack(
+            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+        )
+        intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
+
+        # Handle the case where no intersection points are found
+        if len(intersection_points) == 0:
+            print("No intersection points found, use the first surface as pupil.")
+            pupilr = self.surfaces[0].r
+            avg_pupilz = self.surfaces[0].d.item()
+        else:
+            pupilr = enpd/2.0
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+        return avg_pupilz, pupilr
+
     @staticmethod
     def compute_intersection_points_2d(origins, directions):
         """Compute the intersection points of 2D lines.
@@ -3141,7 +3231,7 @@ class GeoLens(Lens):
             surf = self.surfaces[i]
 
             if isinstance(surf, Aperture):
-                pass
+                params += surf.get_optimizer_params(lr=lr, decay=decay)
 
             elif isinstance(surf, Aspheric):
                 params += surf.get_optimizer_params(
@@ -3165,6 +3255,9 @@ class GeoLens(Lens):
 
             elif isinstance(surf, Spheric):
                 params += surf.get_optimizer_params(lr=lr[:2], optim_mat=optim_mat)
+
+            elif isinstance(surf, ThinLens):
+                params += surf.get_optimizer_params(lr=lr)
 
             else:
                 raise Exception(
