@@ -1,12 +1,19 @@
-"""Optical performance evaluation and visualization for GeoLens."""
+"""Classical optical performance evaluation for GeoLens. Accuracy aligned with Zemax.
+
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
+"""
 
 import math
-import time
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision.utils import make_grid, save_image
 
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
@@ -487,14 +494,14 @@ class GeoLensEval:
             tangential_mtf[positive_freq_idx],
             sagittal_mtf[positive_freq_idx],
         )
-    
+
     @torch.no_grad()
     def draw_mtf(
         self,
         relative_fov_list=[0.0, 0.7, 1.0],
         depth_list=[DEPTH],
         save_name="./mtf_grid.png",
-        ks=128
+        ks=128,
     ):
         """Draw a grid of MTF curves.
         Each subplot in the grid corresponds to a specific (depth, FOV) combination.
@@ -513,19 +520,19 @@ class GeoLensEval:
         num_depths = len(depth_list)
 
         if num_fovs == 0 or num_depths == 0:
-            print("Warning: relative_fov_list or depth_list is empty. No MTF plot generated.")
+            print(
+                "Warning: relative_fov_list or depth_list is empty. No MTF plot generated."
+            )
             return
 
         # Wavelength colors and labels
         red, green, blue = "#CC0000", "#006600", "#0066CC"
         wavelength_colors = [red, green, blue]
-        wavelength_labels = ['R', 'G', 'B']
+        wavelength_labels = ["R", "G", "B"]
 
         # Create figure and subplots
         fig, axs = plt.subplots(
-            num_depths, num_fovs, 
-            figsize=(num_fovs * 3, num_depths * 3), 
-            squeeze=False
+            num_depths, num_fovs, figsize=(num_fovs * 3, num_depths * 3), squeeze=False
         )
 
         # Iterate over depth and field of view
@@ -535,12 +542,14 @@ class GeoLensEval:
 
                 # Calculate field of view and depth
                 fov_deg = round(current_fov_relative * self.hfov * 180 / np.pi, 1)
-                depth_str = "inf" if current_depth == float("inf") else f"{current_depth}"
+                depth_str = (
+                    "inf" if current_depth == float("inf") else f"{current_depth}"
+                )
 
                 # Calculate rgb PSF
                 point = [0, -current_fov_relative, current_depth]
                 psf_rgb = self.psf_rgb(points=point, ks=ks)
-                
+
                 # Calculate MTF for each wavelength channel
                 for wvln_channel_idx, wvln_actual in enumerate(WAVE_RGB):
                     # Calculate MTF from PSF
@@ -549,7 +558,9 @@ class GeoLensEval:
 
                     # Plot MTF curve
                     color = wavelength_colors[wvln_channel_idx % len(wavelength_colors)]
-                    wvln_short_label = wavelength_labels[wvln_channel_idx % len(wavelength_labels)]
+                    wvln_short_label = wavelength_labels[
+                        wvln_channel_idx % len(wavelength_labels)
+                    ]
                     wvln_nm = int(wvln_actual * 1000)
                     ax.plot(
                         freq,
@@ -569,7 +580,7 @@ class GeoLensEval:
                 ax.set_xlabel("Spatial Frequency [cycles/mm]", fontsize=8)
                 ax.set_ylabel("MTF", fontsize=8)
                 ax.legend(fontsize=6)
-                ax.tick_params(axis='both', which='major', labelsize=7)
+                ax.tick_params(axis="both", which="major", labelsize=7)
                 ax.grid(True)
                 ax.set_ylim(0, 1.05)
 
@@ -591,24 +602,24 @@ class GeoLensEval:
         # Calculate vignetting map
         vignetting = ray.ra.sum(-1) / (ray.ra.shape[-1])
         return vignetting
-    
+
     def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512):
         """Draw vignetting."""
         # Calculate vignetting map
         vignetting = self.vignetting(depth=depth)
-        
+
         # Interpolate vignetting map to desired resolution
         vignetting = F.interpolate(
-            vignetting.unsqueeze(0).unsqueeze(0), 
+            vignetting.unsqueeze(0).unsqueeze(0),
             size=(resolution, resolution),
-            mode='bilinear',
-            align_corners=False
+            mode="bilinear",
+            align_corners=False,
         ).squeeze()
 
         # Scale vignetting to [0.5, 1] range
         vignetting = 0.5 + 0.5 * vignetting
 
-        plt.imshow(vignetting.cpu().numpy(), cmap='gray', vmin=0.5, vmax=1.0)
+        plt.imshow(vignetting.cpu().numpy(), cmap="gray", vmin=0.5, vmax=1.0)
         plt.colorbar(ticks=[0.5, 0.75, 1.0])
 
         filename = f"./vignetting_{depth}.png" if filename is None else filename
@@ -629,24 +640,3 @@ class GeoLensEval:
     def aberration_histogram(self):
         """Compute aberration histogram."""
         pass
-
-    # ================================================================
-    # 3D layout
-    # ================================================================
-    def draw_layout_3d(self, filename=None, figsize=(10, 6), view_angle=30, show=True):
-        """Draw 3D layout of the lens system.
-
-        Args:
-            filename (str, optional): Path to save the figure. Defaults to None.
-            figsize (tuple): Figure size
-            view_angle (int): Viewing angle for the 3D plot
-            show (bool): Whether to display the figure
-
-        Returns:
-            fig, ax: Matplotlib figure and axis objects
-        """
-        from deeplens.geolens_utils import draw_layout_3d
-
-        return draw_layout_3d(
-            self, filename=filename, figsize=figsize, view_angle=view_angle, show=show
-        )

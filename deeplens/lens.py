@@ -1,6 +1,13 @@
 """Basic lens class.
 
 When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and re-write core functions.
+
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import matplotlib.pyplot as plt
@@ -10,7 +17,9 @@ from torchvision.utils import make_grid, save_image
 from .optics import (
     BLUE_RESPONSE,
     DEPTH,
+    EPSILON,
     GREEN_RESPONSE,
+    PSF_KS,
     RED_RESPONSE,
     WAVE_BLUE,
     WAVE_BOARD_BAND,
@@ -18,11 +27,9 @@ from .optics import (
     WAVE_RED,
     WAVE_RGB,
     DeepObj,
-    EPSILON,
-    PSF_KS,
     init_device,
 )
-from .optics.render_psf import conv_psf_map, conv_psf
+from .optics.render_psf import conv_psf, conv_psf_map
 
 
 class Lens(DeepObj):
@@ -496,17 +503,6 @@ class Lens(DeepObj):
         psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
         img_render = conv_psf_map(img_obj, psf_map)
         return img_render
-
-    # ===========================================
-    # Visualization-ralated functions
-    # ===========================================
-    def draw_layout(self, filename=None):
-        """Draw lens layout."""
-        raise NotImplementedError
-
-    def draw_layout_3d(self, filename=None):
-        """Draw 3D layout of the lens."""
-        raise NotImplementedError
 
     # ===========================================
     # Optimization-ralated functions

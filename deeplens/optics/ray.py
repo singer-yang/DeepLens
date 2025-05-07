@@ -1,4 +1,12 @@
-"""Optical ray"""
+"""Optical ray class.
+
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
+"""
 
 import copy
 
@@ -10,14 +18,9 @@ from .basics import DEFAULT_WAVE, EPSILON, DeepObj
 
 class Ray(DeepObj):
     def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
-        """Ray class. Optical rays with the same wvln.
-
-        Args:
-            o (torch.Tensor): origin of the ray.
-            d (torch.Tensor): direction of the ray.
-            wvln (float, optional): wavelength in [um]. Defaults to DEFAULT_WAVE.
-            coherent (bool, optional): coherent ray tracing. Defaults to False.
-            device (str, optional): device. Defaults to "cpu".
+        """Optical ray class. 
+        
+        Now we only support the same wvln for all rays, but it is possible to extend to different wvln for each ray.
         """
         assert wvln > 0.1 and wvln < 1, "wvln should be in [um]"
         self.wvln = wvln
@@ -31,25 +34,17 @@ class Ray(DeepObj):
         self.en = torch.ones(o.shape[:-1])
 
         # Coherent ray tracing (initialize coherent light)
-        self.coherent = coherent # bool
+        self.coherent = coherent  # bool
         self.opl = torch.zeros(o.shape[:-1])
 
         # Used in lens design with no direct physical meaning
         self.obliq = torch.ones(o.shape[:-1])
 
         self.to(device)
+
+        # Post computation
         self.d = F.normalize(self.d, p=2, dim=-1)
-
-    # def propagate_to(self, z, n=1):
-    #     """Ray propagates to a given depth plane.
-
-    #     TODO: this function will be deprecated in the future.
-
-    #     Args:
-    #         z (float): depth.
-    #         n (float, optional): refractive index. Defaults to 1.
-    #     """
-    #     return self.prop_to(z, n)
+        self.is_forward = bool((self.d[..., 2] > 0).any())
 
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
@@ -60,7 +55,7 @@ class Ray(DeepObj):
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
         new_o = self.o + self.d * t[..., None]
-        
+
         is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
         new_o[~is_valid] = self.o[~is_valid]
         self.o = new_o
@@ -75,28 +70,15 @@ class Ray(DeepObj):
 
         return self
 
-    # def project_to(self, z):
-    #     """Calculate the intersection point of the ray with a given depth plane.
-
-    #     Args:
-    #         z (float): depth.
-
-    #     Return:
-    #         p: shape of [..., 2].
-    #     """
-    #     t = (z - self.o[..., 2]) / self.d[..., 2]
-    #     new_o = self.o + self.d * t[..., None]
-    #     is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
-    #     new_o[~is_valid] = self.o[~is_valid]
-    #     return new_o[..., :2]
-
     def centroid(self):
         """Calculate the centroid of the ray, shape (..., num_rays, 3)
-        
+
         Returns:
             torch.Tensor: Centroid of the ray, shape (..., 3)
         """
-        return (self.o * self.ra.unsqueeze(-1)).sum(-2) / self.ra.sum(-1).add(EPSILON).unsqueeze(-1)
+        return (self.o * self.ra.unsqueeze(-1)).sum(-2) / self.ra.sum(-1).add(
+            EPSILON
+        ).unsqueeze(-1)
 
     def clone(self, device=None):
         """Clone the ray.
