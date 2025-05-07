@@ -1,7 +1,7 @@
 """Optical performance evaluation and visualization for GeoLens."""
 
 import math
-
+import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -43,8 +43,8 @@ class GeoLensEval:
 
         # Trace rays to sensor plane, shape [num_field, num_rays, 3]
         ray = self.trace2sensor(ray)
-        ray_o = ray.o.clone().cpu().numpy() #.squeeze(0)
-        ray_ra = ray.ra.clone().cpu().numpy() #.squeeze(0)
+        ray_o = ray.o.clone().cpu().numpy()  # .squeeze(0)
+        ray_ra = ray.ra.clone().cpu().numpy()  # .squeeze(0)
 
         # Plot multiple spot diagrams in one figure
         _, axs = plt.subplots(1, num_field, figsize=(num_field * 4, 4))
@@ -146,7 +146,7 @@ class GeoLensEval:
     # RMS map
     # ================================================================
     @torch.no_grad()
-    def rms_map_rgb(self, num_grid=64, depth=DEPTH):
+    def rms_map_rgb(self, num_grid=32, depth=DEPTH):
         """Calculate the RMS spot error map across RGB wavelengths. Reference to the centroid of green rays.
 
         Args:
@@ -159,11 +159,12 @@ class GeoLensEval:
         all_rms_maps = []
 
         # Iterate G, R, B
-        for i, wvln_current in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
+        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
             # Sample and trace rays, shape [num_grid, num_grid, spp, 3]
-            ray = self.sample_grid_source(
-                depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln_current
+            ray = self.sample_grid_rays(
+                depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
             )
+
             ray = self.trace2sensor(ray)
             ray_xy = ray.o[..., :2]
             ray_ra = ray.ra
@@ -191,7 +192,7 @@ class GeoLensEval:
         return rms_map_rgb
 
     @torch.no_grad()
-    def rms_map(self, num_grid=64, depth=DEPTH, wvln=DEFAULT_WAVE):
+    def rms_map(self, num_grid=32, depth=DEPTH, wvln=DEFAULT_WAVE):
         """Calculate the RMS spot error map for a specific wavelength.
 
         Args:
@@ -203,7 +204,7 @@ class GeoLensEval:
             rms_map (torch.Tensor): RMS map for the specified wavelength. Shape [num_grid, num_grid].
         """
         # Sample and trace rays, shape [num_grid, num_grid, spp, 3]
-        ray = self.sample_grid_source(
+        ray = self.sample_grid_rays(
             depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
         )
         ray = self.trace2sensor(ray)
@@ -218,9 +219,7 @@ class GeoLensEval:
 
         # Calculate RMS error relative to its own centroid, shape [num_grid, num_grid]
         rms_map = torch.sqrt(
-            (((ray_xy - ray_xy_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(
-                -1
-            )
+            (((ray_xy - ray_xy_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(-1)
             / (ray_ra.sum(-1) + EPSILON)
         )
 
@@ -243,52 +242,46 @@ class GeoLensEval:
         Returns:
             distortion (float): distortion at the specific field angle
         """
-        # ===========>
-        # # Calculate ideal image height
-        # eff_foclen = self.calc_efl()
-        # ideal_imgh = eff_foclen * np.tan(hfov * np.pi / 180)
+        # Calculate ideal image height
+        eff_foclen = self.calc_efl()
+        ideal_imgh = eff_foclen * np.tan(hfov * np.pi / 180)
 
-        # # Calculate chief ray
-        # chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
-        #     hfov=hfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming
-        # )
-        # ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
+        # Calculate chief ray
+        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
+            hfov=hfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming
+        )
+        ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
 
-        # ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
-        # t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
+        ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
+        t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
 
-        # # Calculate actual image height
-        # if plane == "sagittal":
-        #     actual_imgh = (ray.o[..., 0] + ray.d[..., 0] * t).abs()
-        # elif plane == "meridional":
-        #     actual_imgh = (ray.o[..., 1] + ray.d[..., 1] * t).abs()
-        # else:
-        #     raise ValueError(f"Invalid plane: {plane}")
+        # Calculate actual image height
+        if plane == "sagittal":
+            actual_imgh = (ray.o[..., 0] + ray.d[..., 0] * t).abs()
+        elif plane == "meridional":
+            actual_imgh = (ray.o[..., 1] + ray.d[..., 1] * t).abs()
+        else:
+            raise ValueError(f"Invalid plane: {plane}")
 
-        # # Calculate distortion
-        # actual_imgh = actual_imgh.cpu().numpy()
-        # ideal_imgh = ideal_imgh.cpu().numpy()
-        # distortion = (actual_imgh - ideal_imgh) / ideal_imgh
+        # Calculate distortion
+        actual_imgh = actual_imgh.cpu().numpy()
+        ideal_imgh = ideal_imgh.cpu().numpy()
+        distortion = (actual_imgh - ideal_imgh) / ideal_imgh
 
-        # # Handle the case where ideal_imgh is 0 or very close to 0
-        # mask = abs(ideal_imgh) < EPSILON
-        # distortion[mask] = 0.0
-        # ===========>
-
-
-
-        # ===========>
+        # Handle the case where ideal_imgh is 0 or very close to 0
+        mask = abs(ideal_imgh) < EPSILON
+        distortion[mask] = 0.0
 
         return distortion
 
-    def draw_distortion_2D(
+    def draw_distortion_radial(
         self,
         hfov,
-        filename=None,
         num_points=GEO_GRID,
         wvln=DEFAULT_WAVE,
         plane="meridional",
         ray_aiming=True,
+        filename=None,
     ):
         """Draw distortion. zemax format(default): ray_aiming = False.
 
@@ -299,7 +292,6 @@ class GeoLensEval:
             plane: Meridional or sagittal. Defaults to meridional.
             ray_aiming: Whether to use ray aiming. Defaults to False.
         """
-
         # Sample view angles
         hfov_samples = torch.linspace(0, hfov, num_points)
         distortions = []
@@ -371,34 +363,54 @@ class GeoLensEval:
                 dpi=300,
             )
 
-    def distortion(self, depth=DEPTH, grid_size=64):
+    def distortion_map(self, num_grid=16, depth=DEPTH):
         """Compute distortion map at a given depth.
 
+        Note:
+            When distortion is strong, the current FoV calculation is not accurate. So we sample rays from the mapped sensor plane in the object space.
+
         Args:
+            num_grid (int): number of grid points.
             depth (float): depth of the point source.
-            img_res (tuple): resolution of the image.
 
         Returns:
             distortion_grid (torch.Tensor): distortion map. shape (grid_size, grid_size, 2)
         """
-        # Ray tracing to calculate distortion map
-        ray = self.sample_point_source(
-            depth=depth, num_rays=SPP_CALC, num_grid=grid_size
-        )
-        ray = self.trace2sensor(ray)
-        o_dist = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(-2) / ray.ra.unsqueeze(
-            -1
-        ).sum(-2).add(EPSILON)  # shape (H, W, 2)
+        assert depth != float("inf"), "depth cannot be infinity"
 
-        x_dist = -o_dist[..., 0] / self.sensor_size[1] * 2
-        y_dist = o_dist[..., 1] / self.sensor_size[0] * 2
-        distortion_grid = torch.stack((x_dist, y_dist), dim=-1)  # shape (H, W, 2)
+        # Sample rays from mapped sensor plane in the object space, shape (grid_size, grid_size, 3)
+        scale = self.calc_scale_pinhole(depth=depth)
+        obj_size_x = self.sensor_size[1] * scale
+        obj_size_y = self.sensor_size[0] * scale
+        ray_x, ray_y = torch.meshgrid(
+            torch.linspace(-obj_size_x / 2, obj_size_x / 2, num_grid),
+            torch.linspace(obj_size_y / 2, -obj_size_y / 2, num_grid),
+            indexing="xy",
+        )
+        ray_z = torch.full_like(ray_x, depth)
+        ray_o = torch.stack((ray_x, ray_y, ray_z), dim=-1)
+
+        # Sample and trace rays, shape (grid_size, grid_size, num_rays, 3)
+        ray = self.sample_from_points(ray_o)
+        ray = self.trace2sensor(ray)
+
+        # Calculate centroid of the rays, shape (grid_size, grid_size, 2)
+        ray_xy = ray.centroid()[..., :2]
+        x_dist = -ray_xy[..., 0] / self.sensor_size[1] * 2
+        y_dist = ray_xy[..., 1] / self.sensor_size[0] * 2
+        distortion_grid = torch.stack((x_dist, y_dist), dim=-1)
         return distortion_grid
 
-    def draw_distortion(self, filename=None, depth=DEPTH, grid_size=16):
-        """Draw distortion."""
+    def draw_distortion(self, filename=None, num_grid=16, depth=DEPTH):
+        """Draw distortion map.
+
+        Args:
+            filename (str, optional): filename to save. Defaults to None.
+            num_grid (int, optional): number of grid points. Defaults to 16.
+            depth (float, optional): depth of the point source. Defaults to DEPTH.
+        """
         # Ray tracing to calculate distortion map
-        distortion_grid = self.distortion(depth=depth, grid_size=grid_size)
+        distortion_grid = self.distortion_map(num_grid=num_grid, depth=depth)
         x1 = distortion_grid[..., 0].cpu().numpy()
         y1 = distortion_grid[..., 1].cpu().numpy()
 
@@ -410,19 +422,20 @@ class GeoLensEval:
         ax.grid(True)
 
         # Add grid lines based on grid_size
-        ax.set_xticks(np.linspace(-1, 1, grid_size))
-        ax.set_yticks(np.linspace(-1, 1, grid_size))
+        ax.set_xticks(np.linspace(-1, 1, num_grid))
+        ax.set_yticks(np.linspace(-1, 1, num_grid))
 
+        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
         if filename is None:
             plt.savefig(
-                f"./distortion{-depth}mm.png",
+                f"./distortion_{depth_str}.png",
                 bbox_inches="tight",
                 format="png",
                 dpi=300,
             )
         else:
             plt.savefig(
-                f"{filename[:-4]}_distortion_{-depth}mm.png",
+                f"{filename[:-4]}_distortion_{depth_str}.png",
                 bbox_inches="tight",
                 format="png",
                 dpi=300,

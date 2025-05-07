@@ -210,18 +210,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         Returns:
             ray (Ray object): Ray object. Shape [num_field, num_rays, 3]
         """
-        fov_y_list = torch.linspace(0, float(np.rad2deg(self.hfov)), num_field, device=self.device)
+        fov_y_list = torch.linspace(
+            0, float(np.rad2deg(self.hfov)), num_field, device=self.device
+        )
 
-        if depth == float("inf"):    
+        if depth == float("inf"):
             ray = self.sample_parallel(
                 fov_x=[0.0], fov_y=fov_y_list, num_rays=num_rays, wvln=wvln
             )
             ray = ray.squeeze(1)
         else:
             point_obj_x = torch.zeros(num_field, device=self.device)
-            point_obj_y = (
-                depth * torch.tan(fov_y_list * torch.pi / 180)
-            )
+            point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180)
             point_obj = torch.stack(
                 [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
             )
@@ -237,9 +237,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
         shrink_pupil=False,
-        normalized=False,
     ):
-        """Sample forward rays from given point source (absolute coordinates). Used for (1) PSF calculation, (2) chief ray calculation.
+        """Sample rays from given point source (absolute physical coordinates) from the object space. 
+        
+        Used for (1) PSF calculation, (2) chief ray calculation.
 
         Args:
             points (list): absolute ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
@@ -252,18 +253,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         Returns:
             ray: Ray object. Shape [*shape_points, num_rays, 3]
         """
-        if normalized:
-            raise NotImplementedError(
-                "Currently only support unnormalized object point positions."
-            )
-        else:
-            ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
+        # if normalized:
+        #     raise NotImplementedError(
+        #         "Currently only support unnormalized object point positions."
+        #     )
+        # else:
+        #     ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
+        ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
+        ray_o = ray_o.to(self.device)
 
         # Sample second points on the pupil
         pupilz, pupilr = self.calc_entrance_pupil(shrink_pupil=shrink_pupil)
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(*ray_o.shape[:-1], num_rays)
-        ).to(ray_o.device)
+        )
 
         # Compute ray directions
         if len(ray_o.shape) == 1:
@@ -394,7 +397,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
             shrink_pupil (bool, optional): whether to shrink the pupil. Defaults to False.
             depth (float, optional): sampling depth. Defaults to 0.0.
-        
+
         Returns:
             ray (Ray object): Ray object. Shape [num_fov_y, num_fov_x, num_rays, 3], arranged in uv order.
         """
@@ -414,8 +417,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             pupilz, pupilr = 0, self.surfaces[0].r
 
         ray_o = self.sample_circle(
-            pupilr, pupilz, shape=[len(fov_y), len(fov_x), num_rays]
-        ).to(self.device)
+            r=pupilr, z=pupilz, shape=[len(fov_y), len(fov_x), num_rays]
+        )
 
         # Sample ray directions, shape [num_fov_y, num_fov_x, num_rays, 3]
         fov_x_grid, fov_y_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
@@ -521,14 +524,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
 
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(len(fov_y), len(fov_x), num_rays)
-        ).to(self.device)
+        )
 
         # Compute ray directions
         ray_d = ray_o2 - ray_o
 
         ray = Ray(ray_o, ray_d, wvln, device=self.device)
         return ray
-    
+
     @torch.no_grad()
     def sample_sensor(self, spp=64, wvln=DEFAULT_WAVE, sub_pixel=False):
         """Sample rays from sensor pixels (backward rays). Used for ray-tracing based rendering.
@@ -563,9 +566,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
 
         # Sample second points on the pupil
         pupilz, pupilr = self.calc_exit_pupil()
-        ray_o2 = self.sample_circle(
-            r=pupilr, z=pupilz, shape=(*self.sensor_res, spp)
-        ).to(self.device)
+        ray_o2 = self.sample_circle(r=pupilr, z=pupilz, shape=(*self.sensor_res, spp))
 
         # Form rays
         ray_o = torch.stack((x1, y1, z1), 2)
@@ -590,8 +591,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         ray = Ray(ray_o, ray_d, wvln, device=self.device)
         return ray
 
-    @staticmethod
-    def sample_circle(r, z, shape=[16, 16, 512]):
+    def sample_circle(self, r, z, shape=[16, 16, 512]):
         """Sample points inside a circle.
 
         Args:
@@ -602,11 +602,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         Returns:
             torch.Tensor: Tensor of shape [*shape, 3] containing sampled points.
         """
+        device = self.device
+
         # Generate random angles
-        theta = torch.rand(*shape) * 2 * torch.pi
+        theta = torch.rand(*shape, device=device) * 2 * torch.pi
 
         # Generate random radii with square root for uniform distribution
-        r2 = torch.rand(*shape) * r**2
+        r2 = torch.rand(*shape, device=device) * r**2
         radius = torch.sqrt(r2 + EPSILON)
 
         # Convert to Cartesian coordinates
@@ -914,7 +916,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
 
         return image
 
-    def unwarp(self, img, depth=DEPTH, grid_size=128, crop=True, flip=True):
+    def unwarp(self, img, depth=DEPTH, num_grid=128, crop=True, flip=True):
         """Unwarp rendered images using distortion map.
 
         Args:
@@ -926,25 +928,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         Returns:
             img_unwarpped (tensor): Unwarped image tensor. Shape of [N, C, H, W].
         """
-        # Calculate distortion grid
-        distortion_grid = self.distortion(
-            depth=depth, grid_size=grid_size
-        )  # shape (grid_size, grid_size, 2)
+        # Calculate distortion map, shape (num_grid, num_grid, 2)
+        distortion_map = self.distortion_map(depth=depth, num_grid=num_grid)
 
-        # Interpolate distortion grid to image resolution
-        distortion_grid = distortion_grid.permute(2, 0, 1).unsqueeze(1)
-        distortion_grid = torch.flip(distortion_grid, [-2]) if flip else distortion_grid
-        distortion_grid = F.interpolate(
-            distortion_grid, img.shape[-2:], mode="bilinear", align_corners=True
-        )
-        distortion_grid = distortion_grid.permute(1, 2, 3, 0).repeat(
+        # Interpolate distortion map to image resolution
+        distortion_map = distortion_map.permute(2, 0, 1).unsqueeze(1)
+        # distortion_map = torch.flip(distortion_map, [-2]) if flip else distortion_map
+        distortion_map = F.interpolate(
+            distortion_map, img.shape[-2:], mode="bilinear", align_corners=True
+        )  # shape (B, 2, Himg, Wimg)
+        distortion_map = distortion_map.permute(1, 2, 3, 0).repeat(
             img.shape[0], 1, 1, 1
-        )  # shape (N, H, W, 2)
+        )  # shape (B, Himg, Wimg, 2)
 
         # Unwarp using grid_sample function
         img_unwarpped = F.grid_sample(
-            img, distortion_grid, align_corners=True
-        )  # shape (N, C, H, W)
+            img, distortion_map, align_corners=True
+        )  # shape (B, C, Himg, Wimg)
         return img_unwarpped
 
     @torch.no_grad()
@@ -1351,111 +1351,43 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     #     return rms_map
 
     def analysis_rms(self, depth=float("inf")):
-        """Compute RMS-based error. Contain both RMS errors and RMS radius. This function needs more testing."""
-        if depth == float("inf"):
-            num_fields = 3
-            fov_x = [0.0]
-            fov_y = torch.linspace(0.0, self.hfov * 180 / torch.pi, num_fields).tolist()
-
-            all_rms_errors = []
-            all_rms_radii = []
-            for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-                # Ray tracing
-                ray = self.sample_parallel(
-                    fov_x=fov_x, fov_y=fov_y, num_rays=SPP_PSF, wvln=wvln
-                )
-                ray = self.trace2sensor(ray)
-
-                # Green light point center for reference
-                if i == 0:
-                    pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
-                        -2
-                    ) / ray.ra.sum(-1).add(EPSILON).unsqueeze(-1)
-                    pointc_green = pointc_green.unsqueeze(-2).repeat(
-                        1, 1, SPP_PSF, 1
-                    )  # shape [1, num_fields, num_rays, 2]
-
-                # Calculate RMS error for different FoVs
-                o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
-
-                rms_error = ((o2_norm**2).sum(-1).sqrt() * ray.ra).sum(-1) / (
-                    ray.ra.sum(-1) + EPSILON
-                )  # shape [1, num_fields]
-                rms_radius = (o2_norm**2).sum(-1).sqrt().max(dim=-1).values
-                all_rms_errors.append(rms_error[0])
-                all_rms_radii.append(rms_radius[0])
-
-            # Calculate and print average across wavelengths
-            avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-            avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-
-            avg_rms_error = [round(value.item(), 3) for value in avg_rms_error]
-            avg_rms_radius = [round(value.item(), 3) for value in avg_rms_radius]
-
-            print(
-                f"RMS average error (chief ray): center {avg_rms_error[0]} mm, middle {avg_rms_error[1]} mm, off-axis {avg_rms_error[-1]} mm"
-            )
-            print(
-                f"RMS maximum radius (chief ray): center {avg_rms_radius[0]} mm, middle {avg_rms_radius[1]} mm, off-axis {avg_rms_radius[-1]} mm"
-            )
-
-        else:
-            # Sample diagonal points
-            grid = 20
-            x = torch.linspace(0, 1, grid)
-            y = torch.linspace(0, 1, grid)
-            z = torch.full_like(x, depth)
-            points = torch.stack((x, y, z), dim=-1)
-            scale = self.calc_scale_ray(depth)
-
-            # Ray position in the object space by perspective projection, because points are normalized
-            point_obj_x = (
-                points[..., 0] * scale * self.sensor_size[1] / 2
-            )  # x coordinate
-            point_obj_y = (
-                points[..., 1] * scale * self.sensor_size[0] / 2
-            )  # y coordinate
-            point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
-
-            # Point center determined by green light
-            ray = self.sample_from_points(
-                points=point_obj, num_rays=SPP_PSF, wvln=DEFAULT_WAVE
+        """Compute RMS spot size and radius for on-axis and off-axis fields."""
+        num_field = 3
+        rms_error_fields = []
+        rms_radius_fields = []
+        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
+            # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
+            ray = self.sample_radial_rays(
+                num_field=num_field, depth=depth, num_rays=SPP_PSF, wvln=wvln
             )
             ray = self.trace2sensor(ray)
-            pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
-                -2
-            ) / ray.ra.unsqueeze(-1).sum(-2).add(EPSILON)
 
-            # Calculate RMS spot size
-            rms = []
-            for wvln in WAVE_RGB:
-                # Trace rays to sensor plane
-                ray = self.sample_from_points(
-                    points=point_obj, num_rays=SPP_PSF, wvln=wvln
-                )
-                ray = self.trace2sensor(ray)
+            # Green light point center for reference, shape [num_field, 1, 2]
+            if i == 0:
+                ray_xy_center_green = ray.centroid()[..., :2].unsqueeze(-2)
 
-                # Calculate RMS error for different FoVs
-                o2_norm = (
-                    ray.o[..., :2] - pointc_green.unsqueeze(-2)
-                ) * ray.ra.unsqueeze(-1)
-                rms0 = torch.sqrt(
-                    (o2_norm**2 * ray.ra.unsqueeze(-1)).sum((-2, -1))
-                    / (ray.ra.sum(-1) + EPSILON)
-                )
-                rms.append(rms0)
-
-            rms = torch.stack(rms, dim=0)
-            rms = torch.mean(rms, dim=0)
-
-            # Calculate RMS error for on-axis and off-axis
-            rms_avg = round(rms.mean().item(), 3)
-            rms_radius_on_axis = round(rms[0].item(), 3)  # Center point
-            rms_radius_off_axis = round(rms[-1].item(), 3)  # Corner point
-
-            print(
-                f"RMS average error (chief ray): center {rms_radius_on_axis} mm, off-axis {rms_radius_off_axis} mm, average {rms_avg} mm"
+            # Calculate RMS spot size and radius for different FoVs
+            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.ra.unsqueeze(-1)
+            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.ra).sum(-1) / (
+                ray.ra.sum(-1) + EPSILON
             )
+            rms_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
+
+            # Append to list
+            rms_error_fields.append(rms_error)
+            rms_radius_fields.append(rms_radius)
+
+        # Average over wavelengths
+        avg_rms_error_um = torch.stack(rms_error_fields).mean(dim=0) * 1000.0
+        avg_rms_radius_um = torch.stack(rms_radius_fields).mean(dim=0) * 1000.0
+
+        print(
+            f"RMS average error (chief ray): center {avg_rms_error_um[0]:.3f} um, middle {avg_rms_error_um[1]:.3f} um, off-axis {avg_rms_error_um[-1]:.3f} um"
+        )
+        print(
+            f"RMS maximum radius (chief ray): center {avg_rms_radius_um[0]:.3f} um, middle {avg_rms_radius_um[1]:.3f} um, off-axis {avg_rms_radius_um[-1]:.3f} um"
+        )
+
 
     # def psf2mtf(self, psf, diag=False):
     #     """Convert 2D PSF kernel to MTF curve by FFT.
@@ -1653,7 +1585,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         # Sample paraxial rays, shape [1, 1, num_rays, 3]
         ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, shrink_pupil=True)
         ray = self.trace2sensor(ray)
-        image_height = (ray.o[0, 0, :, 1] * ray.ra[0, 0, :]).sum() / ray.ra[0, 0, :].sum()
+        image_height = (ray.o[0, 0, :, 1] * ray.ra[0, 0, :]).sum() / ray.ra[
+            0, 0, :
+        ].sum()
         # ===========>
         eff_foclen = image_height.item() / float(np.tan(small_fov_rad))
         return eff_foclen
@@ -1862,7 +1796,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         """
         # Old implementation
         # scale = -depth * float(np.tan(self.hfov)) / self.r_sensor
-        
+
         # New implementation
         scale = -depth / self.foclen
         return scale
@@ -2192,7 +2126,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
                 avg_pupilz = self.surfaces[-1].d.item()
 
         if shrink_pupil:
-            avg_pupilr *= 0.5
+            avg_pupilr *= 0.25
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
@@ -2258,7 +2192,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
                 avg_pupilz = self.surfaces[0].d.item()
 
         if shrink_pupil:
-            avg_pupilr *= 0.5
+            avg_pupilr *= 0.25
         return avg_pupilz, avg_pupilr
 
     @staticmethod
