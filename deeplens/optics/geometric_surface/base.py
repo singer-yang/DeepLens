@@ -179,8 +179,7 @@ class Surface(DeepObj):
         """
         # Compute normal vectors
         n_vec = self.normal_vec(ray)
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
-        if forward:
+        if ray.is_forward:
             n_vec = -n_vec
 
         # Compute refraction according to Snell's law
@@ -221,8 +220,7 @@ class Surface(DeepObj):
         """
         # Compute surface normal vectors
         n = self.normal_vec(ray)
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
-        if forward:
+        if ray.is_forward:
             n = -n
 
         # Reflect
