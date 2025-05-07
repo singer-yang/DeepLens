@@ -66,10 +66,17 @@ from deeplens.utils import (
 from deeplens.geolens_eval import GeoLensEval
 from deeplens.geolens_optim import GeoLensOptim
 
+
 class GeoLens(Lens, GeoLensEval, GeoLensOptim):
-    def __init__(self, filename=None, sensor_res=(1000, 1000), sensor_size=(8.0, 8.0), device=None):
+    def __init__(
+        self,
+        filename=None,
+        sensor_res=(1000, 1000),
+        sensor_size=(8.0, 8.0),
+        device=None,
+    ):
         """Initialize a refractive lens.
-        
+
         There are three ways to initialize a GeoLens:
             1. Read a lens from .json/.zmx/.seq file
             2. Initialize a lens with no lens file, then manually add surfaces and materials
@@ -89,8 +96,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             self.to(self.device)
 
     def read_lens(self, filename):
-        """Read a GeoLens from a file. 
-        
+        """Read a GeoLens from a file.
+
         In this step, sensor size and resolution will usually be overwritten.
         """
         # Load lens file
@@ -134,232 +141,24 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     # Ray sampling
     # ====================================================================================
     @torch.no_grad()
-    def sample_parallel_2D(
+    def sample_grid_rays(
         self,
-        fov=0.0,
-        depth=0.0,
-        num_rays=7,
-        wvln=DEFAULT_WAVE,
-        plane="meridional",
-        entrance_pupil=True,
-    ):
-        """Sample 2D parallel rays from object space to sensor plane.
-        
-        Used for (1) drawing lens setup, (2) 2D geometric optics calculation, for example, refocusing to infinity
-
-        Args:
-            fov (float, optional): incident angle (in degree). Defaults to 0.0.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            num_rays (int, optional): ray number. Defaults to 7.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            plane (str, optional): sampling plane. Defaults to "meridional" (y-z plane).
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to True.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_rays, 3]
-        """
-        # Sample points on the pupil
-        if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilr = 0, self.surfaces[0].r
-
-        # Sample ray origins, shape [num_rays, 3]
-        if plane == "sagittal":
-            ray_o = torch.stack((
-                torch.linspace(-pupilr, pupilr, num_rays) * 0.99,
-                torch.full((num_rays,), 0),
-                torch.full((num_rays,), pupilz)
-            ), axis=-1)
-        elif plane == "meridional":
-            ray_o = torch.stack((
-                torch.full((num_rays,), 0),
-                torch.linspace(-pupilr, pupilr, num_rays) * 0.99,
-                torch.full((num_rays,), pupilz)
-            ), axis=-1)
-        else:
-            raise ValueError(f"Invalid plane: {plane}")
-
-        # Sample ray directions, shape [num_rays, 3]
-        if plane == "sagittal":
-            ray_d = torch.stack((
-                torch.full((num_rays,), float(np.sin(np.deg2rad(fov)))),
-                torch.zeros((num_rays,)),
-                torch.full((num_rays,), float(np.cos(np.deg2rad(fov))))
-            ), axis=-1)        
-        elif plane == "meridional":
-            ray_d = torch.stack((
-                torch.zeros((num_rays,)),
-                torch.full((num_rays,), float(np.sin(np.deg2rad(fov)))),
-                torch.full((num_rays,), float(np.cos(np.deg2rad(fov))))
-            ), axis=-1)
-        else:
-            raise ValueError(f"Invalid plane: {plane}")
-
-        # Form rays and propagate to the target depth
-        rays = Ray(ray_o, ray_d, wvln, device=self.device)
-        rays.propagate_to(depth)
-        return rays
-
-    @torch.no_grad()
-    def sample_parallel(
-        self,
-        fov_x=[0.0],
-        fov_y=[0.0],
-        depth=0.0,
-        num_rays=SPP_CALC,
-        wvln=DEFAULT_WAVE,
-        entrance_pupil=True,
-    ):
-        """Sample 3D parallel rays from object space to sensor plane. 
-
-        Used for geometric optics calculation.
-
-        Args:
-            fov_x (float or list): degree angle in x0z plane.
-            fov_y (float or list): degree angle in y0z plane.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_fov_x, num_fov_y, num_rays, 3]
-        """
-        # Preprocess fov angles
-        if isinstance(fov_x, float):
-            fov_x = [fov_x]
-        if isinstance(fov_y, float):
-            fov_y = [fov_y]
-
-        fov_x = torch.tensor([fx * torch.pi / 180 for fx in fov_x])
-        fov_y = torch.tensor([fy * torch.pi / 180 for fy in fov_y])
-
-        # Sample ray origins on the pupil, shape [num_fov_x, num_fov_y, num_rays, 3]
-        if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilr = 0, self.surfaces[0].r
-
-        ray_o = self.sample_circle(pupilr, pupilz, shape=[len(fov_x), len(fov_y), num_rays])
-
-        # Sample ray directions, shape [num_fov_x, num_fov_y, num_rays, 3]
-        fx_grid, fy_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
-        dx = torch.tan(fx_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
-        dy = torch.tan(fy_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
-        dz = torch.ones_like(ray_o[..., 2])
-        ray_d = torch.stack((dx, dy, dz), dim=-1)
-
-        # Form rays and propagate to the target depth
-        rays = Ray(ray_o, ray_d, wvln, device=self.device)
-        rays.propagate_to(depth)
-        return rays
-    
-    @torch.no_grad()
-    def sample_grid_source(
-        self,
-        depth=float("inf"),
         num_grid=[11, 11],
+        depth=float("inf"),
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
     ):
-        """Sample 3D grid rays from object space to sensor plane.
+        """Sample grid rays from object space.
 
-        This function is used for RMS and spot diagram calculation.
-        
+        If depth is infinite, sample parallel rays at different field angles.
+        If depth is finite, sample point source rays from the object plane.
+
+        This function is usually used for (1) PSF map, (2) RMS error map, and (3) spot diagram calculation.
+
         Args:
             depth (float, optional): sampling depth. Defaults to float("inf").
             num_grid (list, optional): number of grid points. Defaults to [11, 11].
             num_rays (int, optional): number of rays. Defaults to SPP_PSF.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-        """
-        if isinstance(num_grid, int):
-            num_grid = [num_grid, num_grid]
-
-        if depth == float("inf"):
-            hfov_x = np.rad2deg(self.hfov_x)
-            hfov_y = np.rad2deg(self.hfov_y)
-            fov_x_list = [float(x) for x in np.linspace(-hfov_x, hfov_x, num_grid[0])]
-            fov_y_list = [float(y) for y in np.linspace(hfov_y, -hfov_y, num_grid[1])]
-            rays = self.sample_parallel(
-                fov_x=fov_y_list, fov_y=fov_x_list, num_rays=num_rays, wvln=wvln
-            )
-        else:
-            rays = self.sample_point_source(
-                depth=depth,
-                num_rays=num_rays,
-                num_grid=num_grid,
-                wvln=wvln,
-            )
-        return rays
-
-    @torch.no_grad()
-    def sample_point_source_2D(
-        self,
-        fov=0.0,
-        depth=DEPTH,
-        num_rays=7,
-        wvln=DEFAULT_WAVE,
-        entrance_pupil=True,
-    ):
-        """Sample 2D point source rays from object space to sensor plane.
-        
-        Used for (1) drawing lens setup.
-
-        Args:
-            fov (float, optional): incident angle (in degree). Defaults to 0.0.
-            depth (float, optional): sampling depth. Defaults to DEPTH.
-            num_rays (int, optional): ray number. Defaults to 7.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_rays, 3]
-        """
-        # Sample point on the object plane
-        ray_o = torch.tensor([depth * float(np.tan(np.deg2rad(fov))), 0, depth])
-        ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
-
-        # Sample points (second point) on the pupil
-        if entrance_pupil:
-            pupilz, pupilx = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilx = 0, self.surfaces[0].r
-
-        x2 = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
-        y2 = torch.zeros_like(x2)
-        z2 = torch.full_like(x2, pupilz)
-        ray_o2 = torch.stack((x2, y2, z2), axis=1)
-
-        # Form the rays
-        ray_d = ray_o2 - ray_o
-        ray = Ray(ray_o, ray_d, wvln, device=self.device)
-
-        # Propagate rays to the sampling depth
-        ray.propagate_to(depth)
-        return ray
-
-    @torch.no_grad()
-    def sample_point_source(
-        self,
-        depth=DEPTH,
-        num_grid=[11, 11],
-        num_rays=SPP_PSF,
-        wvln=DEFAULT_WAVE,
-        entrance_pupil=True,
-        importance_sampling=False,
-    ):
-        """Sample 2D grid rays from object space to sensor plane. 
-        
-        Used for (1) spot/rms/magnification calculation, (2) distortion/sensor sampling. 
-
-        This function is equivalent to self.point_source_grid() + self.sample_from_points().
-
-        Args:
-            depth (float, optional): sample plane z position. Defaults to -10.0.
-            num_grid (int or list, optional): sample plane resolution. Defaults to 11.
-            num_rays (int, optional): number of rays sampled from each grid point. Defaults to 16.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
 
         Returns:
@@ -368,44 +167,67 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         if isinstance(num_grid, int):
             num_grid = [num_grid, num_grid]
 
-        # Sample normalized grid points [-1, 1] * [-1, 1] on the sensor plane
-        num_grid_x, num_grid_y = num_grid
-        x, y = torch.meshgrid(
-            torch.linspace(-1, 1, num_grid_x, device=self.device),
-            torch.linspace(1, -1, num_grid_y, device=self.device),
-            indexing="xy",
-        )
+        # Calculate field angles. Top-left field has positive fov_x and negative fov_y.
+        hfov_x = np.rad2deg(self.hfov_x)
+        hfov_y = np.rad2deg(self.hfov_y)
+        fov_x_list = [float(x) for x in np.linspace(hfov_x, -hfov_x, num_grid[0])]
+        fov_y_list = [float(y) for y in np.linspace(-hfov_y, hfov_y, num_grid[1])]
 
-        # Importance sampling to concentrate rays towards edge
-        if importance_sampling:
-            x = torch.sqrt(x.abs()) * x.sign()
-            y = torch.sqrt(y.abs()) * y.sign()
-
-        # Scale grid points to the object space
-        scale = self.calc_scale_pinhole(depth=depth)
-        x, y = x * (self.sensor_size[1]/2) * scale, y * (self.sensor_size[0]/2) * scale
-
-        # Form ray origins
-        z = torch.full_like(x, depth)
-        ray_o = torch.stack((x, y, z), -1)
-        ray_o = ray_o.unsqueeze(2).repeat(
-            1, 1, num_rays, 1
-        )  # shape [num_grid, num_grid, num_rays, 3]
-
-        # Sample second points on the pupil
-        if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
+        # Sample rays (parallel or point source)
+        if depth == float("inf"):
+            rays = self.sample_parallel(
+                fov_x=fov_x_list, fov_y=fov_y_list, num_rays=num_rays, wvln=wvln
+            )
         else:
-            pupilz, pupilr = 0, self.surfaces[0].r
+            rays = self.sample_point_source(
+                fov_x=fov_x_list,
+                fov_y=fov_y_list,
+                num_rays=num_rays,
+                wvln=wvln,
+                depth=depth,
+            )
+        return rays
 
-        ray_o2 = self.sample_circle(
-            r=pupilr, z=pupilz, shape=(num_grid[0], num_grid[1], num_rays)
-        ).to(self.device)  # shape [num_grid, num_grid, num_rays, 3]
+    @torch.no_grad()
+    def sample_radial_rays(
+        self,
+        num_field=5,
+        depth=float("inf"),
+        num_rays=SPP_PSF,
+        wvln=DEFAULT_WAVE,
+        plane="meridional",
+    ):
+        """Sample radial (meridional, y direction) rays at different field angles.
 
-        # Compute ray directions
-        ray_d = ray_o2 - ray_o
+        This function is usually used for (1) PSF radial map, and (2) RMS error radial map calculation.
 
-        ray = Ray(ray_o, ray_d, wvln, device=self.device)
+        Args:
+            num_field (int, optional): number of field angles. Defaults to 5.
+            depth (float, optional): sampling depth. Defaults to float("inf").
+            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [num_field, num_rays, 3]
+        """
+        fov_y_list = torch.linspace(0, float(np.rad2deg(self.hfov)), num_field, device=self.device)
+
+        if depth == float("inf"):    
+            ray = self.sample_parallel(
+                fov_x=[0.0], fov_y=fov_y_list, num_rays=num_rays, wvln=wvln
+            )
+            ray = ray.squeeze(1)
+        else:
+            point_obj_x = torch.zeros(num_field, device=self.device)
+            point_obj_y = (
+                depth * torch.tan(fov_y_list * torch.pi / 180)
+            )
+            point_obj = torch.stack(
+                [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
+            )
+            ray = self.sample_from_points(
+                points=point_obj, num_rays=num_rays, wvln=wvln
+            )
         return ray
 
     @torch.no_grad()
@@ -468,6 +290,245 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
         return rays
 
+    @torch.no_grad()
+    def sample_parallel_2D(
+        self,
+        fov=0.0,
+        num_rays=7,
+        wvln=DEFAULT_WAVE,
+        plane="meridional",
+        entrance_pupil=True,
+        depth=0.0,
+    ):
+        """Sample parallel rays (2D) in object space.
+
+        Used for (1) drawing lens setup, (2) 2D geometric optics calculation, for example, refocusing to infinity
+
+        Args:
+            fov (float, optional): incident angle (in degree). Defaults to 0.0.
+            depth (float, optional): sampling depth. Defaults to 0.0.
+            num_rays (int, optional): ray number. Defaults to 7.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            plane (str, optional): sampling plane. Defaults to "meridional" (y-z plane).
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to True.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [num_rays, 3]
+        """
+        # Sample points on the pupil
+        if entrance_pupil:
+            pupilz, pupilr = self.calc_entrance_pupil()
+        else:
+            pupilz, pupilr = 0, self.surfaces[0].r
+
+        # Sample ray origins, shape [num_rays, 3]
+        if plane == "sagittal":
+            ray_o = torch.stack(
+                (
+                    torch.linspace(-pupilr, pupilr, num_rays) * 0.99,
+                    torch.full((num_rays,), 0),
+                    torch.full((num_rays,), pupilz),
+                ),
+                axis=-1,
+            )
+        elif plane == "meridional":
+            ray_o = torch.stack(
+                (
+                    torch.full((num_rays,), 0),
+                    torch.linspace(-pupilr, pupilr, num_rays) * 0.99,
+                    torch.full((num_rays,), pupilz),
+                ),
+                axis=-1,
+            )
+        else:
+            raise ValueError(f"Invalid plane: {plane}")
+
+        # Sample ray directions, shape [num_rays, 3]
+        if plane == "sagittal":
+            ray_d = torch.stack(
+                (
+                    torch.full((num_rays,), float(np.sin(np.deg2rad(fov)))),
+                    torch.zeros((num_rays,)),
+                    torch.full((num_rays,), float(np.cos(np.deg2rad(fov)))),
+                ),
+                axis=-1,
+            )
+        elif plane == "meridional":
+            ray_d = torch.stack(
+                (
+                    torch.zeros((num_rays,)),
+                    torch.full((num_rays,), float(np.sin(np.deg2rad(fov)))),
+                    torch.full((num_rays,), float(np.cos(np.deg2rad(fov)))),
+                ),
+                axis=-1,
+            )
+        else:
+            raise ValueError(f"Invalid plane: {plane}")
+
+        # Form rays and propagate to the target depth
+        rays = Ray(ray_o, ray_d, wvln, device=self.device)
+        rays.prop_to(depth)
+        return rays
+
+    @torch.no_grad()
+    def sample_parallel(
+        self,
+        fov_x=[0.0],
+        fov_y=[0.0],
+        num_rays=SPP_CALC,
+        wvln=DEFAULT_WAVE,
+        entrance_pupil=True,
+        shrink_pupil=False,
+        depth=0.0,
+    ):
+        """Sample parallel rays in object space.
+
+        Used for geometric optics calculation.
+
+        Args:
+            fov_x (float or list): degree angle in x0z plane.
+            fov_y (float or list): degree angle in y0z plane.
+            depth (float, optional): sampling depth. Defaults to 0.0.
+            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
+            shrink_pupil (bool, optional): whether to shrink the pupil. Defaults to False.
+            depth (float, optional): sampling depth. Defaults to 0.0.
+        
+        Returns:
+            ray (Ray object): Ray object. Shape [num_fov_y, num_fov_x, num_rays, 3], arranged in uv order.
+        """
+        # Preprocess fov angles
+        if isinstance(fov_x, float):
+            fov_x = [fov_x]
+        if isinstance(fov_y, float):
+            fov_y = [fov_y]
+
+        fov_x = torch.tensor([fx * torch.pi / 180 for fx in fov_x]).to(self.device)
+        fov_y = torch.tensor([fy * torch.pi / 180 for fy in fov_y]).to(self.device)
+
+        # Sample ray origins on the pupil, shape [num_fov_x, num_fov_y, num_rays, 3]
+        if entrance_pupil:
+            pupilz, pupilr = self.calc_entrance_pupil(shrink_pupil=shrink_pupil)
+        else:
+            pupilz, pupilr = 0, self.surfaces[0].r
+
+        ray_o = self.sample_circle(
+            pupilr, pupilz, shape=[len(fov_y), len(fov_x), num_rays]
+        ).to(self.device)
+
+        # Sample ray directions, shape [num_fov_y, num_fov_x, num_rays, 3]
+        fov_x_grid, fov_y_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
+        dx = torch.tan(fov_x_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
+        dy = torch.tan(fov_y_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
+        dz = torch.ones_like(ray_o[..., 2])
+        ray_d = torch.stack((dx, dy, dz), dim=-1)
+
+        # Form rays and propagate to the target depth
+        rays = Ray(ray_o, ray_d, wvln, device=self.device)
+        rays.prop_to(depth)
+        return rays
+
+    @torch.no_grad()
+    def sample_point_source_2D(
+        self,
+        fov=0.0,
+        depth=DEPTH,
+        num_rays=7,
+        wvln=DEFAULT_WAVE,
+        entrance_pupil=True,
+    ):
+        """Sample point source rays (2D) in object space.
+
+        Used for (1) drawing lens setup.
+
+        Args:
+            fov (float, optional): incident angle (in degree). Defaults to 0.0.
+            depth (float, optional): sampling depth. Defaults to DEPTH.
+            num_rays (int, optional): ray number. Defaults to 7.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [num_rays, 3]
+        """
+        # Sample point on the object plane
+        ray_o = torch.tensor([depth * float(np.tan(np.deg2rad(fov))), 0, depth])
+        ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
+
+        # Sample points (second point) on the pupil
+        if entrance_pupil:
+            pupilz, pupilx = self.calc_entrance_pupil()
+        else:
+            pupilz, pupilx = 0, self.surfaces[0].r
+
+        x2 = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
+        y2 = torch.zeros_like(x2)
+        z2 = torch.full_like(x2, pupilz)
+        ray_o2 = torch.stack((x2, y2, z2), axis=1)
+
+        # Form the rays
+        ray_d = ray_o2 - ray_o
+        ray = Ray(ray_o, ray_d, wvln, device=self.device)
+
+        # Propagate rays to the sampling depth
+        ray.prop_to(depth)
+        return ray
+
+    @torch.no_grad()
+    def sample_point_source(
+        self,
+        fov_x=[0.0],
+        fov_y=[0.0],
+        depth=DEPTH,
+        num_rays=SPP_PSF,
+        wvln=DEFAULT_WAVE,
+        entrance_pupil=True,
+    ):
+        """Sample point source rays from object space with given field angles.
+
+        Used for (1) spot/rms/magnification calculation, (2) distortion/sensor sampling.
+
+        This function is equivalent to self.point_source_grid() + self.sample_from_points().
+
+        Args:
+            fov_x (float or list): field angle in x0z plane.
+            fov_y (float or list): field angle in y0z plane.
+            depth (float, optional): sample plane z position. Defaults to -10.0.
+            num_rays (int, optional): number of rays sampled from each grid point. Defaults to 16.
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [len(fov_y), len(fov_x), num_rays, 3], arranged in uv order.
+        """
+        # Sample second points on the pupil, shape [len(fov_y), len(fov_x), num_rays, 3]
+        if entrance_pupil:
+            pupilz, pupilr = self.calc_entrance_pupil()
+        else:
+            pupilz, pupilr = 0, self.surfaces[0].r
+
+        # Sample grid points with given field angles, shape [len(fov_y), len(fov_x), 3]
+        fov_x = torch.tensor([fx * torch.pi / 180 for fx in fov_x]).to(self.device)
+        fov_y = torch.tensor([fy * torch.pi / 180 for fy in fov_y]).to(self.device)
+        fov_x_grid, fov_y_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
+        x, y = torch.tan(fov_x_grid) * depth, torch.tan(fov_y_grid) * depth
+
+        # Form ray origins, shape [len(fov_y), len(fov_x), num_rays, 3]
+        z = torch.full_like(x, depth)
+        ray_o = torch.stack((x, y, z), -1)
+        ray_o = ray_o.unsqueeze(2).repeat(1, 1, num_rays, 1)
+
+        ray_o2 = self.sample_circle(
+            r=pupilr, z=pupilz, shape=(len(fov_y), len(fov_x), num_rays)
+        ).to(self.device)
+
+        # Compute ray directions
+        ray_d = ray_o2 - ray_o
+
+        ray = Ray(ray_o, ray_d, wvln, device=self.device)
+        return ray
+    
     @torch.no_grad()
     def sample_sensor(self, spp=64, wvln=DEFAULT_WAVE, sub_pixel=False):
         """Sample rays from sensor pixels (backward rays). Used for ray-tracing based rendering.
@@ -594,7 +655,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             depth (float): sensor distance.
         """
         ray, _ = self.trace(ray)
-        ray = ray.propagate_to(depth)
+        ray = ray.prop_to(depth)
         return ray
 
     def trace2sensor(self, ray, record=False):
@@ -610,11 +671,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         """
         # Manually propagate ray to a shallow depth to improve accuracy
         if (ray.o[..., 2].min() < -1000.0).any():
-            ray = ray.propagate_to(-10.0)
-        
+            ray = ray.prop_to(-10.0)
+
         # Trace rays
         ray, ray_o_record = self.trace(ray, record=record)
-        ray = ray.propagate_to(self.d_sensor)
+        ray = ray.prop_to(self.d_sensor)
 
         if record:
             ray_o = ray.o.clone().detach()
@@ -636,7 +697,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             ray_o_record = []
             # A hack for the case of infinite object
             if ray.o[..., 2].min() < -1000.0:
-                ray.propagate_to(-0.1)
+                ray.prop_to(-0.1)
             ray_o_record.append(ray.o.clone().detach())
         else:
             ray_o_record = None
@@ -815,7 +876,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             raise Exception("Input image should be Tensor.")
 
         # Scale object image physical size to get 1:1 pixel-pixel alignment with sensor image
-        ray = ray.propagate_to(depth)
+        ray = ray.prop_to(depth)
         p = ray.o[..., :2]
         pixel_size = scale * self.pixel_size
         ray.ra = (
@@ -1003,7 +1064,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             psf_center: [N, 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
-            # Shrink the pupil and calculate centroid ray as the chief ray. Distortion will affect the result.
+            # Shrink the pupil and calculate centroid ray as the chief ray.
             ray = self.sample_from_points(point, num_rays=SPP_CALC, shrink_pupil=True)
             ray = self.trace2sensor(ray)
             assert (ray.ra == 1).any(), "No sampled rays is valid."
@@ -1012,7 +1073,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             psf_center = -psf_center[..., :2]  # shape [N, 2]
 
         elif method == "pinhole":
-            # Pinhole camera perspective projection. Assume no distortion.
+            # Pinhole camera perspective projection.
             scale = self.calc_scale_pinhole(point[..., 2])
             psf_center = point[..., :2] / scale.unsqueeze(-1)
 
@@ -1569,18 +1630,33 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     def calc_efl(self):
         """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
         # Trace a paraxial chief ray
-        small_fov = 0.001  # paraxial fov in radian
-        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=np.rad2deg(small_fov), wvln=DEFAULT_WAVE, ray_aiming=True)       
-        ray = Ray(chief_ray_o[1, ...], chief_ray_d[1, ...], wvln=DEFAULT_WAVE, device=self.device)
-        ray, _ = self.trace(ray)
+        small_fov_rad = 0.001
+        small_fov_deg = float(np.rad2deg(small_fov_rad))
+        # ===========>
+        # chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
+        #     hfov=small_fov_deg, wvln=DEFAULT_WAVE, ray_aiming=True
+        # )
+        # ray = Ray(
+        #     chief_ray_o[1, ...],
+        #     chief_ray_d[1, ...],
+        #     wvln=DEFAULT_WAVE,
+        #     device=self.device,
+        # )
+        # ray, _ = self.trace(ray)
 
-        # Compute the effective focal length
-        image_height = (
-            ray.o[..., 1]
-            + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
-        )
-        eff_foclen = image_height / float(np.tan(small_fov))
-        return eff_foclen.mean().item()
+        # # Compute the effective focal length
+        # image_height = (
+        #     ray.o[..., 1]
+        #     + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
+        # )
+        # ===========>
+        # Sample paraxial rays, shape [1, 1, num_rays, 3]
+        ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, shrink_pupil=True)
+        ray = self.trace2sensor(ray)
+        image_height = (ray.o[0, 0, :, 1] * ray.ra[0, 0, :]).sum() / ray.ra[0, 0, :].sum()
+        # ===========>
+        eff_foclen = image_height.item() / float(np.tan(small_fov_rad))
+        return eff_foclen
 
     @torch.no_grad()
     def calc_bfl(self, wvln=DEFAULT_WAVE):
@@ -1722,7 +1798,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             hfov = fov.item()
 
         # Compute horizontal (x) and vertical (y) fov from diagonal fov
-        diag = math.sqrt(self.sensor_size[0]**2 + self.sensor_size[1]**2)
+        diag = math.sqrt(self.sensor_size[0] ** 2 + self.sensor_size[1] ** 2)
         self.hfov_x = math.atan((self.sensor_size[0] * math.tan(hfov)) / diag)
         self.hfov_y = math.atan((self.sensor_size[1] * math.tan(hfov)) / diag)
         self.hfov = hfov
@@ -1774,17 +1850,21 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
 
     @torch.no_grad()
     def calc_scale_pinhole(self, depth):
-        """Assume the first principle point is at (0, 0, 0), use pinhole camera model to calculate the scale factor.
+        """Scale factor computed by pinhole camera model.
 
-        Note: due to distortion, the scale factor computed here is larger than the actual scale factor.
+        Note: if there is distortion, the scale factor computed with pinhole camera model will be inaccurate.
 
         Args:
             depth (float): depth of the object.
 
         Returns:
-            scale (float): scale factor.
+            scale (float): scale factor. phy_size_obj / phy_size_img
         """
-        scale = -depth * float(np.tan(self.hfov)) / self.r_sensor
+        # Old implementation
+        # scale = -depth * float(np.tan(self.hfov)) / self.r_sensor
+        
+        # New implementation
+        scale = -depth / self.foclen
         return scale
 
     @torch.no_grad()
@@ -1793,7 +1873,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         if isinstance(depth, float) or isinstance(depth, int):
             # Sample rays [num_grid, num_grid, spp, 3] from the object plane
             num_grid = 64
-            ray = self.sample_point_source(depth=depth, num_rays=SPP_CALC, num_grid=num_grid)
+            raise Warning(
+                "This function needs to be checked because of the change of the ray sampling function."
+            )
+            ray = self.sample_point_source(
+                depth=depth, num_rays=SPP_CALC, num_grid=num_grid
+            )
 
             # Map points from object space to sensor space, ground-truth
             o1 = ray.o.clone()[..., :2]
@@ -1862,8 +1947,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
 
     @torch.no_grad()
     def calc_chief_ray(self, fov, plane="sagittal"):
-        """Compute chief ray for an incident angle. 
-        
+        """Compute chief ray for an incident angle.
+
         TODO: if chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
 
         Args:
@@ -1894,7 +1979,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
-    def calc_chief_ray_infinite(self, hfov, depth=0.0, wvln=DEFAULT_WAVE, plane="meridional", num_rays=SPP_CALC, ray_aiming=True):
+    def calc_chief_ray_infinite(
+        self,
+        hfov,
+        depth=0.0,
+        wvln=DEFAULT_WAVE,
+        plane="meridional",
+        num_rays=SPP_CALC,
+        ray_aiming=True,
+    ):
         """Compute chief ray for an incident angle.
 
         Args:
@@ -1906,26 +1999,29 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             ray_aiming (bool): whether the chief ray through the center of the stop.
         """
         if isinstance(hfov, float) and hfov > 0:
-            hfov = torch.linspace(0, hfov, 2).to(self.device)
+            hfov = torch.linspace(0, hfov, 2)
+        hfov = hfov.to(self.device)
 
         if not isinstance(depth, torch.Tensor):
-            depth = torch.tensor(depth, device=self.device, dtype=torch.float32).repeat(len(hfov))
-        
+            depth = torch.tensor(depth, device=self.device).repeat(len(hfov))
+
         # set chief ray
         chief_ray_o = torch.zeros([len(hfov), 3]).to(self.device)
         chief_ray_d = torch.zeros([len(hfov), 3]).to(self.device)
-        
+
         # Convert hfov to radian
         hfov = hfov * torch.pi / 180.0
 
         if torch.any(hfov == 0):
             chief_ray_o[0, ...] = torch.tensor(
-                [0.0, 0.0, depth[0]], device=self.device, dtype=torch.float32)
+                [0.0, 0.0, depth[0]], device=self.device, dtype=torch.float32
+            )
             chief_ray_d[0, ...] = torch.tensor(
-                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32)
+                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
+            )
             if len(hfov) == 1:
                 return chief_ray_o, chief_ray_d
-        
+
         if len(hfov) > 1:
             hfovs = hfov[1:]
             depths = depth[1:]
@@ -1936,21 +2032,24 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
                     [depths * torch.tan(hfovs), torch.zeros_like(hfovs), depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
+                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    dim=-1,
                 )
             else:
                 chief_ray_o[1:, ...] = torch.stack(
                     [torch.zeros_like(hfovs), depths * torch.tan(hfovs), depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
-                )  
-            
+                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+
             return chief_ray_o, chief_ray_d
-                 
+
         # Scale factor
         pupilz, _ = self.calc_entrance_pupil()
         y_distance = torch.tan(hfovs) * (abs(depths) + pupilz)
+
         if ray_aiming:
             scale = 0.05
             delta = scale * y_distance
@@ -1961,29 +2060,40 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
                     [-y_distance, torch.zeros_like(hfovs), depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
+                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    dim=-1,
                 )
             else:
                 chief_ray_o[1:, ...] = torch.stack(
                     [torch.zeros_like(hfovs), -y_distance, depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
+                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    dim=-1,
                 )
-        
+
         else:
-            min_y = - y_distance - delta
-            max_y = - y_distance + delta
+            min_y = -y_distance - delta
+            max_y = -y_distance + delta
             o1_linspace = torch.stack(
-                [torch.linspace(min_y[i], max_y[i], num_rays) for i in range(len(min_y))], dim=0)  
+                [
+                    torch.linspace(min_y[i], max_y[i], num_rays)
+                    for i in range(len(min_y))
+                ],
+                dim=0,
+            )
 
             o1 = torch.zeros([len(hfovs), num_rays, 3])
             o1[:, :, 2] = depths[0]
-            
+
             o2_linspace = torch.stack(
-                [torch.linspace(-delta[i], delta[i], num_rays) for i in range(len(min_y))], dim=0
-                )    
-                  
+                [
+                    torch.linspace(-delta[i], delta[i], num_rays)
+                    for i in range(len(min_y))
+                ],
+                dim=0,
+            )
+
             o2 = torch.zeros([len(hfovs), num_rays, 3])
             o2[:, :, 2] = pupilz
 
@@ -1997,24 +2107,28 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             # Trace until the aperture
             ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
             inc_ray = ray.clone()
-            ray, _ = self.trace(
-                ray, lens_range=list(range(0, self.aper_idx + 1))
-            )
+            ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx + 1)))
 
             # Look for the ray that is closest to the optical axis
             if plane == "sagittal":
                 _, center_idx = torch.min(torch.abs(ray.o[..., 0]), dim=1)
-                chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]                
+                chief_ray_o[1:, ...] = inc_ray.o[
+                    torch.arange(len(hfovs)), center_idx.long(), ...
+                ]
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
+                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    dim=-1,
                 )
             else:
                 _, center_idx = torch.min(torch.abs(ray.o[..., 1]), dim=1)
-                chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]                  
+                chief_ray_o[1:, ...] = inc_ray.o[
+                    torch.arange(len(hfovs)), center_idx.long(), ...
+                ]
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
+                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    dim=-1,
                 )
-        
+
         return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
@@ -2084,7 +2198,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     @torch.no_grad()
     def calc_entrance_pupil(self, shrink_pupil=False):
         """Caclulate entrance pupil of the lens.
-        
+
         Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2]. We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
 
         Args:
@@ -2299,20 +2413,24 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             r_sensor: Sensor radius in [mm].
         """
         if sensor_size is not None:
-            assert r_sensor is None, "Sensor_size is provided, no need to provide r_sensor."
+            assert r_sensor is None, (
+                "Sensor_size is provided, no need to provide r_sensor."
+            )
             assert sensor_res[0] * sensor_size[1] == sensor_res[1] * sensor_size[0], (
                 "sensor_res and sensor_size are not consistent"
             )
 
             self.sensor_res = sensor_res
             self.sensor_size = sensor_size
-            self.r_sensor = math.sqrt(sensor_size[0]**2 + sensor_size[1]**2) / 2
+            self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
             self.pixel_size = sensor_size[0] / sensor_res[0]
 
             self.post_computation()
 
         elif r_sensor is not None:
-            assert sensor_size is None, "sensor_res and r_sensor are provided, no need to provide sensor_size."
+            assert sensor_size is None, (
+                "sensor_res and r_sensor are provided, no need to provide sensor_size."
+            )
             if isinstance(sensor_res, int):
                 sensor_res = (sensor_res, sensor_res)
             self.sensor_res = sensor_res
@@ -2332,7 +2450,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
             self.post_computation()
 
         else:
-            raise ValueError("Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time.")
+            raise ValueError(
+                "Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time."
+            )
 
     @torch.no_grad()
     def prune_surf(self, expand_surf=None):
@@ -2346,7 +2466,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         """
         # Settings
         surface_range = self.find_diff_surf()
-        
+
         if self.is_cellphone:
             expand_surf = 0.05 if expand_surf is None else expand_surf
 
@@ -2361,7 +2481,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
         if self.hfov is not None:
             fov_deg = self.hfov * 180 / torch.pi
         else:
-            fov_deg = float(np.arctan(self.r_sensor / self.d_sensor.item())) * 180 / torch.pi
+            fov_deg = (
+                float(np.arctan(self.r_sensor / self.d_sensor.item())) * 180 / torch.pi
+            )
 
         ray = self.sample_parallel_2D(
             fov=fov_deg, num_rays=GEO_GRID, entrance_pupil=True
@@ -2529,6 +2651,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     ):
         """Plot lens layout with ray tracing."""
         from deeplens.geolens_utils import draw_lens_layout
+
         draw_lens_layout(
             self,
             filename,
@@ -2635,7 +2758,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     #         wvln=DEFAULT_WAVE,
     #     )
     #     ray, _ = self.trace(ray)
-    #     ray.propagate_to(self.d_sensor)
+    #     ray.prop_to(self.d_sensor)
     #     o2 = torch.flip(ray.o.clone(), [1, 2]).cpu().numpy()
     #     ra = torch.flip(ray.ra.clone(), [1, 2]).cpu().numpy()
 
@@ -2944,7 +3067,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     #             importance_sampling=importance_sampling,
     #         )
     #         ray = self.trace2sensor(ray)
-            
+
     #         # Green light point center for reference
     #         if i == 0:
     #             pointc_green = ((ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(-2) /
@@ -2981,7 +3104,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     #     fov_x = np.rad2deg(np.arctan(tan_fov_x))
     #     fov_y = torch.linspace(0.0, fov_y, num_grid).tolist()
     #     fov_x = torch.linspace(0.0, fov_x, num_grid).tolist()
-        
+
     #     # calculate RMS error
     #     all_rms_errors = []
     #     all_rms_radii = []
@@ -3003,14 +3126,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
 
     #         # Calculate RMS error for different FoVs
     #         o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
-            
+
     #         # error
     #         rms_error = torch.mean(
-    #             (((o2_norm**2).sum(-1) * ray.ra).sum(-1) / 
+    #             (((o2_norm**2).sum(-1) * ray.ra).sum(-1) /
     #                         (ray.ra.sum(-1) + EPSILON)
     #                         ).sqrt()
     #         )
-            
+
     #         # radius
     #         rms_radius = torch.mean(
     #             ((o2_norm**2).sum(-1) * ray.ra).sqrt().max(dim=-1).values
@@ -3021,9 +3144,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     #     # Calculate and print average across wavelengths
     #     avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
     #     avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-        
+
     #     return avg_rms_error
-    
+
     # def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
     #     """Loss function designed on the MTF. We want to maximize MTF values."""
     #     loss = 0.0
@@ -3471,6 +3594,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim):
     def read_lens_zmx(self, filename="./test.zmx"):
         """Read the lens from .zmx file."""
         from .geolens_utils import read_zmx
+
         loaded_lens = read_zmx(filename)
 
         # Copy all attributes from loaded_lens to self
