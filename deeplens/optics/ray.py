@@ -90,6 +90,14 @@ class Ray(DeepObj):
     #     new_o[~is_valid] = self.o[~is_valid]
     #     return new_o[..., :2]
 
+    def centroid(self):
+        """Calculate the centroid of the ray, shape (..., num_rays, 3)
+        
+        Returns:
+            torch.Tensor: Centroid of the ray, shape (..., 3)
+        """
+        return (self.o * self.ra.unsqueeze(-1)).sum(-2) / self.ra.sum(-1).add(EPSILON).unsqueeze(-1)
+
     def clone(self, device=None):
         """Clone the ray.
 
