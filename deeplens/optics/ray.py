@@ -25,13 +25,13 @@ class Ray(DeepObj):
         self.o = o if torch.is_tensor(o) else torch.tensor(o)
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         self.ra = torch.ones(o.shape[:-1])
-        self.valid = self.ra
+        self.valid = self.ra.clone()
 
         # Intensity tracing
         self.en = torch.ones(o.shape[:-1])
 
         # Coherent ray tracing (initialize coherent light)
-        self.coherent = coherent
+        self.coherent = coherent # bool
         self.opl = torch.zeros(o.shape[:-1])
 
         # Used in lens design with no direct physical meaning
@@ -40,16 +40,16 @@ class Ray(DeepObj):
         self.to(device)
         self.d = F.normalize(self.d, p=2, dim=-1)
 
-    def propagate_to(self, z, n=1):
-        """Ray propagates to a given depth plane.
+    # def propagate_to(self, z, n=1):
+    #     """Ray propagates to a given depth plane.
 
-        TODO: this function will be deprecated in the future.
+    #     TODO: this function will be deprecated in the future.
 
-        Args:
-            z (float): depth.
-            n (float, optional): refractive index. Defaults to 1.
-        """
-        return self.prop_to(z, n)
+    #     Args:
+    #         z (float): depth.
+    #         n (float, optional): refractive index. Defaults to 1.
+    #     """
+    #     return self.prop_to(z, n)
 
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
@@ -75,20 +75,20 @@ class Ray(DeepObj):
 
         return self
 
-    def project_to(self, z):
-        """Calculate the intersection point of the ray with a given depth plane.
+    # def project_to(self, z):
+    #     """Calculate the intersection point of the ray with a given depth plane.
 
-        Args:
-            z (float): depth.
+    #     Args:
+    #         z (float): depth.
 
-        Return:
-            p: shape of [..., 2].
-        """
-        t = (z - self.o[..., 2]) / self.d[..., 2]
-        new_o = self.o + self.d * t[..., None]
-        is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
-        new_o[~is_valid] = self.o[~is_valid]
-        return new_o[..., :2]
+    #     Return:
+    #         p: shape of [..., 2].
+    #     """
+    #     t = (z - self.o[..., 2]) / self.d[..., 2]
+    #     new_o = self.o + self.d * t[..., None]
+    #     is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
+    #     new_o[~is_valid] = self.o[~is_valid]
+    #     return new_o[..., :2]
 
     def clone(self, device=None):
         """Clone the ray.
@@ -99,3 +99,18 @@ class Ray(DeepObj):
             return copy.deepcopy(self).to(self.device)
         else:
             return copy.deepcopy(self).to(device)
+
+    def squeeze(self, dim=None):
+        """Squeeze the ray.
+
+        Args:
+            dim (int, optional): dimension to squeeze. Defaults to None.
+        """
+        self.o = self.o.squeeze(dim)
+        self.d = self.d.squeeze(dim)
+        self.ra = self.ra.squeeze(dim)
+        self.valid = self.valid.squeeze(dim)
+        self.en = self.en.squeeze(dim)
+        self.opl = self.opl.squeeze(dim)
+        self.obliq = self.obliq.squeeze(dim)
+        return self

@@ -13,7 +13,6 @@ from deeplens.optics.basics import (
     DEPTH,
     EPSILON,
     GEO_GRID,
-    PSF_KS,
     SPP_CALC,
     SPP_PSF,
     WAVE_RGB,
@@ -27,49 +26,29 @@ class GeoLensEval:
     # ================================================================
     @torch.no_grad()
     def draw_spot_radial(
-        self, num_fields=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None
+        self, num_field=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None
     ):
-        """Draw spot diagram of the lens at different fields along meridional direction.
+        """Draw spot diagram of the lens at different field angles along meridional (y) direction.
 
         Args:
-            num_fields (int, optional): field number. Defaults to 4.
+            num_field (int, optional): field number. Defaults to 4.
             depth (float, optional): depth of the point source. Defaults to float("inf").
             wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
         """
-        # Sample rays along meridional (y) direction, shape [1, num_fields, num_rays, 3]
-        if depth == float("inf"):
-            fov_y_list = torch.linspace(
-                0, float(np.rad2deg(self.hfov)), num_fields, device=self.device
-            )
-            ray = self.sample_parallel(
-                fov_x=[0.0], fov_y=fov_y_list, num_rays=SPP_PSF, wvln=wvln
-            )
-        else:
-            scale = self.calc_scale_pinhole(depth)
-            point_obj_x = torch.zeros(num_fields, device=self.device)
-            point_obj_y = (
-                torch.linspace(0, -1, num_fields, device=self.device)
-                * scale
-                * self.r_sensor
-            )
-            point_obj = torch.stack(
-                [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
-            )
-            ray = self.sample_from_points(
-                points=point_obj.unsqueeze(0), num_rays=SPP_PSF, wvln=wvln
-            )
+        # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
+        ray = self.sample_radial_rays(
+            num_field=num_field, depth=depth, num_rays=SPP_PSF, wvln=wvln
+        )
 
-        # Trace rays to sensor plane
+        # Trace rays to sensor plane, shape [num_field, num_rays, 3]
         ray = self.trace2sensor(ray)
-        ray_o = (
-            ray.o.clone().cpu().numpy().squeeze(0)
-        )  # Shape [num_fields, num_rays, 3]
-        ray_ra = ray.ra.clone().cpu().numpy().squeeze(0)  # Shape [num_fields, num_rays]
+        ray_o = ray.o.clone().cpu().numpy() #.squeeze(0)
+        ray_ra = ray.ra.clone().cpu().numpy() #.squeeze(0)
 
         # Plot multiple spot diagrams in one figure
-        _, axs = plt.subplots(1, num_fields, figsize=(num_fields * 4, 4))
-        for i in range(num_fields):
+        _, axs = plt.subplots(1, num_field, figsize=(num_field * 4, 4))
+        for i in range(num_field):
             ra = ray_ra[i, :]
             x, y = ray_o[i, :, 0], ray_o[i, :, 1]
 
@@ -103,9 +82,7 @@ class GeoLensEval:
 
     @torch.no_grad()
     def draw_spot_map(self, num_grid=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
-        """Draw spot diagram of the lens.
-
-        Shot rays from grid points in object space, trace to sensor.
+        """Draw spot diagram of the lens at different field angles.
 
         Args:
             num_grid (int, optional): number of grid points. Defaults to 5.
@@ -114,7 +91,7 @@ class GeoLensEval:
             save_name (string, optional): filename to save. Defaults to None.
         """
         # Sample rays, shape [num_grid, num_grid, num_rays, 3]
-        ray = self.sample_grid_source(
+        ray = self.sample_grid_rays(
             depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
         )
 
@@ -170,14 +147,14 @@ class GeoLensEval:
     # ================================================================
     @torch.no_grad()
     def rms_map_rgb(self, num_grid=64, depth=DEPTH):
-        """Calculate the RMS spot error map across RGB wavelengths relative to the green centroid.
+        """Calculate the RMS spot error map across RGB wavelengths. Reference to the centroid of green rays.
 
         Args:
-            num_fields (int, optional): Resolution of the grid used for sampling fields/points. Defaults to 64.
+            num_grid (int, optional): Number of grid points. Defaults to 64.
             depth (float, optional): Depth of the point source. Defaults to DEPTH.
 
         Returns:
-            rms_map (torch.Tensor): RMS map for RGB channels. Shape [3, num_fields, num_fields].
+            rms_map (torch.Tensor): RMS map for RGB channels. Shape [3, num_grid, num_grid].
         """
         all_rms_maps = []
 
@@ -191,7 +168,7 @@ class GeoLensEval:
             ray_xy = ray.o[..., :2]
             ray_ra = ray.ra
 
-            # Calculate green centroid, shape [num_grid, num_grid, 2]
+            # Calculate green centroid as reference, shape [num_grid, num_grid, 2]
             if i == 0:
                 ray_xy_center_green = (ray_xy * ray_ra.unsqueeze(-1)).sum(
                     -2
@@ -206,7 +183,7 @@ class GeoLensEval:
             )
             all_rms_maps.append(rms_map)
 
-        # Stack the RMS maps for R, G, B, shape [3, num_grid, num_grid]
+        # Stack the RMS maps for R, G, B channels, shape [3, num_grid, num_grid]
         rms_map_rgb = torch.stack(
             [all_rms_maps[1], all_rms_maps[0], all_rms_maps[2]], dim=0
         )
@@ -239,13 +216,13 @@ class GeoLensEval:
         ).unsqueeze(-1)
         # Shape [num_grid, num_grid, 2]
 
-        # Calculate RMS error relative to its own centroid
+        # Calculate RMS error relative to its own centroid, shape [num_grid, num_grid]
         rms_map = torch.sqrt(
             (((ray_xy - ray_xy_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(
                 -1
             )
             / (ray_ra.sum(-1) + EPSILON)
-        )  # Shape [num_grid, num_grid]
+        )
 
         return rms_map
 
@@ -259,39 +236,48 @@ class GeoLensEval:
 
         Args:
             hfov (float): view angle (degree)
+            wvln (float): wavelength
             plane (str): meridional or sagittal
             ray_aiming (bool): whether the chief ray through the center of the stop.
 
         Returns:
             distortion (float): distortion at the specific field angle
         """
-        # Calculate ideal image height
-        effective_foclen = self.calc_efl()
-        ideal_image_height = effective_foclen * torch.tan(hfov * torch.pi / 180)
+        # ===========>
+        # # Calculate ideal image height
+        # eff_foclen = self.calc_efl()
+        # ideal_imgh = eff_foclen * np.tan(hfov * np.pi / 180)
 
-        # Calculate chief ray
-        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
-            hfov=hfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming
-        )
-        ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
+        # # Calculate chief ray
+        # chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
+        #     hfov=hfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming
+        # )
+        # ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
 
-        ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
-        t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
+        # ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
+        # t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
 
-        # Calculate actual image height
-        if plane == "sagittal":
-            actual_image_height = abs(ray.o[..., 0] + ray.d[..., 0] * t)
-        elif plane == "meridional":
-            actual_image_height = abs(ray.o[..., 1] + ray.d[..., 1] * t)
-        else:
-            raise ValueError(f"Invalid plane: {plane}")
+        # # Calculate actual image height
+        # if plane == "sagittal":
+        #     actual_imgh = (ray.o[..., 0] + ray.d[..., 0] * t).abs()
+        # elif plane == "meridional":
+        #     actual_imgh = (ray.o[..., 1] + ray.d[..., 1] * t).abs()
+        # else:
+        #     raise ValueError(f"Invalid plane: {plane}")
 
-        # Calculate distortion
-        distortion = (actual_image_height - ideal_image_height) / ideal_image_height
+        # # Calculate distortion
+        # actual_imgh = actual_imgh.cpu().numpy()
+        # ideal_imgh = ideal_imgh.cpu().numpy()
+        # distortion = (actual_imgh - ideal_imgh) / ideal_imgh
 
-        # Handle the case where ideal_image_height is 0 or very close to 0
-        mask = abs(ideal_image_height) < EPSILON
-        distortion[mask] = torch.tensor(0.0, device=self.device)
+        # # Handle the case where ideal_imgh is 0 or very close to 0
+        # mask = abs(ideal_imgh) < EPSILON
+        # distortion[mask] = 0.0
+        # ===========>
+
+
+
+        # ===========>
 
         return distortion
 
@@ -319,7 +305,7 @@ class GeoLensEval:
         distortions = []
 
         # Calculate distortion
-        distortions = self.calc_distortion_1D(
+        distortions = self.calc_distortion_2D(
             hfov=hfov_samples,
             wvln=wvln,
             plane=plane,
