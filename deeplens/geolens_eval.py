@@ -363,6 +363,7 @@ class GeoLensEval:
                 dpi=300,
             )
 
+    @torch.no_grad()
     def distortion_map(self, num_grid=16, depth=DEPTH):
         """Compute distortion map at a given depth.
 
@@ -444,117 +445,137 @@ class GeoLensEval:
     # ================================================================
     # MTF
     # ================================================================
+    def psf2mtf(self, psf, pixel_size):
+        """Calculate MTF from PSF.
+
+        Args:
+            psf (tensor): 2D PSF tensor (e.g., ks x ks). Assumes standard orientation where the array's y-axis corresponds to the tangential/meridional direction and the x-axis to the sagittal direction.
+
+        Returns:
+            freq (ndarray): Frequency axis (cycles/mm).
+            tangential_mtf (ndarray): Tangential MTF.
+            sagittal_mtf (ndarray): Sagittal MTF.
+
+        Reference:
+            [1] https://en.wikipedia.org/wiki/Optical_transfer_function
+            [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/introduction-to-modulation-transfer-function/?srsltid=AfmBOoq09vVDVlh_uuwWnFoMTg18JVgh18lFSw8Ci4Sdlry-AmwGkfDd
+        """
+        psf = psf.cpu().numpy()
+
+        # Extract 1D PSFs along the sagittal and tangential directions
+        center_x = psf.shape[1] // 2
+        center_y = psf.shape[0] // 2
+        sagittal_psf = psf[center_y, :]
+        tangential_psf = psf[:, center_x]
+
+        # Fourier Transform to get the MTFs
+        sagittal_mtf = np.abs(np.fft.fft(sagittal_psf))
+        tangential_mtf = np.abs(np.fft.fft(tangential_psf))
+
+        # Normalize the MTFs
+        sagittal_mtf /= sagittal_mtf.max()
+        tangential_mtf /= tangential_mtf.max()
+
+        # Create frequency axis in cycles/mm
+        freq = np.fft.fftfreq(psf.shape[0], pixel_size)
+
+        # Only keep the positive frequencies
+        positive_freq_idx = freq > 0
+
+        return (
+            freq[positive_freq_idx],
+            tangential_mtf[positive_freq_idx],
+            sagittal_mtf[positive_freq_idx],
+        )
+    
     @torch.no_grad()
     def draw_mtf(
         self,
-        wvlns=DEFAULT_WAVE,
-        depth=DEPTH,
-        relative_fov=[0.0, 0.7, 1.0],
-        save_name="./mtf.png",
+        relative_fov_list=[0.0, 0.7, 1.0],
+        depth_list=[DEPTH],
+        save_name="./mtf_grid.png",
+        ks=128
     ):
-        """Draw MTF curve (different FoVs, single wvln, infinite depth) of the lens."""
-        assert save_name[-4:] == ".png", "save_name must end with .png"
-
-        relative_fov = (
-            [relative_fov] if isinstance(relative_fov, float) else relative_fov
-        )
-        wvlns = [wvlns] if isinstance(wvlns, float) else wvlns
-        color_list = "rgb"
-
-        plt.figure(figsize=(6, 6))
-        for wvln_idx, wvln in enumerate(wvlns):
-            for fov_idx, fov in enumerate(relative_fov):
-                point = torch.tensor([0, fov, depth])
-                psf = self.psf(points=point, wvln=wvln, ks=256)
-                freq, mtf_tan, mtf_sag = self.psf2mtf(psf)
-
-                fov_deg = round(fov * self.hfov * 180 / torch.pi, 1)
-                plt.plot(
-                    freq,
-                    mtf_tan,
-                    color_list[fov_idx],
-                    label=f"{fov_deg}(deg)-Tangential",
-                )
-                plt.plot(
-                    freq,
-                    mtf_sag,
-                    color_list[fov_idx],
-                    label=f"{fov_deg}(deg)-Sagittal",
-                    linestyle="--",
-                )
-
-        plt.legend()
-        plt.xlabel("Spatial Frequency [cycles/mm]")
-        plt.ylabel("MTF")
-
-        # Save figure
-        plt.savefig(f"{save_name}", bbox_inches="tight", format="png", dpi=300)
-        plt.close()
-
-    def psf2mtf(self, psf, diag=False):
-        """Convert 2D PSF kernel to MTF curve by FFT.
+        """Draw a grid of MTF curves.
+        Each subplot in the grid corresponds to a specific (depth, FOV) combination.
+        Each subplot displays MTF curves for R, G, B wavelengths.
 
         Args:
-            psf (tensor): 2D PSF tensor.
-
-        Returns:
-            freq (ndarray): Frequency axis.
-            tangential_mtf (ndarray): Tangential MTF.
-            sagittal_mtf (ndarray): Sagittal MTF.
+            relative_fov_list (list, optional): List of relative field of view values.
+                                              Defaults to [0.0, 0.7, 1.0].
+            depth_list (list, optional): List of depth values. Defaults to [DEPTH].
+            save_name (str, optional): Filename to save the plot. Defaults to "./mtf_grid.png".
+            ks (int, optional): Kernel size for PSF calculation. Defaults to 256.
         """
-        psf = psf.cpu().numpy()
-        x = np.linspace(-1, 1, psf.shape[1]) * self.pixel_size * psf.shape[1] / 2
-        y = np.linspace(-1, 1, psf.shape[0]) * self.pixel_size * psf.shape[0] / 2
+        assert save_name.endswith(".png"), "save_name must end with .png"
 
-        if diag:
-            raise Exception("Diagonal PSF is not tested.")
-            diag_psf = np.diag(np.flip(psf, axis=0))
-            x *= math.sqrt(2)
-            y *= math.sqrt(2)
-            delta_x = self.pixel_size * math.sqrt(2)
+        num_fovs = len(relative_fov_list)
+        num_depths = len(depth_list)
 
-            diag_mtf = np.abs(np.fft.fft(diag_psf))
-            # diag_mtf /= diag_mtf.max()
+        if num_fovs == 0 or num_depths == 0:
+            print("Warning: relative_fov_list or depth_list is empty. No MTF plot generated.")
+            return
 
-            # Create frequency axis in cycles/mm
-            freq = np.fft.fftfreq(psf.shape[0], delta_x)
+        # Wavelength colors and labels
+        red, green, blue = "#CC0000", "#006600", "#0066CC"
+        wavelength_colors = [red, green, blue]
+        wavelength_labels = ['R', 'G', 'B']
 
-            # Only keep the positive frequencies
-            positive_freq_idx = freq > 0
+        # Create figure and subplots
+        fig, axs = plt.subplots(
+            num_depths, num_fovs, 
+            figsize=(num_fovs * 3, num_depths * 3), 
+            squeeze=False
+        )
 
-            freq = freq[positive_freq_idx]
-            diag_mtf = diag_mtf[positive_freq_idx]
-            diag_mtf /= diag_mtf[0]
+        # Iterate over depth and field of view
+        for depth_idx, current_depth in enumerate(depth_list):
+            for fov_idx, current_fov_relative in enumerate(relative_fov_list):
+                ax = axs[depth_idx, fov_idx]
 
-            return freq, diag_mtf
-        else:
-            # Extract 1D PSFs along the sagittal and tangential directions
-            center_x = psf.shape[1] // 2
-            center_y = psf.shape[0] // 2
-            sagittal_psf = psf[center_y, :]
-            tangential_psf = psf[:, center_x]
+                # Calculate field of view and depth
+                fov_deg = round(current_fov_relative * self.hfov * 180 / np.pi, 1)
+                depth_str = "inf" if current_depth == float("inf") else f"{current_depth}"
 
-            # Fourier Transform to get the MTFs
-            sagittal_mtf = np.abs(np.fft.fft(sagittal_psf))
-            tangential_mtf = np.abs(np.fft.fft(tangential_psf))
+                # Calculate rgb PSF
+                point = [0, -current_fov_relative, current_depth]
+                psf_rgb = self.psf_rgb(points=point, ks=ks)
+                
+                # Calculate MTF for each wavelength channel
+                for wvln_channel_idx, wvln_actual in enumerate(WAVE_RGB):
+                    # Calculate MTF from PSF
+                    psf = psf_rgb[wvln_channel_idx]
+                    freq, mtf_tan, mtf_sag = self.psf2mtf(psf, self.pixel_size)
 
-            # Normalize the MTFs
-            sagittal_mtf /= sagittal_mtf.max()
-            tangential_mtf /= tangential_mtf.max()
+                    # Plot MTF curve
+                    color = wavelength_colors[wvln_channel_idx % len(wavelength_colors)]
+                    wvln_short_label = wavelength_labels[wvln_channel_idx % len(wavelength_labels)]
+                    wvln_nm = int(wvln_actual * 1000)
+                    ax.plot(
+                        freq,
+                        mtf_tan,
+                        color=color,
+                        label=f"{wvln_short_label}({wvln_nm}nm)-Tan",
+                    )
+                    ax.plot(
+                        freq,
+                        mtf_sag,
+                        color=color,
+                        label=f"{wvln_short_label}({wvln_nm}nm)-Sag",
+                        linestyle="--",
+                    )
 
-            delta_x = self.pixel_size  # / 2
+                ax.set_title(f"Depth: {depth_str}mm, FOV: {fov_deg}deg", fontsize=8)
+                ax.set_xlabel("Spatial Frequency [cycles/mm]", fontsize=8)
+                ax.set_ylabel("MTF", fontsize=8)
+                ax.legend(fontsize=6)
+                ax.tick_params(axis='both', which='major', labelsize=7)
+                ax.grid(True)
+                ax.set_ylim(0, 1.05)
 
-            # Create frequency axis in cycles/mm
-            freq = np.fft.fftfreq(psf.shape[0], delta_x)
-
-            # Only keep the positive frequencies
-            positive_freq_idx = freq > 0
-
-            return (
-                freq[positive_freq_idx],
-                tangential_mtf[positive_freq_idx],
-                sagittal_mtf[positive_freq_idx],
-            )
+        plt.tight_layout()
+        plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
+        plt.close(fig)
 
     # ================================================================
     # Vignetting
