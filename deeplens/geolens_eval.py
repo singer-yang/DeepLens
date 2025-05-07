@@ -13,7 +13,6 @@ from deeplens.optics.basics import (
     DEPTH,
     EPSILON,
     GEO_GRID,
-    SPP_CALC,
     SPP_PSF,
     WAVE_RGB,
 )
@@ -368,7 +367,8 @@ class GeoLensEval:
         """Compute distortion map at a given depth.
 
         Note:
-            When distortion is strong, the current FoV calculation is not accurate. So we sample rays from the mapped sensor plane in the object space.
+            [1] When distortion is strong, the current FoV calculation is not accurate. So we sample rays from the mapped sensor plane in the object space.
+            [2] The sampling function should be implemented in the GeoLens class, and consider the sensor aspect ratio.
 
         Args:
             num_grid (int): number of grid points.
@@ -580,9 +580,40 @@ class GeoLensEval:
     # ================================================================
     # Vignetting
     # ================================================================
-    def vignetting(self):
+    def vignetting(self, depth=DEPTH, num_grid=64):
         """Compute vignetting."""
-        pass
+        # Sample rays, shape [num_grid, num_grid, num_rays, 3]
+        ray = self.sample_grid_rays(depth=depth, num_grid=num_grid)
+
+        # Trace rays to sensor
+        ray = self.trace2sensor(ray)
+
+        # Calculate vignetting map
+        vignetting = ray.ra.sum(-1) / (ray.ra.shape[-1])
+        return vignetting
+    
+    def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512):
+        """Draw vignetting."""
+        # Calculate vignetting map
+        vignetting = self.vignetting(depth=depth)
+        
+        # Interpolate vignetting map to desired resolution
+        vignetting = F.interpolate(
+            vignetting.unsqueeze(0).unsqueeze(0), 
+            size=(resolution, resolution),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze()
+
+        # Scale vignetting to [0.5, 1] range
+        vignetting = 0.5 + 0.5 * vignetting
+
+        plt.imshow(vignetting.cpu().numpy(), cmap='gray', vmin=0.5, vmax=1.0)
+        plt.colorbar(ticks=[0.5, 0.75, 1.0])
+
+        filename = f"./vignetting_{depth}.png" if filename is None else filename
+        plt.savefig(filename, bbox_inches="tight", format="png", dpi=300)
+        plt.close()
 
     # ================================================================
     # Wavefront error
