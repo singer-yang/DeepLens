@@ -142,6 +142,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         depth=float("inf"),
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
+        sample_more_off_axis=False,
     ):
         """Sample grid rays from object space.
 
@@ -155,6 +156,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             num_grid (list, optional): number of grid points. Defaults to [11, 11].
             num_rays (int, optional): number of rays. Defaults to SPP_PSF.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            sample_more_off_axis (bool, optional): If True, sample more off-axis rays.
 
         Returns:
             ray (Ray object): Ray object. Shape [num_grid, num_grid, num_rays, 3]
@@ -162,11 +164,22 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if isinstance(num_grid, int):
             num_grid = [num_grid, num_grid]
 
-        # Calculate field angles. Top-left field has positive fov_x and negative fov_y.
-        hfov_x = np.rad2deg(self.hfov_x)
-        hfov_y = np.rad2deg(self.hfov_y)
-        fov_x_list = [float(x) for x in np.linspace(hfov_x, -hfov_x, num_grid[0])]
-        fov_y_list = [float(y) for y in np.linspace(-hfov_y, hfov_y, num_grid[1])]
+        # Calculate field angles. Top-left field has positive fov_x and negative fov_y
+        if sample_more_off_axis:
+            x_list = [
+                np.sign(x) * np.abs(x) ** 0.5 for x in np.linspace(1, -1, num_grid[0])
+            ]
+            y_list = [
+                np.sign(y) * np.abs(y) ** 0.5 for y in np.linspace(-1, 1, num_grid[1])
+            ]
+        else:
+            x_list = [x for x in np.linspace(1, -1, num_grid[0])]
+            y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
+
+        hfov_x = np.rad2deg(self.hfov_x) * 0.98
+        hfov_y = np.rad2deg(self.hfov_y) * 0.98
+        fov_x_list = [float(x * hfov_x) for x in x_list]
+        fov_y_list = [float(y * hfov_y) for y in y_list]
 
         # Sample rays (parallel or point source)
         if depth == float("inf"):
@@ -292,7 +305,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         wvln=DEFAULT_WAVE,
         entrance_pupil=True,
         shrink_pupil=False,
-        depth=0.0,
+        depth=-1.0,
     ):
         """Sample parallel rays in object space.
 
@@ -544,6 +557,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         if record:
             ray_o = ray.o.clone().detach()
+            # Set to nan to be skipped in 2d layout visualization
             ray_o[ray.ra == 0] = float("nan")
             ray_o_record.append(ray_o)
             return ray, ray_o_record
@@ -560,9 +574,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """
         if record:
             ray_o_record = []
-            # A hack for the case of infinite object
-            if ray.o[..., 2].min() < -1000.0:
-                ray.prop_to(-0.1)
             ray_o_record.append(ray.o.clone().detach())
         else:
             ray_o_record = None
@@ -1435,7 +1446,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if method == "pinhole":
             scale = self.calc_scale_pinhole(depth)
         elif method == "raytracing":
-            raise NotImplementedError("Ray tracing for scale factor has been deprecated.")
+            raise NotImplementedError(
+                "Ray tracing for scale factor has been deprecated."
+            )
             # scale = self.calc_scale_ray(depth)
         else:
             raise ValueError(f"Invalid method: {method}.")
@@ -1511,11 +1524,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
     @torch.no_grad()
     def chief_ray(self):
-        """Compute chief ray from sensor to object space. 
-        
-            We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture.
+        """Compute chief ray from sensor to object space.
 
-            This function is currently not used and needs to be checked.
+        We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture.
+
+        This function is currently not used and needs to be checked.
         """
         # sample rays with shape [SPP_CALC, 3]
         pupilz, pupilx = self.calc_exit_pupil()
@@ -1538,192 +1551,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)
 
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
-
-    # @torch.no_grad()
-    # def calc_chief_ray(self, fov, plane="sagittal"):
-    #     """Compute chief ray for an incident angle.
-
-    #     TODO: if chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
-
-    #     Args:
-    #         fov (float): incident angle in degree.
-    #         plane (str): "sagittal" or "meridional".
-
-    #     Returns:
-    #         chief_ray_o (torch.Tensor): origin of chief ray.
-    #         chief_ray_d (torch.Tensor): direction of chief ray.
-
-    #     Note:
-    #         It is 2D ray tracing, for 3D chief ray, we can shrink the pupil, trace rays, calculate the centroid as the chief ray.
-    #     """
-    #     # Sample parallel rays from object space
-    #     ray = self.sample_parallel_2D(
-    #         fov=fov, num_rays=SPP_CALC, entrance_pupil=True, plane=plane
-    #     )
-    #     inc_ray = ray.clone()
-
-    #     # Trace to the aperture
-    #     ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
-
-    #     # Look for the ray that is closest to the optical axis
-    #     center_x = torch.min(torch.abs(ray.o[:, 0]))
-    #     center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item()
-    #     chief_ray_o, chief_ray_d = inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
-
-    #     return chief_ray_o, chief_ray_d
-
-    @torch.no_grad()
-    def calc_chief_ray_infinite(
-        self,
-        hfov,
-        depth=0.0,
-        wvln=DEFAULT_WAVE,
-        plane="meridional",
-        num_rays=SPP_CALC,
-        ray_aiming=True,
-    ):
-        """Compute chief ray for an incident angle.
-
-        Args:
-            hfov (float): incident angle in degree.
-            depth (float): depth of the object.
-            wvln (float): wavelength of the light.
-            plane (str): "sagittal" or "meridional".
-            num_rays (int): number of rays.
-            ray_aiming (bool): whether the chief ray through the center of the stop.
-        """
-        if isinstance(hfov, float) and hfov > 0:
-            hfov = torch.linspace(0, hfov, 2)
-        hfov = hfov.to(self.device)
-
-        if not isinstance(depth, torch.Tensor):
-            depth = torch.tensor(depth, device=self.device).repeat(len(hfov))
-
-        # set chief ray
-        chief_ray_o = torch.zeros([len(hfov), 3]).to(self.device)
-        chief_ray_d = torch.zeros([len(hfov), 3]).to(self.device)
-
-        # Convert hfov to radian
-        hfov = hfov * torch.pi / 180.0
-
-        if torch.any(hfov == 0):
-            chief_ray_o[0, ...] = torch.tensor(
-                [0.0, 0.0, depth[0]], device=self.device, dtype=torch.float32
-            )
-            chief_ray_d[0, ...] = torch.tensor(
-                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
-            )
-            if len(hfov) == 1:
-                return chief_ray_o, chief_ray_d
-
-        if len(hfov) > 1:
-            hfovs = hfov[1:]
-            depths = depth[1:]
-
-        if self.aper_idx == 0:
-            if plane == "sagittal":
-                chief_ray_o[1:, ...] = torch.stack(
-                    [depths * torch.tan(hfovs), torch.zeros_like(hfovs), depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
-                    dim=-1,
-                )
-            else:
-                chief_ray_o[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), depths * torch.tan(hfovs), depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
-                    dim=-1,
-                )
-
-            return chief_ray_o, chief_ray_d
-
-        # Scale factor
-        pupilz, _ = self.calc_entrance_pupil()
-        y_distance = torch.tan(hfovs) * (abs(depths) + pupilz)
-
-        if ray_aiming:
-            scale = 0.05
-            delta = scale * y_distance
-
-        if not ray_aiming:
-            if plane == "sagittal":
-                chief_ray_o[1:, ...] = torch.stack(
-                    [-y_distance, torch.zeros_like(hfovs), depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
-                    dim=-1,
-                )
-            else:
-                chief_ray_o[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), -y_distance, depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
-                    dim=-1,
-                )
-
-        else:
-            min_y = -y_distance - delta
-            max_y = -y_distance + delta
-            o1_linspace = torch.stack(
-                [
-                    torch.linspace(min_y[i], max_y[i], num_rays)
-                    for i in range(len(min_y))
-                ],
-                dim=0,
-            )
-
-            o1 = torch.zeros([len(hfovs), num_rays, 3])
-            o1[:, :, 2] = depths[0]
-
-            o2_linspace = torch.stack(
-                [
-                    torch.linspace(-delta[i], delta[i], num_rays)
-                    for i in range(len(min_y))
-                ],
-                dim=0,
-            )
-
-            o2 = torch.zeros([len(hfovs), num_rays, 3])
-            o2[:, :, 2] = pupilz
-
-            if plane == "sagittal":
-                o1[:, :, 0] = o1_linspace
-                o2[:, :, 0] = o2_linspace
-            else:
-                o1[:, :, 1] = o1_linspace
-                o2[:, :, 1] = o2_linspace
-
-            # Trace until the aperture
-            ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
-            inc_ray = ray.clone()
-            ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx + 1)))
-
-            # Look for the ray that is closest to the optical axis
-            if plane == "sagittal":
-                _, center_idx = torch.min(torch.abs(ray.o[..., 0]), dim=1)
-                chief_ray_o[1:, ...] = inc_ray.o[
-                    torch.arange(len(hfovs)), center_idx.long(), ...
-                ]
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
-                    dim=-1,
-                )
-            else:
-                _, center_idx = torch.min(torch.abs(ray.o[..., 1]), dim=1)
-                chief_ray_o[1:, ...] = inc_ray.o[
-                    torch.arange(len(hfovs)), center_idx.long(), ...
-                ]
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
-                    dim=-1,
-                )
-
-        return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
     def calc_exit_pupil(self, shrink_pupil=False):
@@ -1817,11 +1644,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
 
         # Sample phi ranges from [-0.5rad, 0.5rad]
+        # phi = torch.linspace(-self.hfov - 0.25, -self.hfov + 0.25, SPP_CALC)
         phi = torch.linspace(-0.5, 0.5, SPP_CALC)
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
         )
-
         ray = Ray(ray_o, d, device=self.device)
 
         # Ray tracing from aperture edge to first surface
@@ -1830,16 +1657,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+            [ray.o[ray.ra > 0][:, 0], ray.o[ray.ra > 0][:, 2]], dim=-1
         )
         ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+            [ray.d[ray.ra > 0][:, 0], ray.d[ray.ra > 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
-        # Handle the case where no intersection points are found or small pupil
+        # Handle the case where no intersection points are found or small entrance pupil
         if len(intersection_points) == 0:
-            print("No intersection points found, use the first surface as pupil.")
+            print("Calculate entrance pupil failed, use the first surface.")
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
@@ -1847,7 +1674,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
             if avg_pupilr < EPSILON:
-                print("Small pupil is detected, use the first surface as pupil.")
+                print("Small entrance pupil is detected, use the first surface.")
                 avg_pupilr = self.surfaces[0].r
                 avg_pupilz = self.surfaces[0].d.item()
 
@@ -1972,20 +1799,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         self.surfaces[self.aper_idx].r = optim_aper_r
 
     @torch.no_grad()
-    def set_target_fov_fnum(self, hfov, fnum, imgh=None):
+    def set_target_fov_fnum(self, hfov, fnum, foclen):
         """Set FoV, ImgH and F number, only use this function to assign design targets.
 
         Args:
             hfov (float): half diagonal-FoV in degree.
             fnum (float): F number.
-            imgh (float): image height in [mm].
+            foclen (float): focal length in [mm].
         """
-        if imgh is not None:
-            self.r_sensor = imgh
         self.hfov = hfov
         self.fnum = fnum
+        self.foclen = foclen
 
-        self.foclen = self.calc_efl()
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].r = float(aper_r)
 
@@ -2050,11 +1875,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             )
 
     @torch.no_grad()
-    def prune_surf(self, expand_surf=None):
+    def prune_surf(self, expand_factor=None):
         """Prune surfaces to the minimum height that allows all valid rays to go through.
 
         Args:
-            expand_surf (float): extra height to reserve.
+            expand_factor (float): extra height to reserve.
                 - For cellphone lens, we usually use 0.1mm or 0.05 * r_sensor.
                 - For camera lens, we usually use 0.5mm or 0.1 * r_sensor.
             surface_range (list): surface range to prune.
@@ -2063,14 +1888,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         surface_range = self.find_diff_surf()
 
         if self.is_cellphone:
-            expand_surf = 0.05 if expand_surf is None else expand_surf
+            expand_factor = 0.05 if expand_factor is None else expand_factor
 
             # Reset lens to maximum height(sensor radius)
             for i in surface_range:
                 # self.surfaces[i].r = self.r_sensor
                 self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
         else:
-            expand_surf = 0.2 if expand_surf is None else expand_surf
+            expand_factor = 0.2 if expand_factor is None else expand_factor
 
         # Sample maximum fov rays to cut valid surface height
         if self.hfov is not None:
@@ -2081,51 +1906,43 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             )
 
         # Trace rays to compute the maximum valid region of the lens, shape of ray: [num_rays, 3]
-        ray = self.sample_parallel(
-            fov_x=[0.0], fov_y=[fov_deg], num_rays=SPP_CALC, entrance_pupil=True
-        )
+        ray = self.sample_parallel(fov_x=[0.0], fov_y=[fov_deg], num_rays=SPP_CALC)
         ray = ray.squeeze(0).squeeze(0)
         _, ray_o_record = self.trace2sensor(ray=ray, record=True)
 
-        # Ray origin record, shape [num_rays, num_surfaces + 2, 3]
+        # Ray record, shape [num_rays, num_surfaces + 2, 3]
         ray_o_record = torch.stack(ray_o_record, dim=-2)
-        ray_r_record = torch.sqrt(
-            ray_o_record[:, :, 0] ** 2 + ray_o_record[:, :, 1] ** 2
-        )
-        for i in surface_range:
-            # Filter out nan values and compute the maximum height
-            valid_heights = ray_r_record[:, i + 1]
-            valid_heights = valid_heights[~torch.isnan(valid_heights)]
-            if len(valid_heights) > 0:
-                max_ray_height = valid_heights.max().item()
-            else:
-                print(
-                    f"No valid rays for surface {i}, use the maximum height of the surface."
-                )
-                max_ray_height = self.surfaces[i].r
+        ray_o_record = torch.nan_to_num(ray_o_record, 0.0)
 
-            if max_ray_height > 0:
-                max_height_value_range = self.surfaces[i].max_height()
-                self.surfaces[i].r = min(
-                    max_ray_height * (1 + expand_surf), max_height_value_range
-                )
+        # Compute the maximum ray height for each surface
+        ray_r_record = (ray_o_record[..., :2] ** 2).sum(-1).sqrt()
+        surf_r_max = ray_r_record.max(dim=0)[0][1:-1]
+        for i in surface_range:
+            # Determine and update surface height
+            if surf_r_max[i] > 0:
+                max_height_expand = surf_r_max[i].item() * (1 + expand_factor)
+                max_height_allowed = self.surfaces[i].max_height()
+                self.surfaces[i].r = min(max_height_expand, max_height_allowed)
             else:
-                print("Get max height failed, use the maximum height of the surface.")
+                print(f"No valid rays for Surf {i}, do not prune.")
+                max_height_expand = self.surfaces[i].r.item() * (1 + expand_factor)
+                max_height_value_range = self.surfaces[i].max_height()
+                self.surfaces[i].r = min(max_height_expand, max_height_value_range)
 
     @torch.no_grad()
-    def correct_shape(self, expand_surf=None):
+    def correct_shape(self, expand_factor=None):
         """Correct wrong lens shape during the lens design."""
         aper_idx = self.aper_idx
         optim_surf_range = self.find_diff_surf()
         shape_changed = False
 
-        # Rule 1: Move the first surface to z = 0
+        # Rule 1: Move the first surface to z = 0.0
         move_dist = self.surfaces[0].d.item()
         for surf in self.surfaces:
             surf.d -= move_dist
         self.d_sensor -= move_dist
 
-        # Rule 2: Move lens group to get a fixed aperture distance. Only for aperture at the first surface.
+        # Rule 2: Fix aperture distance to the first surface if aperture in the front.
         if aper_idx == 0:
             d_aper = 0.1 if self.is_cellphone else 2.0
 
@@ -2141,14 +1958,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             for i in optim_surf_range:
                 self.surfaces[i].d -= delta_aper
 
-        # Rule 3: If two surfaces overlap (at center), seperate them by a small distance
-        for i in range(0, len(self.surfaces) - 1):
-            if self.surfaces[i].d > self.surfaces[i + 1].d:
-                self.surfaces[i + 1].d += 0.1
-                shape_changed = True
+        # # Rule 3: If two surfaces overlap (at center), seperate them by a small distance
+        # for i in range(0, len(self.surfaces) - 1):
+        #     if self.surfaces[i].d > self.surfaces[i + 1].d:
+        #         self.surfaces[i + 1].d += 0.1
+        #         shape_changed = True
 
         # Rule 4: Prune all surfaces
-        self.prune_surf(expand_surf=expand_surf)
+        self.prune_surf(expand_factor=expand_factor)
 
         if shape_changed:
             print("Surface shape corrected.")

@@ -79,6 +79,29 @@ class Ray(DeepObj):
         return (self.o * self.ra.unsqueeze(-1)).sum(-2) / self.ra.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
+    
+    def rms_error(self, center_ref=None):
+        """Calculate the RMS error of the ray.
+
+        Args:
+            center_ref (torch.Tensor): Reference center of the ray, shape (..., 3). If None, use the centroid of the ray as reference.
+        Returns:
+            torch.Tensor: average RMS error of the ray
+        """
+        # Calculate the centroid of the ray as reference
+        if center_ref is None:
+            with torch.no_grad():
+                center_ref = self.centroid()
+
+        center_ref = center_ref.unsqueeze(-2)
+        
+        # Calculate RMS error for each region
+        rms_error = ((self.o[..., :2] - center_ref[..., :2])**2).sum(-1)
+        rms_error = (rms_error * self.ra).sum(-1) / (self.ra.sum(-1) + EPSILON)
+        rms_error = rms_error.sqrt()
+        
+        # Average RMS error
+        return rms_error.mean()
 
     def clone(self, device=None):
         """Clone the ray.
