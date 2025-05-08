@@ -176,8 +176,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             x_list = [x for x in np.linspace(1, -1, num_grid[0])]
             y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
 
-        hfov_x = np.rad2deg(self.hfov_x) * 0.98
-        hfov_y = np.rad2deg(self.hfov_y) * 0.98
+        hfov_x = np.rad2deg(self.hfov_x)
+        hfov_y = np.rad2deg(self.hfov_y)
         fov_x_list = [float(x * hfov_x) for x in x_list]
         fov_y_list = [float(y * hfov_y) for y in y_list]
 
@@ -1612,8 +1612,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 avg_pupilr = self.surfaces[-1].r
                 avg_pupilz = self.surfaces[-1].d.item()
 
+        # Shrink the pupil
         if shrink_pupil:
             avg_pupilr *= 0.25
+        else:
+            avg_pupilr *= 0.98
+
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
@@ -1656,12 +1660,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray, _ = self.trace(ray, lens_range=lens_range)
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack(
-            [ray.o[ray.ra > 0][:, 0], ray.o[ray.ra > 0][:, 2]], dim=-1
-        )
-        ray_d = torch.stack(
-            [ray.d[ray.ra > 0][:, 0], ray.d[ray.ra > 0][:, 2]], dim=-1
-        )
+        ray_o = torch.stack([ray.o[ray.ra > 0][:, 0], ray.o[ray.ra > 0][:, 2]], dim=-1)
+        ray_d = torch.stack([ray.d[ray.ra > 0][:, 0], ray.d[ray.ra > 0][:, 2]], dim=-1)
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
         # Handle the case where no intersection points are found or small entrance pupil
@@ -1678,8 +1678,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 avg_pupilr = self.surfaces[0].r
                 avg_pupilz = self.surfaces[0].d.item()
 
+        # Shrink the pupil
         if shrink_pupil:
             avg_pupilr *= 0.25
+        else:
+            avg_pupilr *= 0.98
+        
         return avg_pupilz, avg_pupilr
 
     @staticmethod
