@@ -197,8 +197,7 @@ def create_lens(
 
     # Materials
     mat_names = list(MATERIAL_data.keys())
-    remove_materials = ["air", "vacuum", "occluder"]
-    for mat in remove_materials:
+    for mat in ["air", "vacuum", "occluder"]:
         if mat in mat_names:
             mat_names.remove(mat)
 
@@ -244,13 +243,14 @@ def create_lens(
 
     # Lens calculation
     lens = lens.to(lens.device)
-    lens.d_sensor = torch.tensor(thickness, dtype=torch.float32).to(lens.device)
+    lens.d_sensor = torch.tensor(thickness).to(lens.device)
     lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh / 2)
     lens.post_computation()
 
     # Save lens
-    filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}.json"
-    lens.write_lens_json(os.path.join(save_dir, filename))
+    filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}"
+    lens.write_lens_json(os.path.join(save_dir, f"{filename}.json"))
+    lens.analysis(os.path.join(save_dir, f"{filename}"))
 
     return lens
 
