@@ -46,9 +46,9 @@ class GeoLensOptim:
         if self.r_sensor < 12.0:
             self.is_cellphone = True
 
-            self.dist_min = 0.1
+            self.dist_min = 0.05
             self.dist_max = 0.6
-            self.thickness_min = 0.3
+            self.thickness_min = 0.2
             self.thickness_max = 1.5
             self.flange_min = 0.5
             self.flange_max = 3.0
@@ -493,7 +493,7 @@ class GeoLensOptim:
 
                 # Use only quater of the sensor
                 ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-                ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]  # [h/2, w/2, spp]
+                ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
 
                 # Weight mask, shape of [num_grid, num_grid]
                 with torch.no_grad():
