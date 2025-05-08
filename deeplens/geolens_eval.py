@@ -20,6 +20,7 @@ from deeplens.optics.basics import (
     DEPTH,
     EPSILON,
     GEO_GRID,
+    SPP_CALC,
     SPP_PSF,
     WAVE_RGB,
 )
@@ -640,3 +641,192 @@ class GeoLensEval:
     def aberration_histogram(self):
         """Compute aberration histogram."""
         pass
+
+    # ================================================================
+    # Chief ray calculation
+    # ================================================================
+    @torch.no_grad()
+    def calc_chief_ray(self, fov, plane="sagittal"):
+        """Compute chief ray for an incident angle.
+
+        If chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
+
+        Args:
+            fov (float): incident angle in degree.
+            plane (str): "sagittal" or "meridional".
+
+        Returns:
+            chief_ray_o (torch.Tensor): origin of chief ray.
+            chief_ray_d (torch.Tensor): direction of chief ray.
+
+        Note:
+            It is 2D ray tracing, for 3D chief ray, we can shrink the pupil, trace rays, calculate the centroid as the chief ray.
+        """
+        # Sample parallel rays from object space
+        ray = self.sample_parallel_2D(
+            fov=fov, num_rays=SPP_CALC, entrance_pupil=True, plane=plane
+        )
+        inc_ray = ray.clone()
+
+        # Trace to the aperture
+        ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
+
+        # Look for the ray that is closest to the optical axis
+        center_x = torch.min(torch.abs(ray.o[:, 0]))
+        center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item()
+        chief_ray_o, chief_ray_d = inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
+
+        return chief_ray_o, chief_ray_d
+
+    @torch.no_grad()
+    def calc_chief_ray_infinite(
+        self,
+        hfov,
+        depth=0.0,
+        wvln=DEFAULT_WAVE,
+        plane="meridional",
+        num_rays=SPP_CALC,
+        ray_aiming=True,
+    ):
+        """Compute chief ray for an incident angle.
+
+        Args:
+            hfov (float): incident angle in degree.
+            depth (float): depth of the object.
+            wvln (float): wavelength of the light.
+            plane (str): "sagittal" or "meridional".
+            num_rays (int): number of rays.
+            ray_aiming (bool): whether the chief ray through the center of the stop.
+        """
+        if isinstance(hfov, float) and hfov > 0:
+            hfov = torch.linspace(0, hfov, 2)
+        hfov = hfov.to(self.device)
+
+        if not isinstance(depth, torch.Tensor):
+            depth = torch.tensor(depth, device=self.device).repeat(len(hfov))
+
+        # set chief ray
+        chief_ray_o = torch.zeros([len(hfov), 3]).to(self.device)
+        chief_ray_d = torch.zeros([len(hfov), 3]).to(self.device)
+
+        # Convert hfov to radian
+        hfov = hfov * torch.pi / 180.0
+
+        if torch.any(hfov == 0):
+            chief_ray_o[0, ...] = torch.tensor(
+                [0.0, 0.0, depth[0]], device=self.device, dtype=torch.float32
+            )
+            chief_ray_d[0, ...] = torch.tensor(
+                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
+            )
+            if len(hfov) == 1:
+                return chief_ray_o, chief_ray_d
+
+        if len(hfov) > 1:
+            hfovs = hfov[1:]
+            depths = depth[1:]
+
+        if self.aper_idx == 0:
+            if plane == "sagittal":
+                chief_ray_o[1:, ...] = torch.stack(
+                    [depths * torch.tan(hfovs), torch.zeros_like(hfovs), depths], dim=-1
+                )
+                chief_ray_d[1:, ...] = torch.stack(
+                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+            else:
+                chief_ray_o[1:, ...] = torch.stack(
+                    [torch.zeros_like(hfovs), depths * torch.tan(hfovs), depths], dim=-1
+                )
+                chief_ray_d[1:, ...] = torch.stack(
+                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+
+            return chief_ray_o, chief_ray_d
+
+        # Scale factor
+        pupilz, _ = self.calc_entrance_pupil()
+        y_distance = torch.tan(hfovs) * (abs(depths) + pupilz)
+
+        if ray_aiming:
+            scale = 0.05
+            delta = scale * y_distance
+
+        if not ray_aiming:
+            if plane == "sagittal":
+                chief_ray_o[1:, ...] = torch.stack(
+                    [-y_distance, torch.zeros_like(hfovs), depths], dim=-1
+                )
+                chief_ray_d[1:, ...] = torch.stack(
+                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+            else:
+                chief_ray_o[1:, ...] = torch.stack(
+                    [torch.zeros_like(hfovs), -y_distance, depths], dim=-1
+                )
+                chief_ray_d[1:, ...] = torch.stack(
+                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+
+        else:
+            min_y = -y_distance - delta
+            max_y = -y_distance + delta
+            o1_linspace = torch.stack(
+                [
+                    torch.linspace(min_y[i], max_y[i], num_rays)
+                    for i in range(len(min_y))
+                ],
+                dim=0,
+            )
+
+            o1 = torch.zeros([len(hfovs), num_rays, 3])
+            o1[:, :, 2] = depths[0]
+
+            o2_linspace = torch.stack(
+                [
+                    torch.linspace(-delta[i], delta[i], num_rays)
+                    for i in range(len(min_y))
+                ],
+                dim=0,
+            )
+
+            o2 = torch.zeros([len(hfovs), num_rays, 3])
+            o2[:, :, 2] = pupilz
+
+            if plane == "sagittal":
+                o1[:, :, 0] = o1_linspace
+                o2[:, :, 0] = o2_linspace
+            else:
+                o1[:, :, 1] = o1_linspace
+                o2[:, :, 1] = o2_linspace
+
+            # Trace until the aperture
+            ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
+            inc_ray = ray.clone()
+            ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx + 1)))
+
+            # Look for the ray that is closest to the optical axis
+            if plane == "sagittal":
+                _, center_idx = torch.min(torch.abs(ray.o[..., 0]), dim=1)
+                chief_ray_o[1:, ...] = inc_ray.o[
+                    torch.arange(len(hfovs)), center_idx.long(), ...
+                ]
+                chief_ray_d[1:, ...] = torch.stack(
+                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+            else:
+                _, center_idx = torch.min(torch.abs(ray.o[..., 1]), dim=1)
+                chief_ray_o[1:, ...] = inc_ray.o[
+                    torch.arange(len(hfovs)), center_idx.long(), ...
+                ]
+                chief_ray_d[1:, ...] = torch.stack(
+                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    dim=-1,
+                )
+
+        return chief_ray_o, chief_ray_d

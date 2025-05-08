@@ -17,6 +17,9 @@ from deeplens.optics.ray import Ray
 
 
 class GeoLensVis:
+    # ====================================================================================
+    # Ray sampling functions for 2D layout
+    # ====================================================================================
     @torch.no_grad()
     def sample_parallel_2D(
         self,
@@ -143,6 +146,9 @@ class GeoLensVis:
         ray.prop_to(depth)
         return ray
 
+    # ====================================================================================
+    # Lens 2D layout
+    # ====================================================================================
     def draw_layout(
         self,
         filename,
@@ -167,11 +173,16 @@ class GeoLensVis:
 
         # Lens title
         if lens_title is None:
+            eff_foclen = self.foclen
+            eq_foclen = self.calc_eqfl()
+            fov_deg = 2 * self.hfov * 180 / torch.pi
+
             if self.aper_idx is not None:
-                fnum = self.foclen / self.calc_entrance_pupil()[1] / 2
-                lens_title = f"FoV{round(2 * self.hfov * 180 / torch.pi, 1)}({int(self.calc_eqfl())}mm EQFL)_F/{round(fnum, 2)}_DIAG{round(self.r_sensor * 2, 2)}mm_FFL{round(self.foclen, 2)}mm"
+                _, pupil_r = self.calc_entrance_pupil()
+                fnum = eff_foclen / pupil_r / 2
+                lens_title = f"FoV{round(fov_deg, 1)}({int(eq_foclen)}mm EqFocLen) - F/{round(fnum, 2)} - SensorDiag{round(self.r_sensor * 2, 2)}mm - FocLen{round(eff_foclen, 2)}mm"
             else:
-                lens_title = f"FoV{round(2 * self.hfov * 180 / torch.pi, 1)}({int(self.calc_eqfl())}mm EQFL)_DIAG{round(self.r_sensor * 2, 2)}mm_FFL{round(self.foclen, 2)}mm"
+                lens_title = f"FoV{round(fov_deg, 1)}({int(eq_foclen)}mm EqFocLen) - SensorDiag{round(self.r_sensor * 2, 2)}mm - FocLen{round(eff_foclen, 2)}mm"
 
         # Draw lens layout
         if not multi_plot:
@@ -206,7 +217,7 @@ class GeoLensVis:
                 )
 
             ax.axis("off")
-            ax.set_title(lens_title, fontsize=10)
+            ax.set_title(lens_title, fontsize=8)
             if filename.endswith(".png"):
                 fig.savefig(filename, format="png", dpi=600)
             else:
