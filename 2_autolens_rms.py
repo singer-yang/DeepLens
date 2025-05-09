@@ -19,8 +19,6 @@ from datetime import datetime
 import torch
 import yaml
 from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup
-
 
 from deeplens.geolens import GeoLens
 from deeplens.geolens_utils import create_lens
@@ -102,12 +100,12 @@ def curriculum_design(
 
     # Optimizer
     optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer, num_warmup_steps=200, num_training_steps=iterations
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
 
     # Training loop
-    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss_rms": 0})
+    pbar = tqdm(
+        total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0}
+    )
     for i in range(iterations + 1):
         # =======================================
         # Evaluate the lens
@@ -187,7 +185,8 @@ def curriculum_design(
         loss_rms = sum(loss_rms) / len(loss_rms)
 
         # Add lens design constraint
-        L_total = loss_rms + 0.1 * self.loss_reg()
+        loss_reg = self.loss_reg()
+        L_total = loss_rms + 0.1 * loss_reg
 
         # Gradient-based optimization
         optimizer.zero_grad()
@@ -195,7 +194,7 @@ def curriculum_design(
         optimizer.step()
         scheduler.step()
 
-        pbar.set_postfix(loss_rms=loss_rms.item())
+        pbar.set_postfix(loss_rms=loss_rms.item(), loss_reg=loss_reg.item())
         pbar.update(1)
 
     pbar.close()
@@ -232,7 +231,7 @@ if __name__ == "__main__":
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=5000,
+        iterations=3000,
         test_per_iter=50,
         optim_mat=True,
         match_mat=False,

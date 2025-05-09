@@ -1929,7 +1929,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 self.surfaces[i].r = min(max_height_expand, max_height_allowed)
             else:
                 print(f"No valid rays for Surf {i}, do not prune.")
-                max_height_expand = self.surfaces[i].r.item() * (1 + expand_factor)
+                max_height_expand = self.surfaces[i].r * (1 + expand_factor)
                 max_height_value_range = self.surfaces[i].max_height()
                 self.surfaces[i].r = min(max_height_expand, max_height_value_range)
 
