@@ -85,7 +85,7 @@ def curriculum_design(
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
-    num_grid = 9
+    num_grid = 21
     spp = 512
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
@@ -233,9 +233,10 @@ if __name__ == "__main__":
         decay=float(args["decay"]),
         iterations=3000,
         test_per_iter=50,
-        optim_mat=True,
+        optim_mat=False,
         match_mat=False,
         shape_control=True,
+        sample_more_off_axis=True,
         result_dir=args["result_dir"],
     )
 
@@ -243,12 +244,12 @@ if __name__ == "__main__":
     lens.optimize(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=5000,
+        iterations=3000,
         centroid=False,
-        importance_sampling=True,
-        optim_mat=True,
+        optim_mat=False,
         match_mat=False,
         shape_control=True,
+        sample_more_off_axis=True,
         result_dir=args["result_dir"],
     )
 

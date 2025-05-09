@@ -260,17 +260,14 @@ class Aspheric(Surface):
     # Optimization
     # =======================================
     def get_optimizer_params(
-        self, lr=[1e-4, 1e-4, 1e-1, 1e-2], decay=0.01, optim_mat=False
+        self, lr=[1e-3, 1e-4, 1e-1, 1e-4], decay=0.001, optim_mat=False
     ):
         """Get optimizer parameters for different parameters.
 
         Args:
-            lr (list, optional): learning rates for c, d, k, ai. Defaults to [1e-4, 1e-4, 1e-1, 1e-4].
-            decay (float, optional): decay rate for ai. Defaults to 0.1.
+            lr (list, optional): learning rates for c, d, k, ai. Defaults to [1e-3, 1e-4, 1e-1, 1e-4].
+            decay (float, optional): decay rate for ai. Defaults to 0.01.
         """
-        if isinstance(lr, float):
-            lr = [lr, lr, lr * 1e3, lr]
-
         params = []
         if lr[0] > 0 and self.c != 0:
             self.c.requires_grad_(True)
