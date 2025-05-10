@@ -166,14 +166,15 @@ def curriculum_design(
             # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
 
             # Weight mask (non-differentiable), shape of [num_grid, num_grid]
-            with torch.no_grad():
-                weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
-                weight_mask /= ray_ra.sum(-1) + EPSILON
-                weight_mask = weight_mask.sqrt()
-                weight_mask /= weight_mask.mean()
+            if wv_idx == 0:
+                with torch.no_grad():
+                    weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
+                    weight_mask /= ray_ra.sum(-1) + EPSILON
+                    weight_mask = weight_mask.sqrt()
+                    weight_mask /= weight_mask.mean()
 
             # Loss on rms error, shape of [num_grid, num_grid]
-            l_rms = ((ray_err**2).sum(-1).sqrt() * ray_ra).sum(-1)
+            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
             l_rms /= ray_ra.sum(-1) + EPSILON
 
             # Weighted loss
@@ -186,7 +187,8 @@ def curriculum_design(
 
         # Add lens design constraint
         loss_reg = self.loss_reg()
-        L_total = loss_rms + 0.1 * loss_reg
+        w_reg = 0.05
+        L_total = loss_rms + w_reg * loss_reg
 
         # Gradient-based optimization
         optimizer.zero_grad()
