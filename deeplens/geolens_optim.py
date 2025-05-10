@@ -53,7 +53,7 @@ class GeoLensOptim:
             self.flange_min = 0.5
             self.flange_max = 3.0
 
-            self.sag_max = 0.8
+            self.sag_max = 1.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
         else:
@@ -66,7 +66,7 @@ class GeoLensOptim:
             self.flange_min = 0.5
             self.flange_max = 50.0 #float("inf")
 
-            self.sag_max = 8.0
+            self.sag_max = 10.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
 
@@ -79,23 +79,25 @@ class GeoLensOptim:
 
         if self.is_cellphone:
             loss_intersec = self.loss_self_intersec()
-            # loss_surf = self.loss_surface()
+            loss_surf = self.loss_surface()
             # loss_angle = self.loss_ray_angle()
 
             w_focus = 2.0 if w_focus is None else w_focus
             loss_reg = (
                 w_focus * loss_focus + 1.0 * loss_intersec 
-                # + 1.0 * loss_surf + 0.1 * loss_angle
+                + 1.0 * loss_surf 
+                # + 0.1 * loss_angle
             )
         else:
             loss_intersec = self.loss_self_intersec()
-            # loss_surf = self.loss_surface()
+            loss_surf = self.loss_surface()
             # loss_angle = self.loss_ray_angle()
 
             w_focus = 5.0 if w_focus is None else w_focus
             loss_reg = (
                 w_focus * loss_focus + 1.0 * loss_intersec 
-                # + 1.0 * loss_surf + 0.05 * loss_angle
+                + 1.0 * loss_surf 
+                # + 0.05 * loss_angle
             )
 
         return loss_reg
@@ -262,16 +264,6 @@ class GeoLensOptim:
 
     #     return -loss
 
-    # def loss_fov(self, depth=DEPTH):
-    #     """Trace rays from full FoV and converge them to the edge of the sensor. This loss term can constrain the FoV of the lens."""
-    #     raise NotImplementedError("Need to check this function.")
-    #     ray = self.sample_point_source_2D(depth=depth, num_rays=7, entrance_pupil=True)
-    #     ray = self.trace2sensor(ray)
-    #     loss = (
-    #         (ray.o[:, 0] * ray.ra).sum() / (ray.ra.sum() + EPSILON) - self.r_sensor
-    #     ).abs()
-    #     return loss
-
     def loss_surface(self):
         """Penalize surface to prevent surface from being too curved.
 
@@ -289,15 +281,15 @@ class GeoLensOptim:
 
             # Sag
             sag_ls = self.surfaces[i].sag(x_ls, y_ls)
-            sag_max = sag_ls.max() - sag_ls.min()
+            sag_max = sag_ls.abs().max()
             if sag_max > sag_max_allowed:
-                loss += 10 * sag_max
+                loss += sag_max
 
-            # 1st-order derivative
-            grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
-            grad_max = grad_ls.abs().max()
-            if grad_max > grad_max_allowed:
-                loss += 10 * grad_max
+            # # 1st-order derivative
+            # grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
+            # grad_max = grad_ls.abs().max()
+            # if grad_max > grad_max_allowed:
+            #     loss += 10 * grad_max
 
             # # 2nd-order derivative
             # grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
@@ -413,8 +405,8 @@ class GeoLensOptim:
         """
         # Preparation
         depth = DEPTH
-        num_grid = 31
-        spp = 1024
+        num_grid = 41
+        spp = 512
 
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
@@ -483,9 +475,9 @@ class GeoLensOptim:
 
             # ===> Optimize lens by minimizing RMS
             loss_rms_ls = []
-            for j, wv in enumerate(WAVE_RGB):
+            for wv_idx, wv in enumerate(WAVE_RGB):
                 # Ray tracing to sensor, [num_grid, num_grid, num_rays, 3]
-                ray = rays_backup[j].clone()
+                ray = rays_backup[wv_idx].clone()
                 ray = self.trace2sensor(ray)
 
                 # Ray error to center and valid mask
@@ -498,7 +490,7 @@ class GeoLensOptim:
                 # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
 
                 # Weight mask, shape of [num_grid, num_grid]
-                if j == 0:
+                if wv_idx == 0:
                     with torch.no_grad():
                         weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
                         weight_mask /= ray_ra.sum(-1) + EPSILON
@@ -506,7 +498,7 @@ class GeoLensOptim:
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
-                l_rms = ((ray_err**2).sum(-1).sqrt() * ray_ra).sum(-1)
+                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
                 l_rms /= ray_ra.sum(-1) + EPSILON
 
                 # Weighted loss

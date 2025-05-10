@@ -1952,8 +1952,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
             # If the first surface is concave, use the maximum negative sag.
             aper_r = self.surfaces[aper_idx].r
-            # sag1 = -self.surfaces[aper_idx + 1].surface(aper_r, 0).item()
-            sag1 = -self.surfaces[aper_idx + 1].sag(aper_r, 0).item()
+            sag1 = -self.surfaces[aper_idx + 1].surface_sag(aper_r, 0)
             if sag1 > 0:
                 d_aper += sag1
 
