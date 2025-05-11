@@ -224,6 +224,7 @@ class Surface(DeepObj):
             n = -n
 
         # Reflect
+        ray.is_forward = not ray.is_forward
         cos_alpha = -(n * ray.d).sum(-1)
         new_d = ray.d + 2 * cos_alpha.unsqueeze(-1) * n
         new_d = F.normalize(new_d, p=2, dim=-1)
