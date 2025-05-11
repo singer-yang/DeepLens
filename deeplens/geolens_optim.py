@@ -50,10 +50,10 @@ class GeoLensOptim:
             self.dist_max = 0.6
             self.thickness_min = 0.2
             self.thickness_max = 1.5
-            self.flange_min = 0.5
+            self.flange_min = 0.25
             self.flange_max = 3.0
 
-            self.sag_max = 1.0
+            self.sag_max = 2.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
         else:

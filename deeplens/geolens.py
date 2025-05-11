@@ -115,8 +115,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """After loading lens, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
         self.find_aperture()
-        self.hfov = self.calc_hfov()
         self.foclen = self.calc_efl()
+        self.hfov = self.calc_hfov()
         self.fnum = self.calc_fnum()
 
         # Initialize lens design constraints (edge thickness, etc.)
@@ -1948,7 +1948,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Rule 2: Fix aperture distance to the first surface if aperture in the front.
         if aper_idx == 0:
-            d_aper = 0.1 if self.is_cellphone else 2.0
+            d_aper = 0.05 if self.is_cellphone else 1.0
 
             # If the first surface is concave, use the maximum negative sag.
             aper_r = self.surfaces[aper_idx].r
