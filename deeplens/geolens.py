@@ -2357,7 +2357,10 @@ class GeoLens(Lens):
             d_aper = 0.1 if self.is_cellphone else 2.0
 
             # If the first surface is concave, use the maximum negative sag.
-            aper_r = self.surfaces[aper_idx].r
+            # Convert float to tensor to avoid error
+            aper_r = torch.tensor(self.surfaces[aper_idx].r, device=self.device)
+            y = torch.tensor(0.0, device=self.device)
+
             # sag1 = -self.surfaces[aper_idx + 1].surface(aper_r, 0).item()
             sag1 = -self.surfaces[aper_idx + 1].sag(aper_r, 0).item()
             if sag1 > 0:
