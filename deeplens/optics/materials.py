@@ -161,6 +161,7 @@ class Material(DeepObj):
             # Cauchy equation
             # https://en.wikipedia.org/wiki/Cauchy%27s_equation
             n = self.A + self.B / (wvln * 1e3) ** 2
+            n = torch.tensor(n).item()
 
         elif self.dispersion == "interp":
             ref_wvlns = self.ref_wvlns
@@ -176,6 +177,7 @@ class Material(DeepObj):
             n = ref_n[idx1] + (ref_n[idx2] - ref_n[idx1]) / (
                 ref_wvlns[idx2] - ref_wvlns[idx1]
             ) * (wvln - ref_wvlns[idx1])
+            n = torch.tensor(n).item()
 
         elif self.dispersion == "optimizable":
             # Cauchy's equation, calculate (A, B) on the fly
@@ -183,6 +185,7 @@ class Material(DeepObj):
             A = self.n - B * 1 / 0.589**2
 
             n = A + B / wvln**2
+            n = torch.tensor(n).item()
 
         else:
             raise NotImplementedError
