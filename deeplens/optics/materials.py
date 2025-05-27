@@ -134,36 +134,35 @@ class Material(DeepObj):
 
     def ior(self, wvln):
         """Compute the refractive index at given wvln."""
-        assert wvln > 0.1 and wvln < 1, "Wavelength should be in [um]."
+        # assert wvln > 0.1 and wvln < 1, "Wavelength should be in [um]."
+        assert wvln.max() > 0.1 and wvln.min() < 10, "Wavelength should be in [um]."
 
         if self.dispersion == "sellmeier":
-            # Sellmeier equation
-            # https://en.wikipedia.org/wiki/Sellmeier_equation
+            # Sellmeier equation: https://en.wikipedia.org/wiki/Sellmeier_equation
             n2 = (
                 1
                 + self.k1 * wvln**2 / (wvln**2 - self.l1)
                 + self.k2 * wvln**2 / (wvln**2 - self.l2)
                 + self.k3 * wvln**2 / (wvln**2 - self.l3)
             )
-            n = torch.sqrt(torch.tensor(n2)).item()
+            n = torch.sqrt(n2)
 
         elif self.dispersion == "schott":
-            # High precision computation (by MATLAB), writing dispersion function seperately will introduce errors
+            # Schott equation: https://johnloomis.org/eop501/notes/matlab/sect1/schott.html
             ws = wvln**2
             n2 = (
                 self.a0
                 + self.a1 * ws
                 + (self.a2 + (self.a3 + (self.a4 + self.a5 / ws) / ws) / ws) / ws
             )
-            n = torch.sqrt(torch.tensor(n2)).item()
+            n = torch.sqrt(n2)
 
         elif self.dispersion == "cauchy":
-            # Cauchy equation
-            # https://en.wikipedia.org/wiki/Cauchy%27s_equation
+            # Cauchy equation: https://en.wikipedia.org/wiki/Cauchy%27s_equation
             n = self.A + self.B / (wvln * 1e3) ** 2
-            n = torch.tensor(n).item()
 
         elif self.dispersion == "interp":
+            raise Warning("Interpolation is not tested after changing wvln type from float to tensor.")
             ref_wvlns = self.ref_wvlns
             ref_n = self.ref_n
 
@@ -177,15 +176,12 @@ class Material(DeepObj):
             n = ref_n[idx1] + (ref_n[idx2] - ref_n[idx1]) / (
                 ref_wvlns[idx2] - ref_wvlns[idx1]
             ) * (wvln - ref_wvlns[idx1])
-            n = torch.tensor(n).item()
 
         elif self.dispersion == "optimizable":
             # Cauchy's equation, calculate (A, B) on the fly
             B = (self.n - 1) / self.V / (1 / 0.486**2 - 1 / 0.656**2)
             A = self.n - B * 1 / 0.589**2
-
             n = A + B / wvln**2
-            n = torch.tensor(n).item()
 
         else:
             raise NotImplementedError
@@ -198,7 +194,7 @@ class Material(DeepObj):
         This function is called when we want to use a custom material.
         """
         if params is None:
-            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = 0, 0, 0, 0, 0, 0
+            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         else:
             self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = params
 

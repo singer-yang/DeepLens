@@ -86,8 +86,7 @@ class Surface(DeepObj):
                 "Precision problem caused by long propagation distance."
             )
             new_opl = ray.opl + n * t
-            new_opl[~valid] = ray.opl[~valid]
-            ray.opl = new_opl
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
         return ray
 
@@ -179,22 +178,22 @@ class Surface(DeepObj):
             ray (Ray): refractive ray.
         """
         # Compute normal vectors
-        n_vec = self.normal_vec(ray)
+        normal_vec = self.normal_vec(ray)
         if ray.is_forward:
-            n_vec = -n_vec
+            normal_vec = -normal_vec
 
         # Compute refraction according to Snell's law
-        cosi = torch.sum(ray.d * n_vec, axis=-1)  # n * i
+        cosi = torch.sum(ray.d * normal_vec, axis=-1).unsqueeze(-1)  # n * i
 
-        # Total internal reflection
-        valid = (n**2 * (1 - cosi**2) < 1) & (ray.valid > 0)
+        # Total internal reflection. Shape [N] now, maybe broadcasted to [N, 1] in the future.
+        valid = (n**2 * (1 - cosi**2) < 1).squeeze(-1) & (ray.valid > 0)
 
         sr = torch.sqrt(
-            1 - n**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
+            1 - n**2 * (1 - cosi ** 2) * valid.unsqueeze(-1) + EPSILON
         )  # square root
 
         # First term: vertical. Second term: parallel. Already normalized if both n and ray.d are normalized.
-        new_d = sr * n_vec + n * (ray.d - cosi.unsqueeze(-1) * n_vec)
+        new_d = sr * normal_vec + n * (ray.d - cosi * normal_vec)
 
         # Update ray direction
         # new_d[~valid] = ray.d[~valid]
@@ -202,7 +201,6 @@ class Surface(DeepObj):
 
         # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
-        # new_obliq[~valid] = ray.obliq[~valid]
         ray.obliq = torch.where(valid.unsqueeze(-1), new_obliq, ray.obliq)
 
         # Update ray ra
