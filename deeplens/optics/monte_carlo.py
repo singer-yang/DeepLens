@@ -21,12 +21,12 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
     """
     assert len(ray.o.shape) == 3, "Only support [N, spp, 3] shaped rays for now."
     points = -ray.o[..., :2]  # shape [N, spp, 2]. flip points.
-    ra = ray.ra  # shape [N, spp]
+    valid = ray.valid  # shape [N, spp]
 
     # Points shift relative to center
     if pointc is None:
         # Use ray spot center as PSF/Wavefront center if not specified
-        pointc = (points * ra.unsqueeze(-1)).sum(-2) / ra.unsqueeze(-1).sum(-2).add(
+        pointc = (points * valid.unsqueeze(-1)).sum(-2) / valid.unsqueeze(-1).sum(-2).add(
             EPSILON
         )
     points_shift = points - pointc.unsqueeze(-2).repeat(1, points.shape[-2], 1)
@@ -36,12 +36,12 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
         -(ks / 2 - 0.5) * ps,
         (ks / 2 - 0.5) * ps,
     ]
-    ra = (
-        ra
+    valid = (
+        valid
         * (points_shift[..., 0].abs() < (field_range[1] - 0.001 * ps))
         * (points_shift[..., 1].abs() < (field_range[1] - 0.001 * ps))
     )  # shape [N, spp]
-    points_shift = points_shift * ra.unsqueeze(-1)
+    points_shift = points_shift * valid.unsqueeze(-1)
 
     # Monte Carlo integral
     if not coherent:
@@ -50,12 +50,12 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
         for i in range(points.shape[0]):
             # Iterate over N points
             points_shift0 = points_shift[i]  # [spp, 2]
-            ra0 = ra[i]  # [spp]
+            valid0 = valid[i]  # [spp]
             amp = ray.d[i, :, 2] ** 2  # [spp]
 
             field0 = assign_points_to_pixels(
                 points=points_shift0,
-                mask=ra0,
+                mask=valid0,
                 ks=ks,
                 x_range=field_range,
                 y_range=field_range,
@@ -71,7 +71,7 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
         for i in range(points.shape[0]):
             # Iterate over N points
             points_shift0 = points_shift[i]  # [spp, 2]
-            ra0 = ra[i]  # [spp]
+            valid0 = valid[i]  # [spp]
             amp = ray.d[i, :, 2]  # [spp]
             opl = ray.opl[i]  # [spp]
             phase = torch.fmod((opl - opl.min()) / (ray.wvln * 1e-3), 1) * (
@@ -80,7 +80,7 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
 
             field_u = assign_points_to_pixels(
                 points=points_shift0,
-                mask=ra0,
+                mask=valid0,
                 ks=ks,
                 x_range=field_range,
                 y_range=field_range,
@@ -314,7 +314,7 @@ def backward_integral(
             out_img = img[..., idx_i, idx_j]
 
         # Monte-Carlo integration
-        output = (torch.sum(out_img * ray.ra * energy_correction, -3) + 1e-9) / (
-            torch.sum(ray.ra, -3) + 1e-6
+        output = (torch.sum(out_img * ray.valid * energy_correction, -3) + 1e-9) / (
+            torch.sum(ray.valid, -3) + 1e-6
         )
         return output
