@@ -186,4 +186,5 @@ dependencies:
       # additional packages for 3d view
       - pyvista==0.44.2
       - pyvistaqt==0.11.2
+
 prefix: /home/yangx0i/anaconda3/envs/deeplens
