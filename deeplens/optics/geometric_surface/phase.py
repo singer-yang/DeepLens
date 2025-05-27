@@ -39,7 +39,7 @@ class Phase(Surface):
         self.diffraction = False
         self.diffraction_order = 1
         print(
-            "A Diffractive_GEO is created, but ray-tracing diffraction is not activated."
+            "A Phase diffractive surface is created, but diffraction is not activated."
         )
 
         self.to(device)
