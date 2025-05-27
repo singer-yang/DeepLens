@@ -30,7 +30,7 @@ from .optics.basics import (
     WAVE_RGB,
 )
 from .optics.monte_carlo import forward_integral
-from .optics.geometric_surface import Diffractive_GEO
+from .optics.geometric_surface import Phase
 from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from .optics.wave import AngularSpectrumMethod
 from .optics.utils import diff_float
@@ -93,7 +93,7 @@ class HybridLens(Lens):
 
             # Add a geometric DOE surface to GeoLens
             r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
-            geolens.surfaces.append(Diffractive_GEO(r=r_doe, d=doe.d))
+            geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
             self.geolens = geolens
 
         # Update hybrid lens sensor resolution and pixel size
@@ -242,7 +242,7 @@ class HybridLens(Lens):
             )
 
         # Check lens last surface
-        assert isinstance(self.geolens.surfaces[-1], Diffractive_GEO), (
+        assert isinstance(self.geolens.surfaces[-1], Phase), (
             "The last lens surface should be a DOE."
         )
         geolens, doe = self.geolens, self.doe

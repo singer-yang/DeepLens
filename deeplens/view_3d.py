@@ -16,7 +16,7 @@ from .optics.geometric_surface import (
     Aperture,
     Aspheric,
     Cubic,
-    Diffractive_GEO,
+    Phase,
     Plane,
     Spheric,
     ThinLens,
