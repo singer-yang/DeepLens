@@ -30,9 +30,9 @@ class Ray(DeepObj):
         self.d = F.normalize(self.d, p=2, dim=-1)
         
         # Auxiliary parameters
-        self.ra = torch.ones(o.shape[:-1], device=device)
-        self.valid = self.ra.clone()
-        self.en = torch.ones_like(self.ra).unsqueeze(-1)
+        # self.ra = torch.ones(o.shape[:-1], device=device)
+        self.valid = torch.ones(o.shape[:-1], device=device)
+        self.en = torch.ones_like(self.valid).unsqueeze(-1)
         self.obliq = torch.ones_like(self.en)
 
         # Coherent ray tracing (initialize coherent light)
@@ -72,7 +72,7 @@ class Ray(DeepObj):
         Returns:
             torch.Tensor: Centroid of the ray, shape (..., 3)
         """
-        return (self.o * self.ra.unsqueeze(-1)).sum(-2) / self.ra.sum(-1).add(
+        return (self.o * self.valid.unsqueeze(-1)).sum(-2) / self.valid.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
     
@@ -93,7 +93,7 @@ class Ray(DeepObj):
         
         # Calculate RMS error for each region
         rms_error = ((self.o[..., :2] - center_ref[..., :2])**2).sum(-1)
-        rms_error = (rms_error * self.ra).sum(-1) / (self.ra.sum(-1) + EPSILON)
+        rms_error = (rms_error * self.valid).sum(-1) / (self.valid.sum(-1) + EPSILON)
         rms_error = rms_error.sqrt()
         
         # Average RMS error
@@ -117,7 +117,6 @@ class Ray(DeepObj):
         """
         self.o = self.o.squeeze(dim)
         self.d = self.d.squeeze(dim)
-        self.ra = self.ra.squeeze(dim)
         self.valid = self.valid.squeeze(dim)
         self.en = self.en.squeeze(dim)
         self.opl = self.opl.squeeze(dim)
