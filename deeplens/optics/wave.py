@@ -379,10 +379,10 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
     )
     square_root = torch.sqrt(1 - wvln_mm**2 * (fx**2 + fy**2))
     H = torch.exp(1j * k * z * square_root)
-    H = fftshift(H)
+    H = ifftshift(H)
 
     # https://pytorch.org/docs/stable/generated/torch.fft.fftshift.html#torch.fft.fftshift
-    u = ifftshift(ifft2(fft2(fftshift(u)) * H))
+    u = ifft2(fft2(u) * H)
 
     # Remove padding
     if padding:
