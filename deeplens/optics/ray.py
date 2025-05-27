@@ -34,13 +34,11 @@ class Ray(DeepObj):
         self.valid = torch.ones(o.shape[:-1], device=device)
         self.en = torch.ones_like(self.valid).unsqueeze(-1)
         self.obliq = torch.ones_like(self.en)
+        self.is_forward = self.d[..., 2].unsqueeze(-1) > 0
 
         # Coherent ray tracing (initialize coherent light)
         self.coherent = coherent  # bool
         self.opl = torch.zeros_like(self.en)
-
-        # Post computation
-        self.is_forward = bool((self.d[..., 2] > 0).any())
 
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
@@ -122,4 +120,5 @@ class Ray(DeepObj):
         self.en = self.en.squeeze(dim)
         self.opl = self.opl.squeeze(dim)
         self.obliq = self.obliq.squeeze(dim)
+        self.is_forward = self.is_forward.squeeze(dim)
         return self

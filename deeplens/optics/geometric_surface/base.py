@@ -163,28 +163,25 @@ class Surface(DeepObj):
 
     # @torch.compile()
     def refract(self, ray, n):
-        """Calculate refractive ray according to Snell's law.
+        """Calculate refractive ray according to Snell's law. 
+        
+        Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
-            ray (Ray): input ray.
+            ray (Ray): incident ray.
             n (float): relevant refraction coefficient, n = n_i / n_t
 
         Returns:
             ray (Ray): refractive ray.
 
-        Snell's law (surface normal n defined along the positive z axis):
-            [1] https://physics.stackexchange.com/a/436252/104805
-            [2] https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
-            We follow the first link and normal vector should have the same direction with incident ray(veci), but by default it points to left. We use the second link to check.
-            [3] https://en.wikipedia.org/wiki/Snell%27s_law
+        References:
+            [1] https://en.wikipedia.org/wiki/Snell%27s_law
         """
         # Compute normal vectors
         normal_vec = self.normal_vec(ray)
-        if ray.is_forward:
-            normal_vec = -normal_vec
 
         # Compute refraction according to Snell's law, normal_vec * ray_d
-        cosi = torch.sum(ray.d * normal_vec, axis=-1).unsqueeze(-1)
+        cosi = (-normal_vec * ray.d).sum(-1).unsqueeze(-1)
 
         # Total internal reflection. Shape [N] now, maybe broadcasted to [N, 1] in the future.
         valid = (n**2 * (1 - cosi**2) < 1).squeeze(-1) & (ray.valid > 0)
@@ -193,20 +190,22 @@ class Surface(DeepObj):
         sr = torch.sqrt(1 - n**2 * (1 - cosi ** 2) * valid.unsqueeze(-1) + EPSILON)
 
         # Update ray direction. Already normalized if both n and ray.d are normalized.
-        new_d = sr * normal_vec + n * (ray.d - cosi * normal_vec)
+        new_d = n * ray.d + (n * cosi - sr) * normal_vec
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
         ray.obliq = torch.where(valid.unsqueeze(-1), new_obliq, ray.obliq)
 
-        # Update ray ra
+        # Update ray valid mask
         ray.valid = ray.valid * valid
 
         return ray
 
     def reflect(self, ray):
         """Calculate reflected ray.
+
+        Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
             ray (Ray): input ray.
@@ -215,14 +214,12 @@ class Surface(DeepObj):
             ray (Ray): reflected ray.
         """
         # Compute surface normal vectors
-        n = self.normal_vec(ray)
-        if ray.is_forward:
-            n = -n
+        normal_vec = self.normal_vec(ray)
 
         # Reflect
         ray.is_forward = not ray.is_forward
-        cos_alpha = -(n * ray.d).sum(-1)
-        new_d = ray.d + 2 * cos_alpha.unsqueeze(-1) * n
+        cos_alpha = -(normal_vec * ray.d).sum(-1).unsqueeze(-1)
+        new_d = ray.d + 2 * cos_alpha * normal_vec
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
@@ -232,7 +229,9 @@ class Surface(DeepObj):
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at the intersection point. Normal vector points to the left by default.
+        """Calculate surface normal vector at the intersection point. 
+        
+        Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
             ray (Ray): input ray.
@@ -244,6 +243,7 @@ class Surface(DeepObj):
         nx, ny, nz = self.dfdxyz(x, y)
         n_vec = torch.stack((nx, ny, nz), axis=-1)
         n_vec = F.normalize(n_vec, p=2, dim=-1)
+        n_vec = torch.where(ray.is_forward, n_vec, -n_vec)
         return n_vec
 
     def to_local_coord(self, ray):
