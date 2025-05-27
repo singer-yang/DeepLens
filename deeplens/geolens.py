@@ -520,7 +520,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if lens_range is None:
             lens_range = range(0, len(self.surfaces))
 
-        if ray.is_forward:
+        if ray.is_forward.any():
             ray_out, ray_o_record = self.forward_tracing(ray, lens_range, record=record)
         else:
             ray_out, ray_o_record = self.backward_tracing(
