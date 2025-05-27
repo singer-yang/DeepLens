@@ -17,7 +17,7 @@ class Spheric(Surface):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        if "roc" in surf_dict:
+        if "roc" in surf_dict and surf_dict["roc"] != 0:
             c = 1 / surf_dict["roc"]
         else:
             c = surf_dict["c"]

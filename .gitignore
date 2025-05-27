@@ -15,3 +15,7 @@ debug.py
 
 
 lenses/pancake/
+
+
+# add my own files
+*.ipynb

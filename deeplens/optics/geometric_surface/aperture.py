@@ -87,6 +87,18 @@ class Aperture(Surface):
 
         return line
 
+    # =========================================
+    # Optimization
+    # =========================================
+    def get_optimizer_params(self, lr=[0.001, 0.001], optim_mat=False):
+        """Activate gradient computation for d and return optimizer parameters."""
+        self.d.requires_grad_(True)
+
+        params = []
+        params.append({"params": [self.d], "lr": lr[1]})
+
+        return params
+
     # =======================================
     # IO
     # =======================================

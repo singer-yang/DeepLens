@@ -1,6 +1,13 @@
 """Basic lens class.
 
 When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and re-write core functions.
+
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import matplotlib.pyplot as plt
@@ -10,7 +17,9 @@ from torchvision.utils import make_grid, save_image
 from .optics import (
     BLUE_RESPONSE,
     DEPTH,
+    EPSILON,
     GREEN_RESPONSE,
+    PSF_KS,
     RED_RESPONSE,
     WAVE_BLUE,
     WAVE_BOARD_BAND,
@@ -20,7 +29,7 @@ from .optics import (
     DeepObj,
     init_device,
 )
-from .optics.render_psf import conv_psf_map, conv_psf
+from .optics.render_psf import conv_psf, conv_psf_map
 
 
 class Lens(DeepObj):
@@ -275,7 +284,7 @@ class Lens(DeepObj):
     def draw_psf_map(
         self,
         grid=(7, 7),
-        ks=101,
+        ks=PSF_KS,
         depth=DEPTH,
         log_scale=False,
         save_name="./psf_map.png",
@@ -349,6 +358,31 @@ class Lens(DeepObj):
         plt.tight_layout(pad=0)
         plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
+
+    @torch.no_grad()
+    def draw_psf_radial(
+        self, M=3, depth=DEPTH, ks=PSF_KS, log_scale=False, save_name="./psf_radial.png"
+    ):
+        """Draw radial PSF (45 deg). Will draw M PSFs, each of size ks x ks."""
+        x = torch.linspace(0, 1, M)
+        y = torch.linspace(0, 1, M)
+        z = torch.full_like(x, depth)
+        points = torch.stack((x, y, z), dim=-1)
+
+        psfs = []
+        for i in range(M):
+            # Scale PSF for a better visualization
+            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=4096)
+            psf /= psf.max()
+
+            if log_scale:
+                psf = torch.log(psf + EPSILON)
+                psf = (psf - psf.min()) / (psf.max() - psf.min())
+
+            psfs.append(psf)
+
+        psf_grid = make_grid(psfs, nrow=M, padding=1, pad_value=0.0)
+        save_image(psf_grid, save_name, normalize=True)
 
     # ===========================================
     # Image simulation-ralated functions
@@ -469,13 +503,6 @@ class Lens(DeepObj):
         psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
         img_render = conv_psf_map(img_obj, psf_map)
         return img_render
-
-    # ===========================================
-    # Visualization-ralated functions
-    # ===========================================
-    def draw_layout(self):
-        """Draw lens layout."""
-        raise NotImplementedError
 
     # ===========================================
     # Optimization-ralated functions
