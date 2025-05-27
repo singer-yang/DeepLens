@@ -158,7 +158,7 @@ def curriculum_design(
 
             # Ray error to center and valid mask
             ray_xy = ray.o[..., :2]
-            ray_ra = ray.ra
+            ray_valid = ray.valid
             ray_err = ray_xy - center_ref
 
             # # Use only quater of rays
@@ -168,14 +168,14 @@ def curriculum_design(
             # Weight mask (non-differentiable), shape of [num_grid, num_grid]
             if wv_idx == 0:
                 with torch.no_grad():
-                    weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
-                    weight_mask /= ray_ra.sum(-1) + EPSILON
+                    weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
+                    weight_mask /= ray_valid.sum(-1) + EPSILON
                     weight_mask = weight_mask.sqrt()
                     weight_mask /= weight_mask.mean()
 
             # Loss on rms error, shape of [num_grid, num_grid]
-            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
-            l_rms /= ray_ra.sum(-1) + EPSILON
+            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+            l_rms /= ray_valid.sum(-1) + EPSILON
 
             # Weighted loss
             l_rms_weighted = (l_rms * weight_mask).sum()
