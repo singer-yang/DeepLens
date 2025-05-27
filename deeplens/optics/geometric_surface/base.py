@@ -7,13 +7,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+torch._dynamo.config.cache_size_limit = 64
+
 from ..basics import DeepObj
 from ..materials import Material
 
 # Newton's method parameters
 NEWTONS_MAXITER = 10  # maximum number of Newton iterations
-NEWTONS_TOLERANCE_TIGHT = 25e-6  # [mm], Newton method solution threshold
-NEWTONS_TOLERANCE_LOOSE = 50e-6  # [mm], Newton method solution threshold
+NEWTONS_TOLERANCE = 50 * 1e-6  # [mm], Newton method solution threshold
 NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in each Newton iteration
 
 EPSILON = 1e-9
@@ -115,7 +116,7 @@ class Surface(DeepObj):
             it = 0
             t = t0  # initial guess of t
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
-            while (torch.abs(ft) > NEWTONS_TOLERANCE_LOOSE).any() and (
+            while (torch.abs(ft) > NEWTONS_TOLERANCE).any() and (
                 it < NEWTONS_MAXITER
             ):
                 it += 1
@@ -157,14 +158,13 @@ class Surface(DeepObj):
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
-            valid = valid & (torch.abs(ft) < NEWTONS_TOLERANCE_TIGHT)
+            valid = valid & (torch.abs(ft) < NEWTONS_TOLERANCE)
 
         return t, valid
 
-    # @torch.compile()
     def refract(self, ray, n):
-        """Calculate refractive ray according to Snell's law. 
-        
+        """Calculate refractive ray according to Snell's law.
+
         Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
@@ -175,7 +175,7 @@ class Surface(DeepObj):
             ray (Ray): refractive ray.
 
         References:
-            [1] https://en.wikipedia.org/wiki/Snell%27s_law
+            [1] https://en.wikipedia.org/wiki/Snell%27s_law, "Vector form" section.
         """
         # Compute normal vectors
         normal_vec = self.normal_vec(ray)
@@ -187,7 +187,7 @@ class Surface(DeepObj):
         valid = (n**2 * (1 - cosi**2) < 1).squeeze(-1) & (ray.valid > 0)
 
         # Square root term in Snell's law
-        sr = torch.sqrt(1 - n**2 * (1 - cosi ** 2) * valid.unsqueeze(-1) + EPSILON)
+        sr = torch.sqrt(1 - n**2 * (1 - cosi**2) * valid.unsqueeze(-1) + EPSILON)
 
         # Update ray direction. Already normalized if both n and ray.d are normalized.
         new_d = n * ray.d + (n * cosi - sr) * normal_vec
@@ -208,10 +208,13 @@ class Surface(DeepObj):
         Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
-            ray (Ray): input ray.
+            ray (Ray): incident ray.
 
         Returns:
             ray (Ray): reflected ray.
+
+        References:
+            [1] https://en.wikipedia.org/wiki/Snell%27s_law, "Vector form" section.
         """
         # Compute surface normal vectors
         normal_vec = self.normal_vec(ray)
@@ -223,14 +226,13 @@ class Surface(DeepObj):
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
-        valid = ray.valid > 0
-        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
+        ray.d = torch.where(ray.valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at the intersection point. 
-        
+        """Calculate surface normal vector at the intersection point.
+
         Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
@@ -368,21 +370,16 @@ class Surface(DeepObj):
         """
         return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
 
-    def is_valid(self, x, y, r=None):
+    def is_valid(self, x, y):
         """Valid points within the data range and boundary of the surface."""
-        if r is None:
-            r = self.r
-        return self.is_within_data_range(x, y) & self.is_within_boundary(x, y, r)
+        return self.is_within_data_range(x, y) & self.is_within_boundary(x, y)
 
-    def is_within_boundary(self, x, y, r=None):
+    def is_within_boundary(self, x, y):
         """Valid points within the boundary of the surface."""
-        if r is None:
-            r = self.r
-        
-        # if self.is_square:
-        #     valid = (torch.abs(x) <= (self.w / 2)) & (torch.abs(y) <= (self.h / 2))
-        # else:
-        valid = (x**2 + y**2).sqrt() <= r
+        if self.is_square:
+            valid = (torch.abs(x) <= (self.w / 2)) & (torch.abs(y) <= (self.h / 2))
+        else:
+            valid = (x**2 + y**2).sqrt() <= self.r
 
         return valid
 

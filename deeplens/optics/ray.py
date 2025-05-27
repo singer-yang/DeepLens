@@ -40,6 +40,8 @@ class Ray(DeepObj):
         self.coherent = coherent  # bool
         self.opl = torch.zeros_like(self.en)
 
+        self.device = device
+
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
 
