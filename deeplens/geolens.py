@@ -44,7 +44,7 @@ from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
     Cubic,
-    Diffractive_GEO,
+    Phase,
     Plane,
     Spheric,
     ThinLens,
@@ -2189,7 +2189,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                     lr=lr, decay=decay, optim_mat=optim_mat
                 )
 
-            elif isinstance(surf, Diffractive_GEO):
+            elif isinstance(surf, Phase):
                 params += surf.get_optimizer_params(lr=lr[3])
 
             # elif isinstance(surf, GaussianRBF):
@@ -2254,8 +2254,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 elif surf_dict["type"] == "Cubic":
                     s = Cubic.init_from_dict(surf_dict)
 
-                elif surf_dict["type"] == "Diffractive_GEO":
-                    s = Diffractive_GEO.init_from_dict(surf_dict)
+                elif surf_dict["type"] == "Phase":
+                    s = Phase.init_from_dict(surf_dict)
 
                 # elif surf_dict["type"] == "GaussianRBF":
                 #     s = GaussianRBF.init_from_dict(surf_dict)

@@ -1,7 +1,11 @@
-"""Diffractive surfaces (Local gratings) simulated with ray tracing.
+"""Diffractive surface phase profile (metasurface or DOE).
 
-Reference:
-    https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import matplotlib.pyplot as plt
@@ -12,7 +16,13 @@ import torch.nn.functional as F
 from .base import EPSILON, Surface
 
 
-class Diffractive_GEO(Surface):
+class Phase(Surface):
+    """Phase profile for diffractive surfaces (metasurface or DOE).
+
+    Reference:
+        [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+        [2] https://optics.ansys.com/hc/en-us/articles/360042097313-Small-Scale-Metalens-Field-Propagation
+    """
     def __init__(
         self, r, d, glass="test", param_model="binary2", thickness=0.5, device="cpu"
     ):
