@@ -5,10 +5,10 @@ Reference:
 """
 
 import torch
-from .base import DOE
+from .diffractive import DiffractiveSurface
 
 
-class Fresnel(DOE):
+class Fresnel(DiffractiveSurface):
     def __init__(
         self,
         d,

@@ -498,7 +498,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         points = torch.stack((x, y, z_tensor), dim=-1)
 
         # Fix all chief rays to facilitate the design of telecentricity.
-        points[:,:,0,:2] = 0.0
+        points[..., 0, :2] = 0.0
 
         return points
 
@@ -517,6 +517,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray_final (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
+        # Manually propagate ray to a shallow depth to improve accuracy
+        if (ray.o[..., 2].min() < -1000.0).any():
+            ray = ray.prop_to(-10.0)
+
         if lens_range is None:
             lens_range = range(0, len(self.surfaces))
 
@@ -1827,17 +1831,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     # Lens operation
     # ====================================================================================
     @torch.no_grad()
-    def refocus(self, depth=float("inf")):
+    def refocus(self, foc_dist=float("inf")):
         """Refocus the lens to a depth distance by changing sensor position.
 
         Args:
-            depth (float): depth distance.
+            foc_dist (float): focal distance.
 
         Note:
             In DSLR, phase detection autofocus (PDAF) is a popular and efficient method. But here we simplify the problem by calculating the in-focus position of green light.
         """
         # Calculate in-focus sensor position
-        d_sensor_new = self.calc_foc_plane(depth=depth)
+        d_sensor_new = self.calc_foc_plane(depth=foc_dist)
 
         # Update sensor position
         assert d_sensor_new > 0, "sensor position is negative."
@@ -2220,7 +2224,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         return params
 
-    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_mat=False):
+    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_surf_range=None, optim_mat=False):
         """Get optimizers and schedulers for different lens parameters.
 
         Args:
@@ -2228,7 +2232,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             epochs (int, optional): _description_. Defaults to 100.
             ai_decay (float, optional): _description_. Defaults to 0.2.
         """
-        params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
+        params = self.get_optimizer_params(lr, decay, optim_surf_range, optim_mat)
         optimizer = torch.optim.Adam(params)
         return optimizer
 
@@ -2253,16 +2257,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
                 elif surf_dict["type"] == "Cubic":
                     s = Cubic.init_from_dict(surf_dict)
-
-                elif surf_dict["type"] == "Phase":
-                    s = Phase.init_from_dict(surf_dict)
-
+                
                 # elif surf_dict["type"] == "GaussianRBF":
                 #     s = GaussianRBF.init_from_dict(surf_dict)
 
                 # elif surf_dict["type"] == "NURBS":
                 #     s = NURBS.init_from_dict(surf_dict)
 
+                elif surf_dict["type"] == "Phase":
+                    s = Phase.init_from_dict(surf_dict)
+                
                 elif surf_dict["type"] == "Plane":
                     s = Plane.init_from_dict(surf_dict)
 

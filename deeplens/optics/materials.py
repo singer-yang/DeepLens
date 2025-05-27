@@ -119,6 +119,7 @@ class Material(DeepObj):
             self.dispersion = "interp"
             self.ref_wvlns = INTERP_TABLE["wvlns"]
             self.ref_n = INTERP_TABLE[self.name]
+            self.n = sum(self.ref_n) / len(self.ref_n)
 
         else:
             self.dispersion = "cauchy"
@@ -130,6 +131,10 @@ class Material(DeepObj):
 
     def refractive_index(self, wvln):
         """Compute the refractive index at given wvln."""
+        if isinstance(wvln, float):
+            wvln = torch.tensor(wvln).to(self.device)
+            return self.ior(wvln).item()
+
         return self.ior(wvln)
 
     def ior(self, wvln):
@@ -162,20 +167,25 @@ class Material(DeepObj):
             n = self.A + self.B / (wvln * 1e3) ** 2
 
         elif self.dispersion == "interp":
-            raise Warning("Interpolation is not tested after changing wvln type from float to tensor.")
-            ref_wvlns = self.ref_wvlns
-            ref_n = self.ref_n
+            # Convert reference wavelengths and refractive indices to tensors
+            ref_wvlns = torch.tensor(self.ref_wvlns, device=wvln.device)
+            ref_n = torch.tensor(self.ref_n, device=wvln.device)
 
-            # Find the nearest two wvlns
-            delta_wvln = [abs(wv - wvln) for wv in ref_wvlns]
-            idx1 = delta_wvln.index(min(delta_wvln))
-            delta_wvln[idx1] = float("inf")
-            idx2 = delta_wvln.index(min(delta_wvln))
+            # Find the lower and upper bracketing wavelengths
+            i = torch.searchsorted(ref_wvlns, wvln, side='right')
+            num_ref_wvlns = len(ref_wvlns)
+            idx_low = torch.clamp(i - 1, 0, num_ref_wvlns - 1)
+            idx_high = torch.clamp(i, 0, num_ref_wvlns - 1)
+
+            wvln_ref_low = ref_wvlns[idx_low]
+            wvln_ref_high = ref_wvlns[idx_high]
+            n_ref_low = ref_n[idx_low]
+            n_ref_high = ref_n[idx_high]
 
             # Interpolate n
-            n = ref_n[idx1] + (ref_n[idx2] - ref_n[idx1]) / (
-                ref_wvlns[idx2] - ref_wvlns[idx1]
-            ) * (wvln - ref_wvlns[idx1])
+            weight_high = (wvln - wvln_ref_low) / (wvln_ref_high - wvln_ref_low)
+            weight_low = 1.0 - weight_high
+            n = n_ref_low * weight_low + n_ref_high * weight_high
 
         elif self.dispersion == "optimizable":
             # Cauchy's equation, calculate (A, B) on the fly

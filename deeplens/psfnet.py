@@ -239,7 +239,7 @@ class PSFNet(DeepObj):
         # In each iteration, sample only one f_d
         foc_z = float(np.random.choice(self.foc_z_arr))
         foc_dist = foc_z * (self.d_max - self.d_min) + self.d_min
-        lens.refocus(depth=foc_dist)
+        lens.refocus(foc_dist)
 
         # Sample (x, y), uniform distribution
         x = (torch.rand(num_points) - 0.5) * 2
@@ -319,7 +319,7 @@ class PSFNet(DeepObj):
         ks = self.kernel_size
 
         # Focus to given distance
-        lens.refocus(depth=foc_dist)
+        lens.refocus(foc_dist)
 
         # Sample grid points
         x, y = torch.meshgrid(
@@ -383,7 +383,7 @@ class PSFNet(DeepObj):
         # Evaluation
         for foc_z in test_foc_z:
             foc_dist = foc_z * (self.d_max - self.d_min) + self.d_min
-            lens.refocus(depth=foc_dist)
+            lens.refocus(foc_dist)
 
             for z in test_z:
                 # GT PSF by ray tracing
