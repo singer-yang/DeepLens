@@ -2,10 +2,10 @@
 
 import math
 import torch
-from .base import DOE
+from .diffractive import DiffractiveSurface
 
 
-class Zernike(DOE):
+class Zernike(DiffractiveSurface):
     """DOE parameterized by Zernike polynomials."""
 
     def __init__(
