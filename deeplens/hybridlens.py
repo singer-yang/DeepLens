@@ -353,7 +353,7 @@ class HybridLens(Lens):
 
             # Draw wave propagation
             ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
-            arc_center = (ray.o[:, 0] * ray.ra).sum() / ray.ra.sum()
+            arc_center = (ray.o[:, 0] * ray.valid).sum() / ray.valid.sum()
             arc_center = arc_center.item()
             # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
             arc_radi = geolens.d_sensor.item() - self.doe.d.item()

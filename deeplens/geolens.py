@@ -562,7 +562,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if record:
             ray_o = ray.o.clone().detach()
             # Set to nan to be skipped in 2d layout visualization
-            ray_o[ray.ra == 0] = float("nan")
+            ray_o[ray.valid == 0] = float("nan")
             ray_o_record.append(ray_o)
             return ray, ray_o_record
         else:
@@ -591,7 +591,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
             if record:
                 ray_out_o = ray.o.clone().detach()
-                ray_out_o[ray.ra == 0] = float("nan")
+                ray_out_o[ray.valid == 0] = float("nan")
                 ray_o_record.append(ray_out_o)
 
         return ray, ray_o_record
@@ -619,7 +619,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
             if record:
                 ray_out_o = ray.o.clone().detach()
-                ray_out_o[ray.ra == 0] = float("nan")
+                ray_out_o[ray.valid == 0] = float("nan")
                 ray_o_record.append(ray_out_o)
 
         return ray, ray_o_record
@@ -759,8 +759,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray = ray.prop_to(depth)
         p = ray.o[..., :2]
         pixel_size = scale * self.pixel_size
-        ray.ra = (
-            ray.ra
+        ray.valid = (
+            ray.valid
             * (torch.abs(p[..., 0] / pixel_size) < (W / 2 + 1))
             * (torch.abs(p[..., 1] / pixel_size) < (H / 2 + 1))
         )
@@ -788,9 +788,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Computation image
         if not vignetting:
-            image = torch.sum(irr_img * ray.ra, -1) / (torch.sum(ray.ra, -1) + EPSILON)
+            image = torch.sum(irr_img * ray.valid, -1) / (torch.sum(ray.valid, -1) + EPSILON)
         else:
-            image = torch.sum(irr_img * ray.ra, -1) / torch.numel(ray.ra)
+            image = torch.sum(irr_img * ray.valid, -1) / torch.numel(ray.valid)
 
         return image
 
@@ -945,9 +945,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             # Shrink the pupil and calculate centroid ray as the chief ray.
             ray = self.sample_from_points(point, num_rays=SPP_CALC, shrink_pupil=True)
             ray = self.trace2sensor(ray)
-            assert (ray.ra == 1).any(), "No sampled rays is valid."
-            ra = ray.ra.unsqueeze(-1)
-            psf_center = (ray.o * ra).sum(-2) / ra.sum(-2).add(EPSILON)  # shape [N, 3]
+            assert (ray.valid == 1).any(), "No sampled rays is valid."
+            valid = ray.valid.unsqueeze(-1)
+            psf_center = (ray.o * valid).sum(-2) / valid.sum(-2).add(EPSILON)  # shape [N, 3]
             psf_center = -psf_center[..., :2]  # shape [N, 2]
 
         elif method == "pinhole":
@@ -1212,9 +1212,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 ray_xy_center_green = ray.centroid()[..., :2].unsqueeze(-2)
 
             # Calculate RMS spot size and radius for different FoVs
-            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.ra.unsqueeze(-1)
-            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.ra).sum(-1) / (
-                ray.ra.sum(-1) + EPSILON
+            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.valid.unsqueeze(-1)
+            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.valid).sum(-1) / (
+                ray.valid.sum(-1) + EPSILON
             )
             rms_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
 
@@ -1289,7 +1289,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         # Sample paraxial rays, shape [1, 1, num_rays, 3]
         ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, shrink_pupil=True)
         ray = self.trace2sensor(ray)
-        image_height = (ray.o[0, 0, :, 1] * ray.ra[0, 0, :]).sum() / ray.ra[
+        image_height = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[
             0, 0, :
         ].sum()
         # ===========>
@@ -1317,7 +1317,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Back focal length
         bfl = z_focus - z_principal
-        bfl = float(np.nanmean(bfl[ray.ra > 0].cpu().numpy()))
+        bfl = float(np.nanmean(bfl[ray.valid > 0].cpu().numpy()))
 
         return bfl
 
@@ -1367,7 +1367,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
-        focus_p = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.ra > 0].cpu().numpy()
+        focus_p = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.valid > 0].cpu().numpy()
         focus_p = focus_p[~np.isnan(focus_p) & (focus_p < 0)]
 
         if len(focus_p) > 0:
@@ -1398,7 +1398,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
         focus_p = ray.o[..., 2] - ray.d[..., 2] * t
-        focus_p = focus_p[ray.ra > 0]
+        focus_p = focus_p[ray.valid > 0]
         focus_p = focus_p[~torch.isnan(focus_p) & (focus_p > 0)]
         infocus_sensor_d = torch.mean(focus_p)
 
@@ -1427,7 +1427,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute fov from output ray direction
         tan_hfov = ray.d[..., 0] / ray.d[..., 2]
-        hfov = torch.atan(torch.sum(tan_hfov * ray.ra) / torch.sum(ray.ra))
+        hfov = torch.atan(torch.sum(tan_hfov * ray.valid) / torch.sum(ray.valid))
 
         # If calculation failed, use pinhole camera model to compute fov
         if torch.isnan(hfov):
@@ -1498,7 +1498,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     #         center_end = num_grid // 2 + num_grid // 8
     #         o1_center = o1[center_start:center_end, center_start:center_end, :, :]
     #         o2_center = o2[center_start:center_end, center_start:center_end, :, :]
-    #         ra_center = ray.ra.clone().detach()[
+    #         ra_center = ray.valid.clone().detach()[
     #             center_start:center_end, center_start:center_end, :
     #         ]
 
@@ -1595,10 +1595,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+            [ray.o[ray.valid != 0][:, 0], ray.o[ray.valid != 0][:, 2]], dim=-1
         )
         ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+            [ray.d[ray.valid != 0][:, 0], ray.d[ray.valid != 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
@@ -1664,8 +1664,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray, _ = self.trace(ray, lens_range=lens_range)
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack([ray.o[ray.ra > 0][:, 0], ray.o[ray.ra > 0][:, 2]], dim=-1)
-        ray_d = torch.stack([ray.d[ray.ra > 0][:, 0], ray.d[ray.ra > 0][:, 2]], dim=-1)
+        ray_o = torch.stack([ray.o[ray.valid > 0][:, 0], ray.o[ray.valid > 0][:, 2]], dim=-1)
+        ray_d = torch.stack([ray.d[ray.valid > 0][:, 0], ray.d[ray.valid > 0][:, 2]], dim=-1)
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
         # Handle the case where no intersection points are found or small entrance pupil
@@ -1717,10 +1717,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+            [ray.o[ray.valid != 0][:, 0], ray.o[ray.valid != 0][:, 2]], dim=-1
         )
         ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+            [ray.d[ray.valid != 0][:, 0], ray.d[ray.valid != 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
@@ -1759,10 +1759,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+            [ray.o[ray.valid != 0][:, 0], ray.o[ray.valid != 0][:, 2]], dim=-1
         )
         ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+            [ray.d[ray.valid != 0][:, 0], ray.d[ray.valid != 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 

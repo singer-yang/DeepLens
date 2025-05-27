@@ -193,9 +193,9 @@ class GeoLensOptim:
 
             # Green light point center for reference
             if i == 0:
-                pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
+                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(
                     -2
-                ) / ray.ra.sum(-1).add(EPSILON).unsqueeze(
+                ) / ray.valid.sum(-1).add(EPSILON).unsqueeze(
                     -1
                 )  # shape [1, num_fields, 2]
                 pointc_green = pointc_green.unsqueeze(-2).repeat(
@@ -203,18 +203,18 @@ class GeoLensOptim:
                 )  # shape [num_fields, num_fields, num_rays, 2]
 
             # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
+            o2_norm = (ray.o[..., :2] - pointc_green) * ray.valid.unsqueeze(-1)
 
             # error
             rms_error = torch.mean(
                 (
-                    ((o2_norm**2).sum(-1) * ray.ra).sum(-1) / (ray.ra.sum(-1) + EPSILON)
+                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1) / (ray.valid.sum(-1) + EPSILON)
                 ).sqrt()
             )
 
             # radius
             rms_radius = torch.mean(
-                ((o2_norm**2).sum(-1) * ray.ra).sqrt().max(dim=-1).values
+                ((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values
             )
             all_rms_errors.append(rms_error)
             all_rms_radii.append(rms_radius)
@@ -482,24 +482,24 @@ class GeoLensOptim:
 
                 # Ray error to center and valid mask
                 ray_xy = ray.o[..., :2]
-                ray_ra = ray.ra
+                ray_valid = ray.valid
                 ray_err = ray_xy - center_ref
 
                 # # Use only quater of the sensor
                 # ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-                # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
+                # ray_valid = ray_valid[num_grid // 2 :, num_grid // 2 :, :]
 
                 # Weight mask, shape of [num_grid, num_grid]
                 if wv_idx == 0:
                     with torch.no_grad():
-                        weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
-                        weight_mask /= ray_ra.sum(-1) + EPSILON
+                        weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
+                        weight_mask /= ray_valid.sum(-1) + EPSILON
                         weight_mask = weight_mask.sqrt()
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
-                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
-                l_rms /= ray_ra.sum(-1) + EPSILON
+                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+                l_rms /= ray_valid.sum(-1) + EPSILON
 
                 # Weighted loss
                 l_rms_weighted = (l_rms * weight_mask).sum()
