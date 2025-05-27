@@ -165,38 +165,35 @@ class Surface(DeepObj):
     def refract(self, ray, n):
         """Calculate refractive ray according to Snell's law.
 
-        Snell's law (surface normal n defined along the positive z axis):
-            [1] https://physics.stackexchange.com/a/436252/104805
-            [2] https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
-            We follow the first link and normal vector should have the same direction with incident ray(veci), but by default it points to left. We use the second link to check.
-
         Args:
             ray (Ray): input ray.
             n (float): relevant refraction coefficient, n = n_i / n_t
 
         Returns:
             ray (Ray): refractive ray.
+
+        Snell's law (surface normal n defined along the positive z axis):
+            [1] https://physics.stackexchange.com/a/436252/104805
+            [2] https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
+            We follow the first link and normal vector should have the same direction with incident ray(veci), but by default it points to left. We use the second link to check.
+            [3] https://en.wikipedia.org/wiki/Snell%27s_law
         """
         # Compute normal vectors
         normal_vec = self.normal_vec(ray)
         if ray.is_forward:
             normal_vec = -normal_vec
 
-        # Compute refraction according to Snell's law
-        cosi = torch.sum(ray.d * normal_vec, axis=-1).unsqueeze(-1)  # n * i
+        # Compute refraction according to Snell's law, normal_vec * ray_d
+        cosi = torch.sum(ray.d * normal_vec, axis=-1).unsqueeze(-1)
 
         # Total internal reflection. Shape [N] now, maybe broadcasted to [N, 1] in the future.
         valid = (n**2 * (1 - cosi**2) < 1).squeeze(-1) & (ray.valid > 0)
 
-        sr = torch.sqrt(
-            1 - n**2 * (1 - cosi ** 2) * valid.unsqueeze(-1) + EPSILON
-        )  # square root
+        # Square root term in Snell's law
+        sr = torch.sqrt(1 - n**2 * (1 - cosi ** 2) * valid.unsqueeze(-1) + EPSILON)
 
-        # First term: vertical. Second term: parallel. Already normalized if both n and ray.d are normalized.
+        # Update ray direction. Already normalized if both n and ray.d are normalized.
         new_d = sr * normal_vec + n * (ray.d - cosi * normal_vec)
-
-        # Update ray direction
-        # new_d[~valid] = ray.d[~valid]
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray obliquity
@@ -230,7 +227,6 @@ class Surface(DeepObj):
 
         # Update valid rays
         valid = ray.valid > 0
-        # new_d[~valid] = ray.d[~valid]
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
@@ -247,7 +243,6 @@ class Surface(DeepObj):
         x, y = ray.o[..., 0], ray.o[..., 1]
         nx, ny, nz = self.dfdxyz(x, y)
         n_vec = torch.stack((nx, ny, nz), axis=-1)
-
         n_vec = F.normalize(n_vec, p=2, dim=-1)
         return n_vec
 

@@ -23,6 +23,7 @@ class Phase(Surface):
         [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
         [2] https://optics.ansys.com/hc/en-us/articles/360042097313-Small-Scale-Metalens-Field-Propagation
     """
+
     def __init__(
         self, r, d, glass="test", param_model="binary2", thickness=0.5, device="cpu"
     ):
@@ -132,7 +133,7 @@ class Phase(Surface):
             # Diffraction 1: DOE phase modulation
             if ray.coherent:
                 phi = self.phi(ray.o[..., 0], ray.o[..., 1])
-                new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * np.pi)
+                new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * torch.pi)
                 new_opl[~valid] = ray.opl[~valid]
                 ray.opl = new_opl
 
@@ -140,30 +141,32 @@ class Phase(Surface):
             # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
             dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
 
+            wvln_mm = ray.wvln * 1e-3
             if forward:
                 new_d_x = (
                     ray.d[..., 0]
-                    + (ray.wvln * 1e-3) / (2 * np.pi) * dphidx * self.diffraction_order
+                    + wvln_mm / (2 * torch.pi) * dphidx * self.diffraction_order
                 )
                 new_d_y = (
                     ray.d[..., 1]
-                    + (ray.wvln * 1e-3) / (2 * np.pi) * dphidy * self.diffraction_order
+                    + wvln_mm / (2 * torch.pi) * dphidy * self.diffraction_order
                 )
             else:
                 new_d_x = (
                     ray.d[..., 0]
-                    - (ray.wvln * 1e-3) / (2 * np.pi) * dphidx * self.diffraction_order
+                    - wvln_mm / (2 * torch.pi) * dphidx * self.diffraction_order
                 )
                 new_d_y = (
                     ray.d[..., 1]
-                    - (ray.wvln * 1e-3) / (2 * np.pi) * dphidy * self.diffraction_order
+                    - wvln_mm / (2 * torch.pi) * dphidy * self.diffraction_order
                 )
 
             new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
             new_d = F.normalize(new_d, p=2, dim=-1)
 
-            new_d[~valid] = ray.d[~valid]
-            ray.d = new_d
+            # new_d[~valid] = ray.d[~valid]
+            # ray.d = new_d
+            ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
@@ -205,7 +208,7 @@ class Phase(Surface):
                 f"phi() is not implemented for {self.param_model}"
             )
 
-        phi = torch.remainder(phi, 2 * np.pi)
+        phi = torch.remainder(phi, 2 * torch.pi)
         return phi
 
     def dphi_dxy(self, x, y):
@@ -215,8 +218,8 @@ class Phase(Surface):
         r = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         if self.param_model == "fresnel":
-            dphidx = -2 * np.pi * x / (0.55e-3 * self.f0)  # unit [mm]
-            dphidy = -2 * np.pi * y / (0.55e-3 * self.f0)
+            dphidx = -2 * torch.pi * x / (0.55e-3 * self.f0)  # unit [mm]
+            dphidy = -2 * torch.pi * y / (0.55e-3 * self.f0)
 
         elif self.param_model == "binary2":
             dphidr = (
@@ -342,7 +345,7 @@ class Phase(Surface):
         pmap = self.phi(x, y)
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * np.pi)
+        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * torch.pi)
         ax[0].set_title("Phase map 0.55um", fontsize=10)
         ax[0].grid(False)
         fig.colorbar(ax[0].get_images()[0])
