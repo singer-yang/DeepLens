@@ -22,43 +22,36 @@ class Phase(Surface):
     Reference:
         [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
         [2] https://optics.ansys.com/hc/en-us/articles/360042097313-Small-Scale-Metalens-Field-Propagation
+        [3] https://optics.ansys.com/hc/en-us/articles/18254409091987-Large-Scale-Metalens-Ray-Propagation
     """
 
-    def __init__(
-        self, r, d, glass="test", param_model="binary2", thickness=0.5, device="cpu"
-    ):
-        Surface.__init__(self, r, d, mat2="air", is_square=True, device=device)
+    def __init__(self, r, d, param_model="binary2", mat2="air", device="cpu"):
+        Surface.__init__(self, r, d, mat2, is_square=True, device=device)
 
         # DOE geometry
         self.r = r
         self.w = r * float(np.sqrt(2))
         self.h = r * float(np.sqrt(2))
-        self.thickness = thickness
-        self.glass = glass
+        # self.thickness = thickness
+        # self.glass = glass
 
         # Use ray tracing to simulate diffraction, the same as Zemax
-        self.diffraction = False
+        self.diffraction = True
         self.diffraction_order = 1
-        print(
-            "A Phase diffractive surface is created, but diffraction is not activated."
-        )
+        # print(
+        #     "A Phase diffractive surface is created, but diffraction is not activated."
+        # )
 
         self.to(device)
         self.init_param_model(param_model)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        if "glass" in surf_dict:
-            glass = surf_dict["glass"]
-        else:
-            glass = "test"
-        if "thickness" in surf_dict:
-            thickness = surf_dict["thickness"]
-        else:
-            thickness = 0.5
-        return cls(
-            surf_dict["l"], surf_dict["d"], glass, surf_dict["param_model"], thickness
-        )
+        # glass = surf_dict.get("mat2", "test")
+        # thickness = surf_dict.get("thickness", 0.5)
+        param_model = surf_dict.get("param_model", "binary2")
+        mat2 = surf_dict.get("mat2", "air")
+        return cls(surf_dict["r"], surf_dict["d"], param_model, mat2)
 
     def init_param_model(self, param_model="binary2"):
         self.param_model = param_model
@@ -72,6 +65,7 @@ class Phase(Surface):
             self.order4 = torch.tensor(0.0)
             self.order6 = torch.tensor(0.0)
             self.order8 = torch.tensor(0.0)
+            self.order10 = torch.tensor(0.0)
 
         elif self.param_model == "poly1d":
             rand_value = np.random.rand(6) * 0.001
@@ -112,60 +106,47 @@ class Phase(Surface):
         """
         forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
 
-        # Intersection
+        # Intersection with a plane
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         # valid = (new_o[...,0].abs() <= self.h/2) & (new_o[...,1].abs() <= self.w/2) & (ray.valid > 0) # square
-        valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
-            ray.valid > 0
+        valid_aper = (
+            torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r
         )  # circular
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
+        valid = valid_aper & (ray.valid > 0)
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
         ray.valid = ray.valid * valid
 
+        # OPL change
         if ray.coherent:
-            # OPL change
             new_opl = ray.opl + t
-            new_opl[~valid] = ray.opl[~valid]
-            ray.opl = new_opl
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
+
+        # Refraction by the plane surface
+        ray = self.refract(ray, n2/n1)
 
         if self.diffraction:
             # Diffraction 1: DOE phase modulation
             if ray.coherent:
                 phi = self.phi(ray.o[..., 0], ray.o[..., 1])
                 new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * torch.pi)
-                new_opl[~valid] = ray.opl[~valid]
-                ray.opl = new_opl
+                ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
             # Diffraction 2: bend rays
             # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
             dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
 
-            wvln_mm = ray.wvln * 1e-3
+            wvln_mm = ray.wvln.squeeze(-1) * 1e-3
+            order = self.diffraction_order
             if forward:
-                new_d_x = (
-                    ray.d[..., 0]
-                    + wvln_mm / (2 * torch.pi) * dphidx * self.diffraction_order
-                )
-                new_d_y = (
-                    ray.d[..., 1]
-                    + wvln_mm / (2 * torch.pi) * dphidy * self.diffraction_order
-                )
+                new_d_x = ray.d[..., 0] + wvln_mm / (2 * torch.pi) * dphidx * order
+                new_d_y = ray.d[..., 1] + wvln_mm / (2 * torch.pi) * dphidy * order
             else:
-                new_d_x = (
-                    ray.d[..., 0]
-                    - wvln_mm / (2 * torch.pi) * dphidx * self.diffraction_order
-                )
-                new_d_y = (
-                    ray.d[..., 1]
-                    - wvln_mm / (2 * torch.pi) * dphidy * self.diffraction_order
-                )
+                new_d_x = ray.d[..., 0] - wvln_mm / (2 * torch.pi) * dphidx * order
+                new_d_y = ray.d[..., 1] - wvln_mm / (2 * torch.pi) * dphidy * order
 
             new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
             new_d = F.normalize(new_d, p=2, dim=-1)
-
-            # new_d[~valid] = ray.d[~valid]
-            # ray.d = new_d
             ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
@@ -187,6 +168,7 @@ class Phase(Surface):
                 + self.order4 * r**4
                 + self.order6 * r**6
                 + self.order8 * r**8
+                + self.order10 * r**10
             )
 
         elif self.param_model == "poly1d":
@@ -227,6 +209,7 @@ class Phase(Surface):
                 + 4 * self.order4 * r**3
                 + 6 * self.order6 * r**5
                 + 8 * self.order8 * r**7
+                + 10 * self.order10 * r**9
             )
             dphidx = dphidr * x_norm / r / self.r
             dphidy = dphidr * y_norm / r / self.r
@@ -262,16 +245,28 @@ class Phase(Surface):
             )
 
         return dphidx, dphidy
-
+    
     def _sag(self, x, y):
-        raise ValueError(
-            "sag() function is meaningless for phase DOE, use phi() function."
-        )
+        """Diffractive surface is now attached to a plane surface."""
+        return torch.zeros_like(x)
 
     def _dfdxy(self, x, y):
-        raise ValueError(
-            "_dfdxy() function is meaningless for DOE, use dphi_dxy() function."
-        )
+        """Diffractive surface is now attached to a plane surface."""
+        return torch.zeros_like(x), torch.zeros_like(y)
+
+    def normal_vec(self, ray):
+        """Calculate surface normal vector at intersection points.
+        
+        Normal vector points from the surface toward the side where the light is coming from.
+        """
+        normal_vec = torch.zeros_like(ray.d)
+        normal_vec[..., 2] = -1
+        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+        return normal_vec
+
+    def surface_with_offset(self, *args, **kwargs):
+        """Surface sag with offset, only used in layout drawing."""
+        return self.d
 
     # ==============================
     # Optimization
@@ -285,10 +280,12 @@ class Phase(Surface):
             self.order4.requires_grad = True
             self.order6.requires_grad = True
             self.order8.requires_grad = True
+            self.order10.requires_grad = True
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
             params.append({"params": [self.order6], "lr": lr})
             params.append({"params": [self.order8], "lr": lr})
+            params.append({"params": [self.order10], "lr": lr})
 
         elif self.param_model == "poly1d":
             lr = 0.001 if lr is None else lr
@@ -366,15 +363,15 @@ class Phase(Surface):
         sag = max_offset - np.fmod(sag, max_offset)
         ax.plot(d + sag, x, color=color, linestyle=linestyle, linewidth=0.75)
 
-        # Draw DOE base
-        z_bound = [
-            d + sag[0],
-            d + sag[0] + max_offset,
-            d + sag[0] + max_offset,
-            d + sag[-1],
-        ]
-        x_bound = [-self.r, -self.r, self.r, self.r]
-        ax.plot(z_bound, x_bound, color=color, linestyle=linestyle, linewidth=0.75)
+        # # Draw DOE base
+        # z_bound = [
+        #     d + sag[0],
+        #     d + sag[0] + max_offset,
+        #     d + sag[0] + max_offset,
+        #     d + sag[-1],
+        # ]
+        # x_bound = [-self.r, -self.r, self.r, self.r]
+        # ax.plot(z_bound, x_bound, color=color, linestyle=linestyle, linewidth=0.75)
 
     # =========================================
     # IO
@@ -389,6 +386,7 @@ class Phase(Surface):
                     "order4": self.order4.clone().detach().cpu(),
                     "order6": self.order6.clone().detach().cpu(),
                     "order8": self.order8.clone().detach().cpu(),
+                    "order10": self.order10.clone().detach().cpu(),
                 },
                 save_path,
             )
@@ -422,12 +420,15 @@ class Phase(Surface):
         self.diffraction = True
         ckpt = torch.load(load_path)
         self.param_model = ckpt["param_model"]
+        
         if self.param_model == "binary2" or self.param_model == "poly_even":
             self.param_model = "binary2"
             self.order2 = ckpt["order2"].to(self.device)
             self.order4 = ckpt["order4"].to(self.device)
             self.order6 = ckpt["order6"].to(self.device)
             self.order8 = ckpt["order8"].to(self.device)
+            self.order10 = ckpt["order10"].to(self.device)
+
         elif self.param_model == "poly1d":
             self.order2 = ckpt["order2"].to(self.device)
             self.order3 = ckpt["order3"].to(self.device)
@@ -435,9 +436,11 @@ class Phase(Surface):
             self.order5 = ckpt["order5"].to(self.device)
             self.order6 = ckpt["order6"].to(self.device)
             self.order7 = ckpt["order7"].to(self.device)
+
         elif self.param_model == "grating":
             self.theta = ckpt["theta"].to(self.device)
             self.alpha = ckpt["alpha"].to(self.device)
+
         else:
             raise ValueError(f"Unknown parameterization: {self.param_model}")
 
@@ -446,8 +449,8 @@ class Phase(Surface):
         if self.param_model == "fresnel":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
+                # "glass": self.glass,
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
                 "(d)": round(self.d.item(), 4),
@@ -457,13 +460,14 @@ class Phase(Surface):
         elif self.param_model == "binary2":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
+                # "glass": self.glass,
                 "param_model": self.param_model,
                 "order2": self.order2.item(),
                 "order4": self.order4.item(),
                 "order6": self.order6.item(),
                 "order8": self.order8.item(),
+                "order10": self.order10.item(),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
@@ -471,8 +475,8 @@ class Phase(Surface):
         elif self.param_model == "poly1d":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
+                # "glass": self.glass,
                 "param_model": self.param_model,
                 "order2": self.order2.item(),
                 "order3": self.order3.item(),
@@ -487,8 +491,8 @@ class Phase(Surface):
         elif self.param_model == "grating":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
+                # "glass": self.glass,
                 "param_model": self.param_model,
                 "theta": self.theta.item(),
                 "alpha": self.alpha.item(),
