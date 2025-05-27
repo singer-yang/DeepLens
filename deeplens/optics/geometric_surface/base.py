@@ -101,6 +101,7 @@ class Surface(DeepObj):
             t (tensor): intersection time.
             valid (tensor): valid mask.
         """
+        # Tolerance
         if hasattr(self, "d_offset"):
             d_surf = self.d + self.d_offset
         else:
@@ -178,8 +179,7 @@ class Surface(DeepObj):
         """
         # Compute normal vectors
         n_vec = self.normal_vec(ray)
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
-        if forward:
+        if ray.is_forward:
             n_vec = -n_vec
 
         # Compute refraction according to Snell's law
@@ -220,11 +220,11 @@ class Surface(DeepObj):
         """
         # Compute surface normal vectors
         n = self.normal_vec(ray)
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
-        if forward:
+        if ray.is_forward:
             n = -n
 
         # Reflect
+        ray.is_forward = not ray.is_forward
         cos_alpha = -(n * ray.d).sum(-1)
         new_d = ray.d + 2 * cos_alpha.unsqueeze(-1) * n
         new_d = F.normalize(new_d, p=2, dim=-1)

@@ -175,8 +175,15 @@ def foc_dist_balanced(d1, d2):
 # AutoLens
 # ==================================
 def create_video_from_images(image_folder, output_video_path, fps=30):
-    # Get all .png files in the image_folder
-    images = glob(os.path.join(image_folder, "*.png"))
+    """Create a video from a folder of images.
+    
+    Args:
+        image_folder (str): The path to the folder containing the images.
+        output_video_path (str): The path to save the output video.
+        fps (int): The frames per second of the output video.
+    """
+    # Get all .png files in the image_folder and its subfolders
+    images = glob(os.path.join(image_folder, "**/*.png"), recursive=True)
     # images.sort()  # Sort the images by name
     images.sort(key=lambda x: os.path.getctime(x))  # Sort the images by creation time
 

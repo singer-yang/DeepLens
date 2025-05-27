@@ -19,13 +19,12 @@ from datetime import datetime
 import torch
 import yaml
 from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup
-
 
 from deeplens.geolens import GeoLens
 from deeplens.geolens_utils import create_lens
 from deeplens.optics.basics import DEPTH, EPSILON, WAVE_RGB
 from deeplens.utils import create_video_from_images, set_logger, set_seed
+
 
 def config():
     """Config file for training."""
@@ -72,7 +71,7 @@ def config():
 
 
 def curriculum_design(
-    self:GeoLens,
+    self: GeoLens,
     lrs=[5e-4, 1e-4, 0.1, 1e-4],
     decay=0.02,
     iterations=5000,
@@ -80,41 +79,44 @@ def curriculum_design(
     optim_mat=False,
     match_mat=False,
     shape_control=True,
-    importance_sampling=True,
+    sample_more_off_axis=True,
     result_dir="./results",
 ):
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
-    num_grid = 15
-    spp = 1024
+    num_grid = 21
+    spp = 512
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
     aper_final = self.surfaces[self.aper_idx].r
 
+    # Log
     if not logging.getLogger().hasHandlers():
         set_logger(result_dir)
     logging.info(
         f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
     )
 
+    # Optimizer
     optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer, num_warmup_steps=200, num_training_steps=iterations
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
 
-    # Training
-    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss_rms": 0})
+    # Training loop
+    pbar = tqdm(
+        total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0}
+    )
     for i in range(iterations + 1):
         # =======================================
         # Evaluate the lens
         # =======================================
         if i % test_per_iter == 0:
-            # Curriculum learning: change aperture size
+            # Curriculum learning: gradually change aperture size
             aper_r = min(
                 (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
                 aper_final,
             )
+            # aper_r = aper_scheduler(i, iterations, self.surfaces[self.aper_idx].r)
             self.surfaces[self.aper_idx].r = aper_r
             self.fnum = self.foclen / aper_r / 2
 
@@ -126,67 +128,66 @@ def curriculum_design(
                 if optim_mat and match_mat:
                     self.match_materials()
 
+            # Save lens
             self.write_lens_json(f"{result_dir}/iter{i}.json")
-            self.analysis(
-                f"{result_dir}/iter{i}",
-                zmx_format=True,
-                multi_plot=False,
-            )
+            self.analysis(f"{result_dir}/iter{i}")
 
             # Sample new rays and calculate target centers
             rays_backup = []
             for wv in WAVE_RGB:
-                ray = self.sample_point_source(
+                ray = self.sample_grid_rays(
+                    num_grid=num_grid,
                     depth=depth,
                     num_rays=spp,
-                    num_grid=num_grid,
                     wvln=wv,
-                    importance_sampling=importance_sampling,
+                    sample_more_off_axis=sample_more_off_axis,
                 )
                 rays_backup.append(ray)
 
-            center_p = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
-            center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
+            center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+            center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =======================================
         # Optimize lens by minimizing rms
         # =======================================
         loss_rms = []
-        for j, wv in enumerate(WAVE_RGB):
-            # Ray tracing to sensor
-            ray = rays_backup[j].clone()
+        for wv_idx, wv in enumerate(WAVE_RGB):
+            # Ray tracing to sensor, [num_grid, num_grid, num_rays, 3]
+            ray = rays_backup[wv_idx].clone()
             ray = self.trace2sensor(ray)
-            xy = ray.o[..., :2]  # [h, w, spp, 2]
-            ra = ray.ra.clone().detach()  # [h, w, spp]
-            xy_norm = (xy - center_p) * ra.unsqueeze(-1)
 
-            # Use only quater of rays
-            xy_norm = xy_norm[num_grid // 2 :, num_grid // 2 :, :, :]
-            ra = ra[num_grid // 2 :, num_grid // 2 :, :]  # [h/2, w/2, spp]
+            # Ray error to center and valid mask
+            ray_xy = ray.o[..., :2]
+            ray_ra = ray.ra
+            ray_err = ray_xy - center_ref
 
-            # Weight mask (L2 error map)
-            with torch.no_grad():
-                weight_mask = (xy_norm.clone().detach() ** 2).sum(-1).sqrt().sum(-1) / (
-                    ra.sum([-1]) + EPSILON
-                )
-                weight_mask /= weight_mask.mean()  # shape of [M, M]
+            # # Use only quater of rays
+            # ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
+            # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
 
-            # Weighted L2 loss
-            l_rms = torch.mean(
-                (
-                    (xy_norm**2 + EPSILON).sum(-1).sqrt().sum(-1)
-                    / (ra.sum([-1]) + EPSILON)
-                    * weight_mask
-                )
-            )
-            loss_rms.append(l_rms)
+            # Weight mask (non-differentiable), shape of [num_grid, num_grid]
+            if wv_idx == 0:
+                with torch.no_grad():
+                    weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
+                    weight_mask /= ray_ra.sum(-1) + EPSILON
+                    weight_mask = weight_mask.sqrt()
+                    weight_mask /= weight_mask.mean()
+
+            # Loss on rms error, shape of [num_grid, num_grid]
+            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
+            l_rms /= ray_ra.sum(-1) + EPSILON
+
+            # Weighted loss
+            l_rms_weighted = (l_rms * weight_mask).sum()
+            l_rms_weighted /= weight_mask.sum() + EPSILON
+            loss_rms.append(l_rms_weighted)
 
         # RMS loss for all wavelengths
         loss_rms = sum(loss_rms) / len(loss_rms)
 
-        # Lens design constraint
+        # Add lens design constraint
         loss_reg = self.loss_reg()
-        w_reg = 0.1
+        w_reg = 0.05
         L_total = loss_rms + w_reg * loss_reg
 
         # Gradient-based optimization
@@ -195,7 +196,7 @@ def curriculum_design(
         optimizer.step()
         scheduler.step()
 
-        pbar.set_postfix(loss_rms=loss_rms.item())
+        pbar.set_postfix(loss_rms=loss_rms.item(), loss_reg=loss_reg.item())
         pbar.update(1)
 
     pbar.close()
@@ -222,6 +223,7 @@ if __name__ == "__main__":
     lens.set_target_fov_fnum(
         hfov=args["fov"] / 2 / 57.3,
         fnum=args["fnum"],
+        foclen=args["foclen"],
     )
     logging.info(
         f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}"
@@ -231,11 +233,12 @@ if __name__ == "__main__":
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=5000,
+        iterations=3000,
         test_per_iter=50,
-        optim_mat=True,
+        optim_mat=False,
         match_mat=False,
         shape_control=True,
+        sample_more_off_axis=True,
         result_dir=args["result_dir"],
     )
 
@@ -243,17 +246,17 @@ if __name__ == "__main__":
     lens.optimize(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=5000,
+        iterations=3000,
         centroid=False,
-        importance_sampling=True,
-        optim_mat=True,
+        optim_mat=False,
         match_mat=False,
         shape_control=True,
+        sample_more_off_axis=True,
         result_dir=args["result_dir"],
     )
 
     # =====> 3. Analyze final result
-    lens.prune_surf(expand_surf=0.02)
+    lens.prune_surf(expand_factor=0.02)
     lens.post_computation()
 
     logging.info(
