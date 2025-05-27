@@ -1,10 +1,10 @@
 """Pixel2D DOE parameterization. Each pixel is an independent parameter."""
 
 import torch
-from .base import DOE
+from .diffractive import DiffractiveSurface
 
 
-class Pixel2D(DOE):
+class Pixel2D(DiffractiveSurface):
     """Pixel2D DOE parameterization - direct phase map representation."""
 
     def __init__(

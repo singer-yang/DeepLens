@@ -498,7 +498,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         points = torch.stack((x, y, z_tensor), dim=-1)
 
         # Fix all chief rays to facilitate the design of telecentricity.
-        points[:,:,0,:2] = 0.0
+        points[..., 0, :2] = 0.0
 
         return points
 
@@ -517,6 +517,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray_final (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
+        # Manually propagate ray to a shallow depth to improve accuracy
+        if (ray.o[..., 2].min() < -1000.0).any():
+            ray = ray.prop_to(-10.0)
+
         if lens_range is None:
             lens_range = range(0, len(self.surfaces))
 

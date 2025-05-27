@@ -130,6 +130,10 @@ class Material(DeepObj):
 
     def refractive_index(self, wvln):
         """Compute the refractive index at given wvln."""
+        if isinstance(wvln, float):
+            wvln = torch.tensor(wvln).to(self.device)
+            return self.ior(wvln).item()
+
         return self.ior(wvln)
 
     def ior(self, wvln):
@@ -162,7 +166,6 @@ class Material(DeepObj):
             n = self.A + self.B / (wvln * 1e3) ** 2
 
         elif self.dispersion == "interp":
-            raise Warning("Interpolation is not tested after changing wvln type from float to tensor.")
             ref_wvlns = self.ref_wvlns
             ref_n = self.ref_n
 
