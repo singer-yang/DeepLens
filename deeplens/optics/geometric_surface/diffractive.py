@@ -99,18 +99,18 @@ class Diffractive_GEO(Surface):
             [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
             [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
         """
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
+        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
 
         # Intersection
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
-        # valid = (new_o[...,0].abs() <= self.h/2) & (new_o[...,1].abs() <= self.w/2) & (ray.ra > 0) # square
+        # valid = (new_o[...,0].abs() <= self.h/2) & (new_o[...,1].abs() <= self.w/2) & (ray.valid > 0) # square
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
-            ray.ra > 0
+            ray.valid > 0
         )  # circular
         new_o[~valid] = ray.o[~valid]
         ray.o = new_o
-        ray.ra = ray.ra * valid
+        ray.valid = ray.valid * valid
 
         if ray.coherent:
             # OPL change

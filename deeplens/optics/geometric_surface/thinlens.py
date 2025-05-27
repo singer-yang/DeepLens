@@ -40,14 +40,14 @@ class ThinLens(Surface):
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-            ray.ra > 0
+            ray.valid > 0
         )
 
         # Update ray position
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_o[~valid] = ray.o[~valid]
         ray.o = new_o
-        ray.ra = ray.ra * valid
+        ray.valid = ray.valid * valid
 
         if ray.coherent:
             new_opl = ray.opl + t
@@ -63,7 +63,7 @@ class ThinLens(Surface):
         (1) Lens maker's equation
         (2) Spherical lens function
         """
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
+        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
 
         # Calculate convergence point
         if forward:

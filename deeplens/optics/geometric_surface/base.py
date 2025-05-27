@@ -77,9 +77,9 @@ class Surface(DeepObj):
 
         # Update rays
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
-        ray.ra = ray.ra * valid
+        # new_o[~valid] = ray.o[~valid]
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+        ray.valid = ray.valid * valid
 
         if ray.coherent:
             assert t.min() < 100, (
@@ -123,7 +123,7 @@ class Surface(DeepObj):
 
                 new_o = ray.o + ray.d * t.unsqueeze(-1)
                 new_x, new_y = new_o[..., 0], new_o[..., 1]
-                valid = self.is_within_data_range(new_x, new_y) & (ray.ra > 0)
+                valid = self.is_within_data_range(new_x, new_y) & (ray.valid > 0)
 
                 ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
                 dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
@@ -142,7 +142,7 @@ class Surface(DeepObj):
 
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_x, new_y = new_o[..., 0], new_o[..., 1]
-        valid = self.is_valid(new_x, new_y) & (ray.ra > 0)
+        valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
         ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
@@ -154,7 +154,7 @@ class Surface(DeepObj):
         with torch.no_grad():
             # Solution within the surface boundary and ray doesn't go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.ra > 0) & (t >= 0)
+            valid = self.is_valid(new_x, new_y) & (ray.valid > 0) & (t >= 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
@@ -162,6 +162,7 @@ class Surface(DeepObj):
 
         return t, valid
 
+    # @torch.compile()
     def refract(self, ray, n):
         """Calculate refractive ray according to Snell's law.
 
@@ -186,7 +187,7 @@ class Surface(DeepObj):
         cosi = torch.sum(ray.d * n_vec, axis=-1)  # n * i
 
         # Total internal reflection
-        valid = (n**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
+        valid = (n**2 * (1 - cosi**2) < 1) & (ray.valid > 0)
 
         sr = torch.sqrt(
             1 - n**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
@@ -196,16 +197,16 @@ class Surface(DeepObj):
         new_d = sr * n_vec + n * (ray.d - cosi.unsqueeze(-1) * n_vec)
 
         # Update ray direction
-        new_d[~valid] = ray.d[~valid]
-        ray.d = new_d
+        # new_d[~valid] = ray.d[~valid]
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray obliquity
-        new_obliq = torch.sum(new_d * ray.d, axis=-1)
-        new_obliq[~valid] = ray.obliq[~valid]
-        ray.obliq = new_obliq
+        new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
+        # new_obliq[~valid] = ray.obliq[~valid]
+        ray.obliq = torch.where(valid.unsqueeze(-1), new_obliq, ray.obliq)
 
         # Update ray ra
-        ray.ra = ray.ra * valid
+        ray.valid = ray.valid * valid
 
         return ray
 
@@ -230,9 +231,9 @@ class Surface(DeepObj):
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
-        valid = ray.ra > 0
-        new_d[~valid] = ray.d[~valid]
-        ray.d = new_d
+        valid = ray.valid > 0
+        # new_d[~valid] = ray.d[~valid]
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
@@ -374,19 +375,21 @@ class Surface(DeepObj):
         """
         return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
 
-    def is_valid(self, x, y):
+    def is_valid(self, x, y, r=None):
         """Valid points within the data range and boundary of the surface."""
-        return self.is_within_data_range(x, y) & self.is_within_boundary(x, y)
+        if r is None:
+            r = self.r
+        return self.is_within_data_range(x, y) & self.is_within_boundary(x, y, r)
 
-    def is_within_boundary(self, x, y):
-        """Valid points within the boundary of the surface.
-
-        NOTE: DELTA is used to avoid the numerical error.
-        """
-        if self.is_square:
-            valid = (torch.abs(x) <= (self.w / 2)) & (torch.abs(y) <= (self.h / 2))
-        else:
-            valid = (x**2 + y**2).sqrt() <= self.r
+    def is_within_boundary(self, x, y, r=None):
+        """Valid points within the boundary of the surface."""
+        if r is None:
+            r = self.r
+        
+        # if self.is_square:
+        #     valid = (torch.abs(x) <= (self.w / 2)) & (torch.abs(y) <= (self.h / 2))
+        # else:
+        valid = (x**2 + y**2).sqrt() <= r
 
         return valid
 
