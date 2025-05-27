@@ -1831,17 +1831,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     # Lens operation
     # ====================================================================================
     @torch.no_grad()
-    def refocus(self, depth=float("inf")):
+    def refocus(self, foc_dist=float("inf")):
         """Refocus the lens to a depth distance by changing sensor position.
 
         Args:
-            depth (float): depth distance.
+            foc_dist (float): focal distance.
 
         Note:
             In DSLR, phase detection autofocus (PDAF) is a popular and efficient method. But here we simplify the problem by calculating the in-focus position of green light.
         """
         # Calculate in-focus sensor position
-        d_sensor_new = self.calc_foc_plane(depth=depth)
+        d_sensor_new = self.calc_foc_plane(depth=foc_dist)
 
         # Update sensor position
         assert d_sensor_new > 0, "sensor position is negative."
@@ -2257,16 +2257,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
                 elif surf_dict["type"] == "Cubic":
                     s = Cubic.init_from_dict(surf_dict)
-
-                elif surf_dict["type"] == "Phase":
-                    s = Phase.init_from_dict(surf_dict)
-
+                
                 # elif surf_dict["type"] == "GaussianRBF":
                 #     s = GaussianRBF.init_from_dict(surf_dict)
 
                 # elif surf_dict["type"] == "NURBS":
                 #     s = NURBS.init_from_dict(surf_dict)
 
+                elif surf_dict["type"] == "Phase":
+                    s = Phase.init_from_dict(surf_dict)
+                
                 elif surf_dict["type"] == "Plane":
                     s = Plane.init_from_dict(surf_dict)
 
