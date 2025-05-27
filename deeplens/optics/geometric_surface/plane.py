@@ -47,10 +47,14 @@ class Plane(Surface):
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at intersection points."""
-        n = torch.zeros_like(ray.d)
-        n[..., 2] = -1
-        return n
+        """Calculate surface normal vector at intersection points.
+        
+        Normal vector points from the surface toward the side where the light is coming from.
+        """
+        normal_vec = torch.zeros_like(ray.d)
+        normal_vec[..., 2] = -1
+        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+        return normal_vec
 
     def _sag(self, x, y):
         return torch.zeros_like(x)

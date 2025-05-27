@@ -2224,7 +2224,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         return params
 
-    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_mat=False):
+    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_surf_range=None, optim_mat=False):
         """Get optimizers and schedulers for different lens parameters.
 
         Args:
@@ -2232,7 +2232,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             epochs (int, optional): _description_. Defaults to 100.
             ai_decay (float, optional): _description_. Defaults to 0.2.
         """
-        params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
+        params = self.get_optimizer_params(lr, decay, optim_surf_range, optim_mat)
         optimizer = torch.optim.Adam(params)
         return optimizer
 
