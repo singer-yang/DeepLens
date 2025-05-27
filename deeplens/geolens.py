@@ -7,6 +7,8 @@ For image simulation:
 Technical Paper:
     Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
 
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
 This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
     # The license is only for non-commercial use (commercial licenses can be obtained from authors).
     # The material is provided as-is, with no warranties whatsoever.
@@ -14,27 +16,23 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
 """
 
 import json
-import logging
 import math
-import os
-from datetime import datetime
 
 import cv2 as cv
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torchvision.utils import make_grid, save_image
-from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup
+from torchvision.utils import save_image
 
-from .lens import Lens
-from .optics.basics import (
+from deeplens.geolens_eval import GeoLensEval
+from deeplens.geolens_optim import GeoLensOptim
+from deeplens.geolens_vis import GeoLensVis
+from deeplens.lens import Lens
+from deeplens.optics.basics import (
     DEFAULT_WAVE,
     DEPTH,
     DELTA,
     EPSILON,
-    GEO_GRID,
     PSF_KS,
     SPP_CALC,
     SPP_COHERENT,
@@ -42,10 +40,7 @@ from .optics.basics import (
     SPP_RENDER,
     WAVE_RGB,
 )
-from .optics.materials import Material
-from .optics.monte_carlo import forward_integral
-from .optics.ray import Ray
-from .optics.geometric_surface import (
+from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
     Cubic,
@@ -54,27 +49,33 @@ from .optics.geometric_surface import (
     Spheric,
     ThinLens,
 )
-from .optics.wave import AngularSpectrumMethod
-from .optics.utils import diff_float
-from .utils import (
+from deeplens.optics.materials import Material
+from deeplens.optics.monte_carlo import forward_integral
+from deeplens.optics.ray import Ray
+from deeplens.optics.utils import diff_float
+from deeplens.optics.wave import AngularSpectrumMethod
+from deeplens.utils import (
     batch_psnr,
     batch_ssim,
     denormalize_ImageNet,
     img2batch,
     normalize_ImageNet,
-    set_logger,
 )
-# from .geolens_utils import draw_lens_layout, draw_layout_3d
 
 
-class GeoLens(Lens):
-    def __init__(self, filename=None, sensor_res=(1000, 1000), sensor_size=(8.0, 8.0), device=None):
-        """Initialize a geometric lens.
-        
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
+    def __init__(
+        self,
+        filename=None,
+        sensor_res=(1000, 1000),
+        sensor_size=(8.0, 8.0),
+        device=None,
+    ):
+        """Initialize a refractive lens.
+
         There are three ways to initialize a GeoLens:
-            1. Load a lens from .json file
-            2. Load a lens from .zmx/.seq file
-            3. Initialize a lens with no lens file, then manually add surfaces and materials
+            1. Read a lens from .json/.zmx/.seq file
+            2. Initialize a lens with no lens file, then manually add surfaces and materials
         """
         super().__init__(device)
 
@@ -91,7 +92,10 @@ class GeoLens(Lens):
             self.to(self.device)
 
     def read_lens(self, filename):
-        """Read a GeoLens from a file. In this step, sensor size and resolution will usually be overwritten."""
+        """Read a GeoLens from a file.
+
+        In this step, sensor size and resolution will usually be overwritten.
+        """
         # Load lens file
         if filename[-4:] == ".txt":
             raise ValueError("File format .txt has been deprecated.")
@@ -112,8 +116,8 @@ class GeoLens(Lens):
         """After loading lens, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
         self.find_aperture()
-        self.hfov = self.calc_hfov()
         self.foclen = self.calc_efl()
+        self.hfov = self.calc_hfov()
         self.fnum = self.calc_fnum()
 
         # Initialize lens design constraints (edge thickness, etc.)
@@ -125,195 +129,35 @@ class GeoLens(Lens):
         for surf in self.surfaces:
             surf.double()
 
+    def __call__(self, ray):
+        """The input and output of a GeoLens object are both Ray objects."""
+        return self.trace(ray)
+
     # ====================================================================================
     # Ray sampling
     # ====================================================================================
     @torch.no_grad()
-    def sample_parallel_2D(
+    def sample_grid_rays(
         self,
-        fov=0.0,
-        depth=0.0,
-        num_rays=7,
-        wvln=DEFAULT_WAVE,
-        plane="sagittal",
-        entrance_pupil=False,
-        forward=True,
-    ):
-        """Sample 2D parallel rays. Used for (1) drawing lens setup, (2) 2D geometric optics calculation, for example, refocusing to infinity
-
-        Args:
-            fov (float, optional): incident angle (in degree). Defaults to 0.0.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-            num_rays (int, optional): ray number. Defaults to 15.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_rays, 3]
-        """
-        # Sample points on the pupil
-        if entrance_pupil:
-            pupilz, pupilx = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilx = 0, self.surfaces[0].r
-
-        x = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
-        y = torch.zeros_like(x)
-        z = torch.full_like(x, pupilz)
-
-        # Form ray origins
-        if plane == "sagittal":
-            ray_o = torch.stack((x, y, z), axis=-1)  # shape [num_rays, 3]
-        elif plane == "meridional":
-            ray_o = torch.stack((y, x, z), axis=-1)  # shape [num_rays, 3]
-        else:
-            raise ValueError(f"Invalid plane: {plane}")
-
-        # Sample ray directions
-        if forward:
-            dx = torch.full_like(x, np.sin(fov / 57.3))
-            dy = torch.zeros_like(x)
-            dz = torch.full_like(x, np.cos(fov / 57.3))
-        else:
-            dx = torch.full_like(x, -np.sin(fov / 57.3))
-            dy = torch.zeros_like(x)
-            dz = torch.full_like(x, -np.cos(fov / 57.3))
-
-        # Form ray directions
-        if plane == "sagittal":
-            ray_d = torch.stack((dx, dy, dz), axis=-1)  # shape [num_rays, 3]
-        elif plane == "meridional":
-            ray_d = torch.stack((dy, dx, dz), axis=-1)  # shape [num_rays, 3]
-        else:
-            raise ValueError(f"Invalid plane: {plane}")
-
-        # Form rays
-        rays = Ray(ray_o, ray_d, wvln, device=self.device)
-
-        # Propagate rays to the sampling depth
-        rays.propagate_to(depth)
-        return rays
-
-    @torch.no_grad()
-    def sample_parallel(
-        self,
-        fov_x=[0.0],
-        fov_y=[0.0],
-        depth=0.0,
-        num_rays=SPP_CALC,
-        wvln=DEFAULT_WAVE,
-        entrance_pupil=False,
-    ):
-        """Sample parallel rays from object space. Returns rays for each combination of fov_x and fov_y. Used for geometric optics calculation.
-
-        Args:
-            fov_x (float or list): angle rotated from z-axis to ray direction in x0z plane, positive is clockwise.
-            fov_y (float or list): angle rotated from z-axis to ray direction in y0z plane, positive is clockwise.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_fov_x, num_fov_y, num_rays, 3]
-        """
-        if isinstance(fov_x, float):
-            fov_x = [fov_x]
-        if isinstance(fov_y, float):
-            fov_y = [fov_y]
-
-        # Create meshgrid of fov angles
-        fx_grid, fy_grid = torch.meshgrid(
-            torch.tensor([fx / 57.3 for fx in fov_x]),
-            torch.tensor([fy / 57.3 for fy in fov_y]),
-            indexing="ij",
-        )
-
-        # Sample points on the pupil
-        if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilr = 0, self.surfaces[0].r
-
-        ray_o = self.sample_circle(
-            pupilr, pupilz, shape=[len(fov_x), len(fov_y), num_rays]
-        )  # [num_fov_x, num_fov_y, num_rays, 3]
-
-        # Calculate ray directions
-        dx = torch.tan(-fx_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
-        dy = torch.tan(-fy_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
-        dz = torch.ones_like(ray_o[..., 2])
-        ray_d = torch.stack((dx, dy, dz), dim=-1)  # [num_fov_x, num_fov_y, num_rays, 3]
-
-        # Form rays
-        rays = Ray(ray_o, ray_d, wvln, device=self.device)
-
-        # Propagate rays to the sampling depth
-        rays.propagate_to(depth)
-        return rays
-
-    @torch.no_grad()
-    def sample_point_source_2D(
-        self,
-        fov=0.0,
-        depth=DEPTH,
-        num_rays=7,
-        wvln=DEFAULT_WAVE,
-        entrance_pupil=False,
-    ):
-        """Sample point source 2D rays. Used for (1) drawing lens setup.
-
-        Args:
-            depth (float, optional): sampling depth.
-            num_rays (int, optional): ray number. Defaults to 7.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-
-        Returns:
-            ray (Ray object): Ray object. Shape [num_rays, 3]
-        """
-        # Sample point on the object plane
-        ray_o = torch.tensor([depth * float(np.tan(fov / 57.3)), 0, depth])
-        ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
-
-        # Sample points (second point) on the pupil
-        if entrance_pupil:
-            pupilz, pupilx = self.calc_entrance_pupil()
-        else:
-            pupilz, pupilx = 0, self.surfaces[0].r
-
-        x2 = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
-        y2 = torch.zeros_like(x2)
-        z2 = torch.full_like(x2, pupilz)
-        ray_o2 = torch.stack((x2, y2, z2), axis=1)
-
-        # Form the rays
-        ray_d = ray_o2 - ray_o
-        ray = Ray(ray_o, ray_d, wvln, device=self.device)
-
-        # Propagate rays to the sampling depth
-        ray.propagate_to(depth)
-        return ray
-
-    @torch.no_grad()
-    def sample_point_source(
-        self,
-        depth=DEPTH,
         num_grid=[11, 11],
+        depth=float("inf"),
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
-        importance_sampling=False,
+        sample_more_off_axis=False,
     ):
-        """Sample forward rays from 2D grid in the object space. Used for (1) spot/rms/magnification calculation, (2) distortion/sensor sampling
+        """Sample grid rays from object space.
 
-        This function is equivalent to self.point_source_grid() + self.sample_from_points().
+        If depth is infinite, sample parallel rays at different field angles.
+        If depth is finite, sample point source rays from the object plane.
+
+        This function is usually used for (1) PSF map, (2) RMS error map, and (3) spot diagram calculation.
 
         Args:
-            depth (float, optional): sample plane z position. Defaults to -10.0.
-            num_grid (int or list, optional): sample plane resolution. Defaults to 11.
-            num_rays (int, optional): number of rays sampled from each grid point. Defaults to 16.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
+            depth (float, optional): sampling depth. Defaults to float("inf").
+            num_grid (list, optional): number of grid points. Defaults to [11, 11].
+            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            sample_more_off_axis (bool, optional): If True, sample more off-axis rays.
 
         Returns:
             ray (Ray object): Ray object. Shape [num_grid, num_grid, num_rays, 3]
@@ -321,49 +165,78 @@ class GeoLens(Lens):
         if isinstance(num_grid, int):
             num_grid = [num_grid, num_grid]
 
-        # Sample normalized grid points [-1, 1] * [-1, 1] on the sensor plane
-        x, y = torch.meshgrid(
-            torch.linspace(
-                -1,
-                1,
-                num_grid[1],
-                device=self.device,
-            ),
-            torch.linspace(
-                -1,
-                1,
-                num_grid[0],
-                device=self.device,
-            ),
-            indexing="xy",
+        # Calculate field angles. Top-left field has positive fov_x and negative fov_y
+        if sample_more_off_axis:
+            x_list = [
+                np.sign(x) * np.abs(x) ** 0.5 for x in np.linspace(1, -1, num_grid[0])
+            ]
+            y_list = [
+                np.sign(y) * np.abs(y) ** 0.5 for y in np.linspace(-1, 1, num_grid[1])
+            ]
+        else:
+            x_list = [x for x in np.linspace(1, -1, num_grid[0])]
+            y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
+
+        hfov_x = np.rad2deg(self.hfov_x)
+        hfov_y = np.rad2deg(self.hfov_y)
+        fov_x_list = [float(x * hfov_x) for x in x_list]
+        fov_y_list = [float(y * hfov_y) for y in y_list]
+
+        # Sample rays (parallel or point source)
+        if depth == float("inf"):
+            rays = self.sample_parallel(
+                fov_x=fov_x_list, fov_y=fov_y_list, num_rays=num_rays, wvln=wvln
+            )
+        else:
+            rays = self.sample_point_source(
+                fov_x=fov_x_list,
+                fov_y=fov_y_list,
+                num_rays=num_rays,
+                wvln=wvln,
+                depth=depth,
+            )
+        return rays
+
+    @torch.no_grad()
+    def sample_radial_rays(
+        self,
+        num_field=5,
+        depth=float("inf"),
+        num_rays=SPP_PSF,
+        wvln=DEFAULT_WAVE,
+        plane="meridional",
+    ):
+        """Sample radial (meridional, y direction) rays at different field angles.
+
+        This function is usually used for (1) PSF radial map, and (2) RMS error radial map calculation.
+
+        Args:
+            num_field (int, optional): number of field angles. Defaults to 5.
+            depth (float, optional): sampling depth. Defaults to float("inf").
+            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [num_field, num_rays, 3]
+        """
+        fov_y_list = torch.linspace(
+            0, float(np.rad2deg(self.hfov)), num_field, device=self.device
         )
 
-        # Importance sampling to concentrate rays towards edge
-        if importance_sampling:
-            x = torch.sqrt(x.abs()) * x.sign()
-            y = torch.sqrt(y.abs()) * y.sign()
-
-        # Scale grid points to the object space
-        scale = self.calc_scale_pinhole(depth=depth)
-        x, y = x * (self.sensor_size[1]/2) * scale, y * (self.sensor_size[0]/2) * scale
-
-        # Form ray origins
-        z = torch.full_like(x, depth)
-        ray_o = torch.stack((x, y, z), -1)
-        ray_o = ray_o.unsqueeze(2).repeat(
-            1, 1, num_rays, 1
-        )  # shape [num_grid, num_grid, num_rays, 3]
-
-        # Sample second points on the pupil
-        pupilz, pupilr = self.calc_entrance_pupil()
-        ray_o2 = self.sample_circle(
-            r=pupilr, z=pupilz, shape=(num_grid[0], num_grid[1], num_rays)
-        ).to(self.device)  # shape [num_grid, num_grid, num_rays, 3]
-
-        # Compute ray directions
-        ray_d = ray_o2 - ray_o
-
-        ray = Ray(ray_o, ray_d, wvln, device=self.device)
+        if depth == float("inf"):
+            ray = self.sample_parallel(
+                fov_x=[0.0], fov_y=fov_y_list, num_rays=num_rays, wvln=wvln
+            )
+            ray = ray.squeeze(1)
+        else:
+            point_obj_x = torch.zeros(num_field, device=self.device)
+            point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180)
+            point_obj = torch.stack(
+                [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
+            )
+            ray = self.sample_from_points(
+                points=point_obj, num_rays=num_rays, wvln=wvln
+            )
         return ray
 
     @torch.no_grad()
@@ -373,12 +246,13 @@ class GeoLens(Lens):
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
         shrink_pupil=False,
-        normalized=False,
     ):
-        """Sample forward rays from given point source (un-normalized positions). Used for (1) PSF calculation, (2) chief ray calculation.
+        """Sample rays from given point source (absolute physical coordinates) from the object space.
+
+        Used for (1) PSF calculation, (2) chief ray calculation.
 
         Args:
-            points (list): ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
+            points (list): absolute ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
             num_rays (int): sample per pixel. Defaults to 8.
             forward (bool): forward or backward rays. Defaults to True.
             pupil (bool): whether to use pupil. Defaults to True.
@@ -388,18 +262,15 @@ class GeoLens(Lens):
         Returns:
             ray: Ray object. Shape [*shape_points, num_rays, 3]
         """
-        if normalized:
-            raise NotImplementedError(
-                "Currently only support unnormalized object point positions."
-            )
-        else:
-            ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
+        # Ray origin is given
+        ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
+        ray_o = ray_o.to(self.device)
 
-        # Sample second points on the pupil
+        # Sample points on the pupil
         pupilz, pupilr = self.calc_entrance_pupil(shrink_pupil=shrink_pupil)
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(*ray_o.shape[:-1], num_rays)
-        ).to(ray_o.device)
+        )
 
         # Compute ray directions
         if len(ray_o.shape) == 1:
@@ -422,9 +293,122 @@ class GeoLens(Lens):
         else:
             raise Exception("The shape of input object positions is not supported.")
 
-        # Calculate rays
+        # Calculate rays and propagate to 0.0 (to improve stability)
         rays = Ray(ray_o, ray_d, wvln, device=self.device)
         return rays
+
+    @torch.no_grad()
+    def sample_parallel(
+        self,
+        fov_x=[0.0],
+        fov_y=[0.0],
+        num_rays=SPP_CALC,
+        wvln=DEFAULT_WAVE,
+        entrance_pupil=True,
+        shrink_pupil=False,
+        depth=-1.0,
+    ):
+        """Sample parallel rays in object space.
+
+        Used for geometric optics calculation.
+
+        Args:
+            fov_x (float or list): degree angle in x0z plane.
+            fov_y (float or list): degree angle in y0z plane.
+            depth (float, optional): sampling depth. Defaults to 0.0.
+            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
+            shrink_pupil (bool, optional): whether to shrink the pupil. Defaults to False.
+            depth (float, optional): sampling depth. Defaults to 0.0.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [num_fov_y, num_fov_x, num_rays, 3], arranged in uv order.
+        """
+        # Preprocess fov angles
+        if isinstance(fov_x, float):
+            fov_x = [fov_x]
+        if isinstance(fov_y, float):
+            fov_y = [fov_y]
+
+        fov_x = torch.tensor([fx * torch.pi / 180 for fx in fov_x]).to(self.device)
+        fov_y = torch.tensor([fy * torch.pi / 180 for fy in fov_y]).to(self.device)
+
+        # Sample ray origins on the pupil, shape [num_fov_x, num_fov_y, num_rays, 3]
+        if entrance_pupil:
+            pupilz, pupilr = self.calc_entrance_pupil(shrink_pupil=shrink_pupil)
+        else:
+            pupilz, pupilr = 0, self.surfaces[0].r
+
+        ray_o = self.sample_circle(
+            r=pupilr, z=pupilz, shape=[len(fov_y), len(fov_x), num_rays]
+        )
+
+        # Sample ray directions, shape [num_fov_y, num_fov_x, num_rays, 3]
+        fov_x_grid, fov_y_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
+        dx = torch.tan(fov_x_grid).unsqueeze(-1).expand_as(ray_o[..., 0])
+        dy = torch.tan(fov_y_grid).unsqueeze(-1).expand_as(ray_o[..., 1])
+        dz = torch.ones_like(ray_o[..., 2])
+        ray_d = torch.stack((dx, dy, dz), dim=-1)
+
+        # Form rays and propagate to the target depth
+        rays = Ray(ray_o, ray_d, wvln, device=self.device)
+        rays.prop_to(depth)
+        return rays
+
+    @torch.no_grad()
+    def sample_point_source(
+        self,
+        fov_x=[0.0],
+        fov_y=[0.0],
+        depth=DEPTH,
+        num_rays=SPP_PSF,
+        wvln=DEFAULT_WAVE,
+        entrance_pupil=True,
+    ):
+        """Sample point source rays from object space with given field angles.
+
+        Used for (1) spot/rms/magnification calculation, (2) distortion/sensor sampling.
+
+        This function is equivalent to self.point_source_grid() + self.sample_from_points().
+
+        Args:
+            fov_x (float or list): field angle in x0z plane.
+            fov_y (float or list): field angle in y0z plane.
+            depth (float, optional): sample plane z position. Defaults to -10.0.
+            num_rays (int, optional): number of rays sampled from each grid point. Defaults to 16.
+            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
+            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
+
+        Returns:
+            ray (Ray object): Ray object. Shape [len(fov_y), len(fov_x), num_rays, 3], arranged in uv order.
+        """
+        # Sample second points on the pupil, shape [len(fov_y), len(fov_x), num_rays, 3]
+        if entrance_pupil:
+            pupilz, pupilr = self.calc_entrance_pupil()
+        else:
+            pupilz, pupilr = 0, self.surfaces[0].r
+
+        # Sample grid points with given field angles, shape [len(fov_y), len(fov_x), 3]
+        fov_x = torch.tensor([fx * torch.pi / 180 for fx in fov_x]).to(self.device)
+        fov_y = torch.tensor([fy * torch.pi / 180 for fy in fov_y]).to(self.device)
+        fov_x_grid, fov_y_grid = torch.meshgrid(fov_x, fov_y, indexing="xy")
+        x, y = torch.tan(fov_x_grid) * depth, torch.tan(fov_y_grid) * depth
+
+        # Form ray origins, shape [len(fov_y), len(fov_x), num_rays, 3]
+        z = torch.full_like(x, depth)
+        ray_o = torch.stack((x, y, z), -1)
+        ray_o = ray_o.unsqueeze(2).repeat(1, 1, num_rays, 1)
+
+        ray_o2 = self.sample_circle(
+            r=pupilr, z=pupilz, shape=(len(fov_y), len(fov_x), num_rays)
+        )
+
+        # Compute ray directions
+        ray_d = ray_o2 - ray_o
+
+        ray = Ray(ray_o, ray_d, wvln, device=self.device)
+        return ray
 
     @torch.no_grad()
     def sample_sensor(self, spp=64, wvln=DEFAULT_WAVE, sub_pixel=False):
@@ -460,9 +444,7 @@ class GeoLens(Lens):
 
         # Sample second points on the pupil
         pupilz, pupilr = self.calc_exit_pupil()
-        ray_o2 = self.sample_circle(
-            r=pupilr, z=pupilz, shape=(*self.sensor_res, spp)
-        ).to(self.device)
+        ray_o2 = self.sample_circle(r=pupilr, z=pupilz, shape=(*self.sensor_res, spp))
 
         # Form rays
         ray_o = torch.stack((x1, y1, z1), 2)
@@ -487,8 +469,7 @@ class GeoLens(Lens):
         ray = Ray(ray_o, ray_d, wvln, device=self.device)
         return ray
 
-    @staticmethod
-    def sample_circle(r, z, shape=[16, 16, 512]):
+    def sample_circle(self, r, z, shape=[16, 16, 512]):
         """Sample points inside a circle.
 
         Args:
@@ -499,11 +480,13 @@ class GeoLens(Lens):
         Returns:
             torch.Tensor: Tensor of shape [*shape, 3] containing sampled points.
         """
+        device = self.device
+
         # Generate random angles
-        theta = torch.rand(*shape) * 2 * torch.pi
+        theta = torch.rand(*shape, device=device) * 2 * torch.pi
 
         # Generate random radii with square root for uniform distribution
-        r2 = torch.rand(*shape) * r**2
+        r2 = torch.rand(*shape, device=device) * r**2
         radius = torch.sqrt(r2 + EPSILON)
 
         # Convert to Cartesian coordinates
@@ -522,10 +505,6 @@ class GeoLens(Lens):
     # ====================================================================================
     # Ray tracing
     # ====================================================================================
-    def __call__(self, ray):
-        """Forward ray tracing. The input and output of a GeoLens object are both Ray objects."""
-        return self.trace(ray)
-
     def trace(self, ray, lens_range=None, record=False):
         """Ray tracing function. Forward or backward ray tracing is automatically determined by ray directions.
 
@@ -538,11 +517,10 @@ class GeoLens(Lens):
             ray_final (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
-        is_forward = ray.d.reshape(-1, 3)[0, 2] > 0
         if lens_range is None:
             lens_range = range(0, len(self.surfaces))
 
-        if is_forward:
+        if ray.is_forward:
             ray_out, ray_o_record = self.forward_tracing(ray, lens_range, record=record)
         else:
             ray_out, ray_o_record = self.backward_tracing(
@@ -559,7 +537,7 @@ class GeoLens(Lens):
             depth (float): sensor distance.
         """
         ray, _ = self.trace(ray)
-        ray = ray.propagate_to(depth)
+        ray = ray.prop_to(depth)
         return ray
 
     def trace2sensor(self, ray, record=False):
@@ -573,11 +551,17 @@ class GeoLens(Lens):
             ray_out (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
+        # Manually propagate ray to a shallow depth to improve accuracy
+        if (ray.o[..., 2].min() < -1000.0).any():
+            ray = ray.prop_to(-10.0)
+
+        # Trace rays
         ray, ray_o_record = self.trace(ray, record=record)
-        ray = ray.propagate_to(self.d_sensor)
+        ray = ray.prop_to(self.d_sensor)
 
         if record:
             ray_o = ray.o.clone().detach()
+            # Set to nan to be skipped in 2d layout visualization
             ray_o[ray.ra == 0] = float("nan")
             ray_o_record.append(ray_o)
             return ray, ray_o_record
@@ -594,9 +578,6 @@ class GeoLens(Lens):
         """
         if record:
             ray_o_record = []
-            # A hack for the case of infinite object
-            if ray.o[..., 2].min() < -1000.0:
-                ray.propagate_to(-0.1)
             ray_o_record.append(ray.o.clone().detach())
         else:
             ray_o_record = None
@@ -775,7 +756,7 @@ class GeoLens(Lens):
             raise Exception("Input image should be Tensor.")
 
         # Scale object image physical size to get 1:1 pixel-pixel alignment with sensor image
-        ray = ray.propagate_to(depth)
+        ray = ray.prop_to(depth)
         p = ray.o[..., :2]
         pixel_size = scale * self.pixel_size
         ray.ra = (
@@ -813,7 +794,7 @@ class GeoLens(Lens):
 
         return image
 
-    def unwarp(self, img, depth=DEPTH, grid_size=128, crop=True, flip=True):
+    def unwarp(self, img, depth=DEPTH, num_grid=128, crop=True, flip=True):
         """Unwarp rendered images using distortion map.
 
         Args:
@@ -825,25 +806,23 @@ class GeoLens(Lens):
         Returns:
             img_unwarpped (tensor): Unwarped image tensor. Shape of [N, C, H, W].
         """
-        # Calculate distortion grid
-        distortion_grid = self.distortion(
-            depth=depth, grid_size=grid_size
-        )  # shape (grid_size, grid_size, 2)
+        # Calculate distortion map, shape (num_grid, num_grid, 2)
+        distortion_map = self.distortion_map(depth=depth, num_grid=num_grid)
 
-        # Interpolate distortion grid to image resolution
-        distortion_grid = distortion_grid.permute(2, 0, 1).unsqueeze(1)
-        distortion_grid = torch.flip(distortion_grid, [-2]) if flip else distortion_grid
-        distortion_grid = F.interpolate(
-            distortion_grid, img.shape[-2:], mode="bilinear", align_corners=True
-        )
-        distortion_grid = distortion_grid.permute(1, 2, 3, 0).repeat(
+        # Interpolate distortion map to image resolution
+        distortion_map = distortion_map.permute(2, 0, 1).unsqueeze(1)
+        # distortion_map = torch.flip(distortion_map, [-2]) if flip else distortion_map
+        distortion_map = F.interpolate(
+            distortion_map, img.shape[-2:], mode="bilinear", align_corners=True
+        )  # shape (B, 2, Himg, Wimg)
+        distortion_map = distortion_map.permute(1, 2, 3, 0).repeat(
             img.shape[0], 1, 1, 1
-        )  # shape (N, H, W, 2)
+        )  # shape (B, Himg, Wimg, 2)
 
         # Unwarp using grid_sample function
         img_unwarpped = F.grid_sample(
-            img, distortion_grid, align_corners=True
-        )  # shape (N, C, H, W)
+            img, distortion_map, align_corners=True
+        )  # shape (B, C, Himg, Wimg)
         return img_unwarpped
 
     @torch.no_grad()
@@ -963,7 +942,7 @@ class GeoLens(Lens):
             psf_center: [N, 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
-            # Shrink the pupil and calculate centroid ray as the chief ray. Distortion will affect the result.
+            # Shrink the pupil and calculate centroid ray as the chief ray.
             ray = self.sample_from_points(point, num_rays=SPP_CALC, shrink_pupil=True)
             ray = self.trace2sensor(ray)
             assert (ray.ra == 1).any(), "No sampled rays is valid."
@@ -972,7 +951,7 @@ class GeoLens(Lens):
             psf_center = -psf_center[..., :2]  # shape [N, 2]
 
         elif method == "pinhole":
-            # Pinhole camera perspective projection. Assume no distortion.
+            # Pinhole camera perspective projection.
             scale = self.calc_scale_pinhole(point[..., 2])
             psf_center = point[..., :2] / scale.unsqueeze(-1)
 
@@ -1212,289 +1191,47 @@ class GeoLens(Lens):
     # ====================================================================================
     # Classical optical design
     # ====================================================================================
-    @torch.no_grad()
-    def rms_map(self, res=(128, 128), depth=DEPTH):
-        """Calculate the RMS spot error map as a weight mask for lens design.
+    def analysis_rms(self, depth=float("inf")):
+        """Compute RMS spot size and radius for on-axis and off-axis fields.
 
         Args:
-            res (tuple, optional): resolution of the RMS map. Defaults to (32, 32).
-            depth (float, optional): depth of the point source. Defaults to DEPTH.
-
-        Returns:
-            rms_map (torch.Tensor): RMS map normalized to [0, 1].
+            depth (float, optional): Depth of the point source. Defaults to float("inf").
         """
-        ray = self.sample_point_source(depth=depth, num_rays=SPP_PSF, num_grid=64)
-        ray, _ = self.trace(ray)
-        o2 = ray.project_to(self.d_sensor)
-        o2_center = (o2 * ray.ra.unsqueeze(-1)).sum(0) / ray.ra.sum(0).add(
-            EPSILON
-        ).unsqueeze(-1)
-        # normalized to center (0, 0)
-        o2_norm = (o2 - o2_center) * ray.ra.unsqueeze(-1)
-
-        rms_map = torch.sqrt(
-            ((o2_norm**2).sum(-1) * ray.ra).sum(0) / (ray.ra.sum(0) + EPSILON)
-        )
-        rms_map = (
-            F.interpolate(
-                rms_map.unsqueeze(0).unsqueeze(0),
-                res,
-                mode="bilinear",
-                align_corners=True,
-            )
-            .squeeze(0)
-            .squeeze(0)
-        )
-        rms_map /= rms_map.max()
-
-        return rms_map
-
-    def analysis_rms(self, depth=float("inf")):
-        """Compute RMS-based error. Contain both RMS errors and RMS radius. This function needs more testing."""
-        if depth == float("inf"):
-            num_fields = 3
-            fov_x = [0.0]
-            fov_y = torch.linspace(0.0, self.hfov * 57.3, num_fields).tolist()
-
-            all_rms_errors = []
-            all_rms_radii = []
-            for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-                # Ray tracing
-                ray = self.sample_parallel(
-                    fov_x=fov_x, fov_y=fov_y, num_rays=SPP_PSF, wvln=wvln
-                )
-                ray = self.trace2sensor(ray)
-
-                # Green light point center for reference
-                if i == 0:
-                    pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
-                        -2
-                    ) / ray.ra.sum(-1).add(EPSILON).unsqueeze(-1)
-                    pointc_green = pointc_green.unsqueeze(-2).repeat(
-                        1, 1, SPP_PSF, 1
-                    )  # shape [1, num_fields, num_rays, 2]
-
-                # Calculate RMS error for different FoVs
-                o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
-
-                rms_error = ((o2_norm**2).sum(-1).sqrt() * ray.ra).sum(-1) / (
-                    ray.ra.sum(-1) + EPSILON
-                )  # shape [1, num_fields]
-                rms_radius = (o2_norm**2).sum(-1).sqrt().max(dim=-1).values
-                all_rms_errors.append(rms_error[0])
-                all_rms_radii.append(rms_radius[0])
-
-            # Calculate and print average across wavelengths
-            avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-            avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-
-            avg_rms_error = [round(value.item(), 3) for value in avg_rms_error]
-            avg_rms_radius = [round(value.item(), 3) for value in avg_rms_radius]
-
-            print(
-                f"RMS average error (chief ray): center {avg_rms_error[0]} mm, middle {avg_rms_error[1]} mm, off-axis {avg_rms_error[-1]} mm"
-            )
-            print(
-                f"RMS maximum radius (chief ray): center {avg_rms_radius[0]} mm, middle {avg_rms_radius[1]} mm, off-axis {avg_rms_radius[-1]} mm"
-            )
-
-        else:
-            # Sample diagonal points
-            grid = 20
-            x = torch.linspace(0, 1, grid)
-            y = torch.linspace(0, 1, grid)
-            z = torch.full_like(x, depth)
-            points = torch.stack((x, y, z), dim=-1)
-            scale = self.calc_scale_ray(depth)
-
-            # Ray position in the object space by perspective projection, because points are normalized
-            point_obj_x = (
-                points[..., 0] * scale * self.sensor_size[1] / 2
-            )  # x coordinate
-            point_obj_y = (
-                points[..., 1] * scale * self.sensor_size[0] / 2
-            )  # y coordinate
-            point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
-
-            # Point center determined by green light
-            ray = self.sample_from_points(
-                points=point_obj, num_rays=SPP_PSF, wvln=DEFAULT_WAVE
+        num_field = 3
+        rms_error_fields = []
+        rms_radius_fields = []
+        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
+            # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
+            ray = self.sample_radial_rays(
+                num_field=num_field, depth=depth, num_rays=SPP_PSF, wvln=wvln
             )
             ray = self.trace2sensor(ray)
-            pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
-                -2
-            ) / ray.ra.unsqueeze(-1).sum(-2).add(EPSILON)
 
-            # Calculate RMS spot size
-            rms = []
-            for wvln in WAVE_RGB:
-                # Trace rays to sensor plane
-                ray = self.sample_from_points(
-                    points=point_obj, num_rays=SPP_PSF, wvln=wvln
-                )
-                ray = self.trace2sensor(ray)
+            # Green light point center for reference, shape [num_field, 1, 2]
+            if i == 0:
+                ray_xy_center_green = ray.centroid()[..., :2].unsqueeze(-2)
 
-                # Calculate RMS error for different FoVs
-                o2_norm = (
-                    ray.o[..., :2] - pointc_green.unsqueeze(-2)
-                ) * ray.ra.unsqueeze(-1)
-                rms0 = torch.sqrt(
-                    (o2_norm**2 * ray.ra.unsqueeze(-1)).sum((-2, -1))
-                    / (ray.ra.sum(-1) + EPSILON)
-                )
-                rms.append(rms0)
-
-            rms = torch.stack(rms, dim=0)
-            rms = torch.mean(rms, dim=0)
-
-            # Calculate RMS error for on-axis and off-axis
-            rms_avg = round(rms.mean().item(), 3)
-            rms_radius_on_axis = round(rms[0].item(), 3)  # Center point
-            rms_radius_off_axis = round(rms[-1].item(), 3)  # Corner point
-
-            print(
-                f"RMS average error (chief ray): center {rms_radius_on_axis} mm, off-axis {rms_radius_off_axis} mm, average {rms_avg} mm"
+            # Calculate RMS spot size and radius for different FoVs
+            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.ra.unsqueeze(-1)
+            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.ra).sum(-1) / (
+                ray.ra.sum(-1) + EPSILON
             )
+            rms_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
 
-    def psf2mtf(self, psf, diag=False):
-        """Convert 2D PSF kernel to MTF curve by FFT.
+            # Append to list
+            rms_error_fields.append(rms_error)
+            rms_radius_fields.append(rms_radius)
 
-        Args:
-            psf (tensor): 2D PSF tensor.
+        # Average over wavelengths
+        avg_rms_error_um = torch.stack(rms_error_fields).mean(dim=0) * 1000.0
+        avg_rms_radius_um = torch.stack(rms_radius_fields).mean(dim=0) * 1000.0
 
-        Returns:
-            freq (ndarray): Frequency axis.
-            tangential_mtf (ndarray): Tangential MTF.
-            sagittal_mtf (ndarray): Sagittal MTF.
-        """
-        psf = psf.cpu().numpy()
-        x = np.linspace(-1, 1, psf.shape[1]) * self.pixel_size * psf.shape[1] / 2
-        y = np.linspace(-1, 1, psf.shape[0]) * self.pixel_size * psf.shape[0] / 2
-
-        if diag:
-            raise Exception("Diagonal PSF is not tested.")
-            diag_psf = np.diag(np.flip(psf, axis=0))
-            x *= math.sqrt(2)
-            y *= math.sqrt(2)
-            delta_x = self.pixel_size * math.sqrt(2)
-
-            diag_mtf = np.abs(np.fft.fft(diag_psf))
-            # diag_mtf /= diag_mtf.max()
-
-            # Create frequency axis in cycles/mm
-            freq = np.fft.fftfreq(psf.shape[0], delta_x)
-
-            # Only keep the positive frequencies
-            positive_freq_idx = freq > 0
-
-            freq = freq[positive_freq_idx]
-            diag_mtf = diag_mtf[positive_freq_idx]
-            diag_mtf /= diag_mtf[0]
-
-            return freq, diag_mtf
-        else:
-            # Extract 1D PSFs along the sagittal and tangential directions
-            center_x = psf.shape[1] // 2
-            center_y = psf.shape[0] // 2
-            sagittal_psf = psf[center_y, :]
-            tangential_psf = psf[:, center_x]
-
-            # Fourier Transform to get the MTFs
-            sagittal_mtf = np.abs(np.fft.fft(sagittal_psf))
-            tangential_mtf = np.abs(np.fft.fft(tangential_psf))
-
-            # Normalize the MTFs
-            sagittal_mtf /= sagittal_mtf.max()
-            tangential_mtf /= tangential_mtf.max()
-
-            delta_x = self.pixel_size  # / 2
-
-            # Create frequency axis in cycles/mm
-            freq = np.fft.fftfreq(psf.shape[0], delta_x)
-
-            # Only keep the positive frequencies
-            positive_freq_idx = freq > 0
-
-            return (
-                freq[positive_freq_idx],
-                tangential_mtf[positive_freq_idx],
-                sagittal_mtf[positive_freq_idx],
-            )
-
-    def vignetting(self):
-        """Compute vignetting."""
-        pass
-
-    def field_curvature(self):
-        """Compute field curvature."""
-        pass
-
-    def ray_aberration(self):
-        """Compute ray aberration."""
-        pass
-
-    def distortion(self, depth=DEPTH, grid_size=64):
-        """Compute distortion map at a given depth.
-
-        Args:
-            depth (float): depth of the point source.
-            img_res (tuple): resolution of the image.
-
-        Returns:
-            distortion_grid (torch.Tensor): distortion map. shape (grid_size, grid_size, 2)
-        """
-        # Ray tracing to calculate distortion map
-        ray = self.sample_point_source(
-            depth=depth, num_rays=SPP_CALC, num_grid=grid_size
+        print(
+            f"RMS average error (chief ray): center {avg_rms_error_um[0]:.3f} um, middle {avg_rms_error_um[1]:.3f} um, off-axis {avg_rms_error_um[-1]:.3f} um"
         )
-        ray = self.trace2sensor(ray)
-        o_dist = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(-2) / ray.ra.unsqueeze(
-            -1
-        ).sum(-2).add(EPSILON)  # shape (H, W, 2)
-
-        x_dist = -o_dist[..., 0] / self.sensor_size[1] * 2
-        y_dist = o_dist[..., 1] / self.sensor_size[0] * 2
-        distortion_grid = torch.stack((x_dist, y_dist), dim=-1)  # shape (H, W, 2)
-        return distortion_grid
-
-    def calc_distortion_1D(self, hfov, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=True):
-        """Calculate distortion at a specific field angle.
-
-        Args:
-            hfov (float): view angle (degree)
-            plane (str): meridional or sagittal
-            ray_aiming (bool): whether the chief ray through the center of the stop.
-
-        Returns:
-            distortion (float): distortion at the specific field angle
-        """
-        # Calculate ideal image height
-        effective_foclen = self.calc_efl()
-        ideal_image_height = effective_foclen * torch.tan(hfov * torch.pi / 180)
-
-        # Calculate chief ray
-        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=hfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming)
-        ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
-
-        ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
-        t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
-
-        # Calculate actual image height
-        if plane == "sagittal":
-            actual_image_height = abs(ray.o[..., 0] + ray.d[..., 0] * t)
-        elif plane == "meridional":
-            actual_image_height = abs(ray.o[..., 1] + ray.d[..., 1] * t)
-        else:
-            raise ValueError(f"Invalid plane: {plane}")
-
-        # Calculate distortion
-        distortion = (actual_image_height - ideal_image_height) / ideal_image_height
-
-        # Handle the case where ideal_image_height is 0 or very close to 0
-        mask = abs(ideal_image_height) < EPSILON
-        distortion[mask] = torch.tensor(0.0, device=self.device)
-
-        return distortion
+        print(
+            f"RMS maximum radius (chief ray): center {avg_rms_radius_um[0]:.3f} um, middle {avg_rms_radius_um[1]:.3f} um, off-axis {avg_rms_radius_um[-1]:.3f} um"
+        )
 
     # ====================================================================================
     # Geometrical optics calculation
@@ -1529,18 +1266,35 @@ class GeoLens(Lens):
     def calc_efl(self):
         """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
         # Trace a paraxial chief ray
-        small_fov = 0.001  # paraxial fov in radian
-        chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(hfov=np.rad2deg(small_fov), wvln=DEFAULT_WAVE, ray_aiming=True)       
-        ray = Ray(chief_ray_o[1, ...], chief_ray_d[1, ...], wvln=DEFAULT_WAVE, device=self.device)
-        ray, _ = self.trace(ray)
+        small_fov_rad = 0.001
+        small_fov_deg = float(np.rad2deg(small_fov_rad))
+        # ===========>
+        # chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
+        #     hfov=small_fov_deg, wvln=DEFAULT_WAVE, ray_aiming=True
+        # )
+        # ray = Ray(
+        #     chief_ray_o[1, ...],
+        #     chief_ray_d[1, ...],
+        #     wvln=DEFAULT_WAVE,
+        #     device=self.device,
+        # )
+        # ray, _ = self.trace(ray)
 
-        # Compute the effective focal length
-        image_height = (
-            ray.o[..., 1]
-            + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
-        )
-        eff_foclen = image_height / float(np.tan(small_fov))
-        return eff_foclen.mean().item()
+        # # Compute the effective focal length
+        # image_height = (
+        #     ray.o[..., 1]
+        #     + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
+        # )
+        # ===========>
+        # Sample paraxial rays, shape [1, 1, num_rays, 3]
+        ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, shrink_pupil=True)
+        ray = self.trace2sensor(ray)
+        image_height = (ray.o[0, 0, :, 1] * ray.ra[0, 0, :]).sum() / ray.ra[
+            0, 0, :
+        ].sum()
+        # ===========>
+        eff_foclen = image_height.item() / float(np.tan(small_fov_rad))
+        return eff_foclen
 
     @torch.no_grad()
     def calc_bfl(self, wvln=DEFAULT_WAVE):
@@ -1652,67 +1406,43 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def calc_hfov(self):
-        """Compute half diagonal fov. Shot rays from edge of sensor, trace them to the object space and compute output angel as the fov."""
-        # Sample rays going out from edge of sensor, shape [M, 3]
+        """Compute half diagonal fov.
+
+        Shot rays from edge of sensor, trace them to the object space and compute output angel as the fov.
+        """
+        # Sample rays going out from edge of sensor, shape [SPP_CALC, 3]
         o1 = torch.zeros([SPP_CALC, 3])
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
 
-        # Option 1: sample second points on exit pupil
+        # Sample second points on exit pupil
         pupilz, pupilx = self.calc_exit_pupil()
         x2 = torch.linspace(-pupilx, pupilx, SPP_CALC)
         z2 = torch.full_like(x2, pupilz)
-        # Option 2: sample second points on last surface
-        # x2 = torch.linspace(0, self.surfaces[-1].r, SPP_CALC)
-        # z2 = torch.full_like(x2, self.surfaces[-1].d.item())
-
         y2 = torch.full_like(x2, 0)
         o2 = torch.stack((x2, y2, z2), axis=-1)
 
+        # Ray tracing to object space
         ray = Ray(o1, o2 - o1, device=self.device)
         ray = self.trace2obj(ray)
 
-        # compute fov
-        tan_fov = ray.d[..., 0] / ray.d[..., 2]
-        fov = torch.atan(torch.sum(tan_fov * ray.ra) / torch.sum(ray.ra))
+        # Compute fov from output ray direction
+        tan_hfov = ray.d[..., 0] / ray.d[..., 2]
+        hfov = torch.atan(torch.sum(tan_hfov * ray.ra) / torch.sum(ray.ra))
 
-        if torch.isnan(fov):
-            fov = float(np.arctan(self.r_sensor / self.d_sensor.item()))
-            print(f"Computing fov failed, set fov to {fov}.")
+        # If calculation failed, use pinhole camera model to compute fov
+        if torch.isnan(hfov):
+            hfov = float(np.arctan(self.r_sensor / self.foclen))
+            print(f"Computing fov failed, set fov to {hfov}.")
         else:
-            fov = fov.item()
+            hfov = hfov.item()
 
-        return fov
+        # Compute horizontal (x) and vertical (y) fov from diagonal fov
+        diag = math.sqrt(self.sensor_size[0] ** 2 + self.sensor_size[1] ** 2)
+        self.hfov_x = math.atan((self.sensor_size[0] * math.tan(hfov)) / diag)
+        self.hfov_y = math.atan((self.sensor_size[1] * math.tan(hfov)) / diag)
+        self.hfov = hfov
 
-    @torch.no_grad()
-    def calc_principal(self):
-        """Compute principal (front and back) planes."""
-        # Backward ray tracing to compute first principal point
-        ray = self.sample_parallel_2D(
-            fov=0.0,
-            depth=self.d_sensor.item(),
-            num_rays=SPP_CALC,
-            wvln=DEFAULT_WAVE,
-            forward=False,
-        )
-        inc_ray = ray.clone()
-        out_ray, _ = self.trace(ray)
-
-        t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
-        z = out_ray.o[..., 2] - out_ray.d[..., 2] * t
-        front_principal = np.nanmean(z[ray.ra > 0].cpu().numpy())
-
-        # Forward ray tracing to compute second principal point
-        ray = self.sample_parallel_2D(
-            fov=0.0, depth=0.0, num_rays=SPP_CALC, wvln=DEFAULT_WAVE, forward=True
-        )
-        inc_ray = ray.clone()
-        out_ray, _ = self.trace(ray)
-
-        t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
-        z = out_ray.o[..., 2] - out_ray.d[..., 2] * t
-        back_principal = np.nanmean(z[ray.ra > 0].cpu().numpy())
-
-        return front_principal, back_principal
+        return hfov
 
     @torch.no_grad()
     def calc_scale(self, depth, method="pinhole"):
@@ -1720,7 +1450,10 @@ class GeoLens(Lens):
         if method == "pinhole":
             scale = self.calc_scale_pinhole(depth)
         elif method == "raytracing":
-            scale = self.calc_scale_ray(depth)
+            raise NotImplementedError(
+                "Ray tracing for scale factor has been deprecated."
+            )
+            # scale = self.calc_scale_ray(depth)
         else:
             raise ValueError(f"Invalid method: {method}.")
 
@@ -1728,70 +1461,79 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def calc_scale_pinhole(self, depth):
-        """Assume the first principle point is at (0, 0, 0), use pinhole camera model to calculate the scale factor.
+        """Scale factor computed by pinhole camera model.
 
-        Note: due to distortion, the scale factor computed here is larger than the actual scale factor.
+        Note: if there is distortion, the scale factor computed with pinhole camera model will be inaccurate.
 
         Args:
             depth (float): depth of the object.
 
         Returns:
-            scale (float): scale factor.
+            scale (float): scale factor. phy_size_obj / phy_size_img
         """
-        scale = -depth * float(np.tan(self.hfov)) / self.r_sensor
-        return scale
+        return -depth / self.foclen
 
-    @torch.no_grad()
-    def calc_scale_ray(self, depth):
-        """Use ray tracing to compute scale factor."""
-        if isinstance(depth, float) or isinstance(depth, int):
-            # Sample rays [num_grid, num_grid, spp, 3] from the object plane
-            num_grid = 64
-            ray = self.sample_point_source(depth=depth, num_rays=SPP_CALC, num_grid=num_grid)
+    # @torch.no_grad()
+    # def calc_scale_ray(self, depth):
+    #     """Use ray tracing to compute scale factor."""
+    #     if isinstance(depth, float) or isinstance(depth, int):
+    #         # Sample rays [num_grid, num_grid, spp, 3] from the object plane
+    #         num_grid = 64
+    #         raise Warning(
+    #             "This function needs to be checked because of the change of the ray sampling function."
+    #         )
+    #         ray = self.sample_point_source(
+    #             depth=depth, num_rays=SPP_CALC, num_grid=num_grid
+    #         )
 
-            # Map points from object space to sensor space, ground-truth
-            o1 = ray.o.clone()[..., :2]
-            o1 = torch.flip(o1, [0, 1])
+    #         # Map points from object space to sensor space, ground-truth
+    #         o1 = ray.o.clone()[..., :2]
+    #         o1 = torch.flip(o1, [0, 1])
 
-            ray, _ = self.trace(ray)
-            o2 = ray.project_to(self.d_sensor)  # shape [num_grid, num_grid, spp, 2]
+    #         ray, _ = self.trace(ray)
+    #         o2 = ray.project_to(self.d_sensor)  # shape [num_grid, num_grid, spp, 2]
 
-            # Use only center region of points, because we assume center points have no distortion
-            center_start = num_grid // 2 - num_grid // 8
-            center_end = num_grid // 2 + num_grid // 8
-            o1_center = o1[center_start:center_end, center_start:center_end, :, :]
-            o2_center = o2[center_start:center_end, center_start:center_end, :, :]
-            ra_center = ray.ra.clone().detach()[
-                center_start:center_end, center_start:center_end, :
-            ]
+    #         # Use only center region of points, because we assume center points have no distortion
+    #         center_start = num_grid // 2 - num_grid // 8
+    #         center_end = num_grid // 2 + num_grid // 8
+    #         o1_center = o1[center_start:center_end, center_start:center_end, :, :]
+    #         o2_center = o2[center_start:center_end, center_start:center_end, :, :]
+    #         ra_center = ray.ra.clone().detach()[
+    #             center_start:center_end, center_start:center_end, :
+    #         ]
 
-            x1 = o1_center[:, :, 0, 0]  # shape [num_grid // 4, num_grid // 4]
-            x2 = (o2_center[:, :, :, 0] * ra_center).sum(dim=-1) / (ra_center).sum(
-                dim=-1
-            ).add(EPSILON)
+    #         x1 = o1_center[:, :, 0, 0]  # shape [num_grid // 4, num_grid // 4]
+    #         x2 = (o2_center[:, :, :, 0] * ra_center).sum(dim=-1) / (ra_center).sum(
+    #             dim=-1
+    #         ).add(EPSILON)
 
-            # Calculate scale factor (currently assume rotationally symmetric)
-            scale_x = x1 / x2  # shape [num_grid // 4, num_grid // 4]
-            try:
-                scale = torch.mean(scale_x[~scale_x.isnan()]).item()
-            except Exception as e:
-                print(f"Error calculating scale: {e}")
-                scale = -depth * np.tan(self.hfov) / self.r_sensor
-            return scale
+    #         # Calculate scale factor (currently assume rotationally symmetric)
+    #         scale_x = x1 / x2  # shape [num_grid // 4, num_grid // 4]
+    #         try:
+    #             scale = torch.mean(scale_x[~scale_x.isnan()]).item()
+    #         except Exception as e:
+    #             print(f"Error calculating scale: {e}")
+    #             scale = -depth * np.tan(self.hfov) / self.r_sensor
+    #         return scale
 
-        elif isinstance(depth, torch.Tensor) and len(depth.shape) == 1:
-            scale = []
-            for d in depth:
-                scale.append(self.calc_scale_ray(d.item()))
-            scale = torch.tensor(scale)
-            return scale
+    #     elif isinstance(depth, torch.Tensor) and len(depth.shape) == 1:
+    #         scale = []
+    #         for d in depth:
+    #             scale.append(self.calc_scale_ray(d.item()))
+    #         scale = torch.tensor(scale)
+    #         return scale
 
-        else:
-            raise ValueError("Invalid depth type.")
+    #     else:
+    #         raise ValueError("Invalid depth type.")
 
     @torch.no_grad()
     def chief_ray(self):
-        """Compute chief ray from sensor to object space. We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture."""
+        """Compute chief ray from sensor to object space.
+
+        We can use chief ray for fov, magnification. Chief ray, a ray goes through center of aperture.
+
+        This function is currently not used and needs to be checked.
+        """
         # sample rays with shape [SPP_CALC, 3]
         pupilz, pupilx = self.calc_exit_pupil()
         o1 = torch.zeros([SPP_CALC, 3])
@@ -1813,161 +1555,6 @@ class GeoLens(Lens):
         center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)
 
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
-
-    @torch.no_grad()
-    def calc_chief_ray(self, fov, plane="sagittal"):
-        """Compute chief ray for an incident angle. TODO: if chief ray is only used to determine the ideal image height, we can warp this function into the image height calculation function.
-
-        Args:
-            fov (float): incident angle in degree.
-            plane (str): "sagittal" or "meridional".
-
-        Returns:
-            chief_ray_o (torch.Tensor): origin of chief ray.
-            chief_ray_d (torch.Tensor): direction of chief ray.
-
-        Note:
-            It is 2D ray tracing, for 3D chief ray, we can shrink the pupil, trace rays, calculate the centroid as the chief ray.
-        """
-        # Sample parallel rays from object space
-        ray = self.sample_parallel_2D(
-            fov=fov, num_rays=SPP_CALC, entrance_pupil=True, plane=plane
-        )
-        inc_ray = ray.clone()
-
-        # Trace until the aperture
-        ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
-
-        # Look for the ray that is closest to the optical axis
-        center_x = torch.min(torch.abs(ray.o[:, 0]))
-        center_idx = torch.where(torch.abs(ray.o[:, 0]) == center_x)[0][0].item()  # int
-        chief_ray_o, chief_ray_d = inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
-
-        return chief_ray_o, chief_ray_d
-
-    @torch.no_grad()
-    def calc_chief_ray_infinite(self, hfov, depth=0.0, wvln=DEFAULT_WAVE, plane="meridional", num_rays=SPP_CALC, ray_aiming=True):
-        """Compute chief ray for an incident angle.
-
-        Args:
-            hfov (float): incident angle in degree.
-            depth (float): depth of the object.
-            wvln (float): wavelength of the light.
-            plane (str): "sagittal" or "meridional".
-            num_rays (int): number of rays.
-            ray_aiming (bool): whether the chief ray through the center of the stop.
-        """
-        if isinstance(hfov, float) and hfov > 0:
-            hfov = torch.linspace(0, hfov, 2).to(self.device)
-
-        if not isinstance(depth, torch.Tensor):
-            depth = torch.tensor(depth, device=self.device, dtype=torch.float32).repeat(len(hfov))
-        
-        # set chief ray
-        chief_ray_o = torch.zeros([len(hfov), 3]).to(self.device)
-        chief_ray_d = torch.zeros([len(hfov), 3]).to(self.device)
-        
-        # Convert hfov to radian
-        hfov = hfov * torch.pi / 180.0
-
-        if torch.any(hfov == 0):
-            chief_ray_o[0, ...] = torch.tensor(
-                [0.0, 0.0, depth[0]], device=self.device, dtype=torch.float32)
-            chief_ray_d[0, ...] = torch.tensor(
-                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32)
-            if len(hfov) == 1:
-                return chief_ray_o, chief_ray_d
-        
-        if len(hfov) > 1:
-            hfovs = hfov[1:]
-            depths = depth[1:]
-
-        if self.aper_idx == 0:
-            if plane == "sagittal":
-                chief_ray_o[1:, ...] = torch.stack(
-                    [depths * torch.tan(hfovs), torch.zeros_like(hfovs), depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
-                )
-            else:
-                chief_ray_o[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), depths * torch.tan(hfovs), depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
-                )  
-            
-            return chief_ray_o, chief_ray_d
-                 
-        # Scale factor
-        pupilz, _ = self.calc_entrance_pupil()
-        y_distance = torch.tan(hfovs) * (abs(depths) + pupilz)
-        if ray_aiming:
-            scale = 0.05
-            delta = scale * y_distance
-
-        if not ray_aiming:
-            if plane == "sagittal":
-                chief_ray_o[1:, ...] = torch.stack(
-                    [-y_distance, torch.zeros_like(hfovs), depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
-                )
-            else:
-                chief_ray_o[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), -y_distance, depths], dim=-1
-                )
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
-                )
-        
-        else:
-            min_y = - y_distance - delta
-            max_y = - y_distance + delta
-            o1_linspace = torch.stack(
-                [torch.linspace(min_y[i], max_y[i], num_rays) for i in range(len(min_y))], dim=0)  
-
-            o1 = torch.zeros([len(hfovs), num_rays, 3])
-            o1[:, :, 2] = depths[0]
-            
-            o2_linspace = torch.stack(
-                [torch.linspace(-delta[i], delta[i], num_rays) for i in range(len(min_y))], dim=0
-                )    
-                  
-            o2 = torch.zeros([len(hfovs), num_rays, 3])
-            o2[:, :, 2] = pupilz
-
-            if plane == "sagittal":
-                o1[:, :, 0] = o1_linspace
-                o2[:, :, 0] = o2_linspace
-            else:
-                o1[:, :, 1] = o1_linspace
-                o2[:, :, 1] = o2_linspace
-
-            # Trace until the aperture
-            ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
-            inc_ray = ray.clone()
-            ray, _ = self.trace(
-                ray, lens_range=list(range(0, self.aper_idx + 1))
-            )
-
-            # Look for the ray that is closest to the optical axis
-            if plane == "sagittal":
-                _, center_idx = torch.min(torch.abs(ray.o[..., 0]), dim=1)
-                chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]                
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)], dim=-1
-                )
-            else:
-                _, center_idx = torch.min(torch.abs(ray.o[..., 1]), dim=1)
-                chief_ray_o[1:, ...] = inc_ray.o[torch.arange(len(hfovs)), center_idx.long(), ...]                  
-                chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)], dim=-1
-                )
-        
-        return chief_ray_o, chief_ray_d
 
     @torch.no_grad()
     def calc_exit_pupil(self, shrink_pupil=False):
@@ -2029,16 +1616,22 @@ class GeoLens(Lens):
                 avg_pupilr = self.surfaces[-1].r
                 avg_pupilz = self.surfaces[-1].d.item()
 
+        # Shrink the pupil
         if shrink_pupil:
-            avg_pupilr *= 0.5
+            avg_pupilr *= 0.25
+        else:
+            avg_pupilr *= 0.98
+
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
     def calc_entrance_pupil(self, shrink_pupil=False):
-        """Sample **backward** rays, return z coordinate and radius of entrance pupil.
+        """Caclulate entrance pupil of the lens.
+
+        Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2]. We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
 
         Args:
-            shrink_pupil (bool): shrink the pupil.
+            shrink_pupil (bool): shrink the pupil. Used when we want to calculate chief rays.
 
         Returns:
             avg_pupilz (float): z coordinate of entrance pupil.
@@ -2059,11 +1652,11 @@ class GeoLens(Lens):
         ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
 
         # Sample phi ranges from [-0.5rad, 0.5rad]
+        # phi = torch.linspace(-self.hfov - 0.25, -self.hfov + 0.25, SPP_CALC)
         phi = torch.linspace(-0.5, 0.5, SPP_CALC)
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
         )
-
         ray = Ray(ray_o, d, device=self.device)
 
         # Ray tracing from aperture edge to first surface
@@ -2071,17 +1664,13 @@ class GeoLens(Lens):
         ray, _ = self.trace(ray, lens_range=lens_range)
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
-        )
-        ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
-        )
+        ray_o = torch.stack([ray.o[ray.ra > 0][:, 0], ray.o[ray.ra > 0][:, 2]], dim=-1)
+        ray_d = torch.stack([ray.d[ray.ra > 0][:, 0], ray.d[ray.ra > 0][:, 2]], dim=-1)
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
-        # Handle the case where no intersection points are found or small pupil
+        # Handle the case where no intersection points are found or small entrance pupil
         if len(intersection_points) == 0:
-            print("No intersection points found, use the first surface as pupil.")
+            print("Calculate entrance pupil failed, use the first surface.")
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
@@ -2089,12 +1678,16 @@ class GeoLens(Lens):
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
             if avg_pupilr < EPSILON:
-                print("Small pupil is detected, use the first surface as pupil.")
+                print("Small entrance pupil is detected, use the first surface.")
                 avg_pupilr = self.surfaces[0].r
                 avg_pupilz = self.surfaces[0].d.item()
 
+        # Shrink the pupil
         if shrink_pupil:
-            avg_pupilr *= 0.5
+            avg_pupilr *= 0.25
+        else:
+            avg_pupilr *= 0.98
+        
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
@@ -2255,10 +1848,8 @@ class GeoLens(Lens):
 
     @torch.no_grad()
     def set_aperture(self, fnum=None, foclen=None, aper_r=None):
-        """Change aperture radius.
-
-        TODO: This function will be deprecated in the future.
-        """
+        """Change aperture radius."""
+        raise Exception("This function will be deprecated in the future.")
         if aper_r is None:
             if foclen is None:
                 foclen = self.calc_efl()
@@ -2302,17 +1893,18 @@ class GeoLens(Lens):
         self.surfaces[self.aper_idx].r = optim_aper_r
 
     @torch.no_grad()
-    def set_target_fov_fnum(self, hfov, fnum, imgh=None):
+    def set_target_fov_fnum(self, hfov, fnum, foclen):
         """Set FoV, ImgH and F number, only use this function to assign design targets.
 
-        TODO: This function will be deprecated in the future.
+        Args:
+            hfov (float): half diagonal-FoV in degree.
+            fnum (float): F number.
+            foclen (float): focal length in [mm].
         """
-        if imgh is not None:
-            self.r_sensor = imgh / 2
         self.hfov = hfov
         self.fnum = fnum
+        self.foclen = foclen
 
-        self.foclen = self.calc_efl()
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].r = float(aper_r)
 
@@ -2335,20 +1927,24 @@ class GeoLens(Lens):
             r_sensor: Sensor radius in [mm].
         """
         if sensor_size is not None:
-            assert r_sensor is None, "Sensor_size is provided, no need to provide r_sensor."
+            assert r_sensor is None, (
+                "Sensor_size is provided, no need to provide r_sensor."
+            )
             assert sensor_res[0] * sensor_size[1] == sensor_res[1] * sensor_size[0], (
                 "sensor_res and sensor_size are not consistent"
             )
 
             self.sensor_res = sensor_res
             self.sensor_size = sensor_size
-            self.r_sensor = math.sqrt(sensor_size[0]**2 + sensor_size[1]**2) / 2
+            self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
             self.pixel_size = sensor_size[0] / sensor_res[0]
 
             self.post_computation()
 
         elif r_sensor is not None:
-            assert sensor_size is None, "sensor_res and r_sensor are provided, no need to provide sensor_size."
+            assert sensor_size is None, (
+                "sensor_res and r_sensor are provided, no need to provide sensor_size."
+            )
             if isinstance(sensor_res, int):
                 sensor_res = (sensor_res, sensor_res)
             self.sensor_res = sensor_res
@@ -2368,88 +1964,85 @@ class GeoLens(Lens):
             self.post_computation()
 
         else:
-            raise ValueError("Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time.")
+            raise ValueError(
+                "Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time."
+            )
 
     @torch.no_grad()
-    def prune_surf(self, expand_surf=None, surface_range=None):
+    def prune_surf(self, expand_factor=None):
         """Prune surfaces to the minimum height that allows all valid rays to go through.
 
         Args:
-            expand_surf (float): extra height to reserve.
+            expand_factor (float): extra height to reserve.
                 - For cellphone lens, we usually use 0.1mm or 0.05 * r_sensor.
                 - For camera lens, we usually use 0.5mm or 0.1 * r_sensor.
             surface_range (list): surface range to prune.
         """
         # Settings
-        surface_range = (
-            self.find_diff_surf() if surface_range is None else surface_range
-        )
+        surface_range = self.find_diff_surf()
+
         if self.is_cellphone:
-            expand_surf = 0.05 if expand_surf is None else expand_surf
+            expand_factor = 0.05 if expand_factor is None else expand_factor
 
             # Reset lens to maximum height(sensor radius)
             for i in surface_range:
                 # self.surfaces[i].r = self.r_sensor
                 self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
         else:
-            expand_surf = 0.2 if expand_surf is None else expand_surf
+            expand_factor = 0.2 if expand_factor is None else expand_factor
 
-        # Sample full-fov rays to compute valid surface height
+        # Sample maximum fov rays to cut valid surface height
         if self.hfov is not None:
-            fov = self.hfov
+            fov_deg = self.hfov * 180 / torch.pi
         else:
-            fov = float(np.arctan(self.r_sensor / self.d_sensor.item()))
+            fov_deg = (
+                float(np.arctan(self.r_sensor / self.d_sensor.item())) * 180 / torch.pi
+            )
 
-        ray = self.sample_parallel_2D(
-            fov=fov * 57.3, num_rays=GEO_GRID, entrance_pupil=True
-        )
+        # Trace rays to compute the maximum valid region of the lens, shape of ray: [num_rays, 3]
+        ray = self.sample_parallel(fov_x=[0.0], fov_y=[fov_deg], num_rays=SPP_CALC)
+        ray = ray.squeeze(0).squeeze(0)
+        _, ray_o_record = self.trace2sensor(ray=ray, record=True)
 
-        ray_out, ray_o_record = self.trace2sensor(ray=ray, record=True)
-        ray_o_record = torch.stack(
-            ray_o_record, dim=-2
-        )  # [num_rays, num_surfaces + 2, 3]
-        ray_x_record = ray_o_record[:, :, 0]
+        # Ray record, shape [num_rays, num_surfaces + 2, 3]
+        ray_o_record = torch.stack(ray_o_record, dim=-2)
+        ray_o_record = torch.nan_to_num(ray_o_record, 0.0)
+
+        # Compute the maximum ray height for each surface
+        ray_r_record = (ray_o_record[..., :2] ** 2).sum(-1).sqrt()
+        surf_r_max = ray_r_record.max(dim=0)[0][1:-1]
         for i in surface_range:
-            # Filter out nan values and compute the maximum height
-            valid_heights = ray_x_record[:, i + 1].abs()
-            valid_heights = valid_heights[~torch.isnan(valid_heights)]
-            if len(valid_heights) > 0:
-                max_ray_height = valid_heights.max().item()
+            # Determine and update surface height
+            if surf_r_max[i] > 0:
+                max_height_expand = surf_r_max[i].item() * (1 + expand_factor)
+                max_height_allowed = self.surfaces[i].max_height()
+                self.surfaces[i].r = min(max_height_expand, max_height_allowed)
             else:
-                print(
-                    f"No valid rays for surface {i}, use the maximum height of the surface."
-                )
-                max_ray_height = self.surfaces[i].r
-
-            if max_ray_height > 0:
+                print(f"No valid rays for Surf {i}, do not prune.")
+                max_height_expand = self.surfaces[i].r * (1 + expand_factor)
                 max_height_value_range = self.surfaces[i].max_height()
-                self.surfaces[i].r = min(
-                    max_ray_height * (1 + expand_surf), max_height_value_range
-                )
-            else:
-                print("Get max height failed, use the maximum height of the surface.")
+                self.surfaces[i].r = min(max_height_expand, max_height_value_range)
 
     @torch.no_grad()
-    def correct_shape(self, expand_surf=None):
+    def correct_shape(self, expand_factor=None):
         """Correct wrong lens shape during the lens design."""
         aper_idx = self.aper_idx
         optim_surf_range = self.find_diff_surf()
         shape_changed = False
 
-        # Rule 1: Move the first surface to z = 0
+        # Rule 1: Move the first surface to z = 0.0
         move_dist = self.surfaces[0].d.item()
         for surf in self.surfaces:
             surf.d -= move_dist
         self.d_sensor -= move_dist
 
-        # Rule 2: Move lens group to get a fixed aperture distance. Only for aperture at the first surface.
+        # Rule 2: Fix aperture distance to the first surface if aperture in the front.
         if aper_idx == 0:
-            d_aper = 0.1 if self.is_cellphone else 2.0
+            d_aper = 0.05 if self.is_cellphone else 1.0
 
             # If the first surface is concave, use the maximum negative sag.
             aper_r = self.surfaces[aper_idx].r
-            # sag1 = -self.surfaces[aper_idx + 1].surface(aper_r, 0).item()
-            sag1 = -self.surfaces[aper_idx + 1].sag(aper_r, 0).item()
+            sag1 = -self.surfaces[aper_idx + 1].surface_sag(aper_r, 0)
             if sag1 > 0:
                 d_aper += sag1
 
@@ -2458,14 +2051,14 @@ class GeoLens(Lens):
             for i in optim_surf_range:
                 self.surfaces[i].d -= delta_aper
 
-        # Rule 3: If two surfaces overlap (at center), seperate them by a small distance
-        for i in range(0, len(self.surfaces) - 1):
-            if self.surfaces[i].d > self.surfaces[i + 1].d:
-                self.surfaces[i + 1].d += 0.1
-                shape_changed = True
+        # # Rule 3: If two surfaces overlap (at center), seperate them by a small distance
+        # for i in range(0, len(self.surfaces) - 1):
+        #     if self.surfaces[i].d > self.surfaces[i + 1].d:
+        #         self.surfaces[i + 1].d += 0.1
+        #         shape_changed = True
 
         # Rule 4: Prune all surfaces
-        self.prune_surf(expand_surf=expand_surf)
+        self.prune_surf(expand_factor=expand_factor)
 
         if shape_changed:
             print("Surface shape corrected.")
@@ -2528,9 +2121,6 @@ class GeoLens(Lens):
         # Draw lens layout and ray path
         self.draw_layout(
             filename=f"{save_name}.png",
-            multi_plot=multi_plot,
-            entrance_pupil=True,
-            zmx_format=zmx_format,
             lens_title=lens_title,
             depth=depth,
         )
@@ -2553,650 +2143,6 @@ class GeoLens(Lens):
                 save_name=f"{save_name}_render",
                 noise=0.01,
             )
-
-    @torch.no_grad()
-    def draw_layout(
-        self,
-        filename,
-        depth=float("inf"),
-        entrance_pupil=True,
-        zmx_format=True,
-        multi_plot=False,
-        lens_title=None,
-    ):
-        """Plot lens layout with ray tracing."""
-        from deeplens.geolens_utils import draw_lens_layout
-        draw_lens_layout(
-            self,
-            filename,
-            depth=depth,
-            entrance_pupil=entrance_pupil,
-            zmx_format=zmx_format,
-            multi_plot=multi_plot,
-            lens_title=lens_title,
-        )
-
-    def draw_layout_3d(self, filename=None, figsize=(10, 6), view_angle=30, show=True):
-        """Draw 3D layout of the lens system.
-
-        Args:
-            filename (str, optional): Path to save the figure. Defaults to None.
-            figsize (tuple): Figure size
-            view_angle (int): Viewing angle for the 3D plot
-            show (bool): Whether to display the figure
-
-        Returns:
-            fig, ax: Matplotlib figure and axis objects
-        """
-        from deeplens.geolens_utils import draw_layout_3d
-        return draw_layout_3d(
-            self, filename=filename, figsize=figsize, view_angle=view_angle, show=show
-        )
-
-    @torch.no_grad()
-    def draw_psf_radial(
-        self, M=3, depth=DEPTH, ks=PSF_KS, log_scale=False, save_name="./psf_radial.png"
-    ):
-        """Draw radial PSF (45 deg). Will draw M PSFs, each of size ks x ks."""
-        x = torch.linspace(0, 1, M)
-        y = torch.linspace(0, 1, M)
-        z = torch.full_like(x, depth)
-        points = torch.stack((x, y, z), dim=-1)
-
-        psfs = []
-        for i in range(M):
-            # Scale PSF for a better visualization
-            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=4096)
-            psf /= psf.max()
-
-            if log_scale:
-                psf = torch.log(psf + EPSILON)
-                psf = (psf - psf.min()) / (psf.max() - psf.min())
-
-            psfs.append(psf)
-
-        psf_grid = make_grid(psfs, nrow=M, padding=1, pad_value=0.0)
-        save_image(psf_grid, save_name, normalize=True)
-
-    @torch.no_grad()
-    def draw_spot_diagram(self, M=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
-        """Draw spot diagram of the lens. Shot rays from grid points in object space, trace to sensor and visualize."""
-        # Sample and trace rays from grid points
-        ray = self.sample_point_source(
-            depth=depth,
-            num_rays=SPP_CALC,
-            num_grid=GEO_GRID,
-            wvln=wvln,
-        )
-        ray = self.trace2sensor(ray)
-        o2 = -ray.o.clone().cpu().numpy()
-        ra = ray.ra.clone().cpu().numpy()
-
-        # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(M, M, figsize=(30, 30))
-        for i in range(M):
-            for j in range(M):
-                ra_ = ra[:, i, j]
-                x, y = o2[:, i, j, 0], o2[:, i, j, 1]
-                x, y = x[ra_ > 0], y[ra_ > 0]
-                xc, yc = x.sum() / ra_.sum(), y.sum() / ra_.sum()
-
-                # scatter plot
-                axs[i, j].scatter(x, y, 1, "black")
-                axs[i, j].scatter([xc], [yc], None, "r", "x")
-                axs[i, j].set_aspect("equal", adjustable="datalim")
-
-        if save_name is None:
-            save_name = f"./spot{-depth}mm.png"
-        else:
-            save_name = f"{save_name}_spot{-depth}mm.png"
-
-        plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-        plt.close()
-
-    @torch.no_grad()
-    def draw_spot_radial(self, M=3, depth=DEPTH, save_name=None):
-        """Draw radial spot diagram of the lens.
-
-        Args:
-            M (int, optional): field number. Defaults to 3.
-            depth (float, optional): depth of the point source. Defaults to DEPTH.
-            save_name (string, optional): filename to save. Defaults to None.
-        """
-        # Sample and trace rays
-        # mag = self.calc_magnification3(depth)
-        ray = self.sample_point_source(
-            depth=depth,
-            num_rays=1024,
-            num_grid=M * 2 - 1,
-            wvln=DEFAULT_WAVE,
-        )
-        ray, _ = self.trace(ray)
-        ray.propagate_to(self.d_sensor)
-        o2 = torch.flip(ray.o.clone(), [1, 2]).cpu().numpy()
-        ra = torch.flip(ray.ra.clone(), [1, 2]).cpu().numpy()
-
-        # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(1, M, figsize=(M * 12, 10))
-        for i in range(M):
-            i_bias = i + M - 1
-
-            # calculate center of mass
-            ra_ = ra[:, i_bias, i_bias]
-            x, y = o2[:, i_bias, i_bias, 0], o2[:, i_bias, i_bias, 1]
-            x, y = x[ra_ > 0], y[ra_ > 0]
-            xc, yc = x.sum() / ra_.sum(), y.sum() / ra_.sum()
-
-            # scatter plot
-            axs[i].scatter(x, y, 12, "black")
-            axs[i].scatter([xc], [yc], 400, "r", "x")
-
-            # visualization
-            axs[i].set_aspect("equal", adjustable="datalim")
-            axs[i].tick_params(axis="both", which="major", labelsize=18)
-            axs[i].spines["top"].set_linewidth(4)
-            axs[i].spines["bottom"].set_linewidth(4)
-            axs[i].spines["left"].set_linewidth(4)
-            axs[i].spines["right"].set_linewidth(4)
-
-        # Save figure
-        if save_name is None:
-            plt.savefig(
-                f"./spot{-depth}mm_radial.svg",
-                bbox_inches="tight",
-                format="svg",
-                dpi=1200,
-            )
-        else:
-            plt.savefig(
-                f"{save_name}_spot{-depth}mm_radial.svg",
-                bbox_inches="tight",
-                format="svg",
-                dpi=1200,
-            )
-
-        plt.close()
-
-    @torch.no_grad()
-    def draw_mtf(
-        self,
-        wvlns=DEFAULT_WAVE,
-        depth=DEPTH,
-        relative_fov=[0.0, 0.7, 1.0],
-        save_name="./mtf.png",
-    ):
-        """Draw MTF curve (different FoVs, single wvln, infinite depth) of the lens."""
-        assert save_name[-4:] == ".png", "save_name must end with .png"
-
-        relative_fov = (
-            [relative_fov] if isinstance(relative_fov, float) else relative_fov
-        )
-        wvlns = [wvlns] if isinstance(wvlns, float) else wvlns
-        color_list = "rgb"
-
-        plt.figure(figsize=(6, 6))
-        for wvln_idx, wvln in enumerate(wvlns):
-            for fov_idx, fov in enumerate(relative_fov):
-                point = torch.tensor([0, fov, depth])
-                psf = self.psf(points=point, wvln=wvln, ks=256)
-                freq, mtf_tan, mtf_sag = self.psf2mtf(psf)
-
-                fov_deg = round(fov * self.hfov * 57.3, 1)
-                plt.plot(
-                    freq,
-                    mtf_tan,
-                    color_list[fov_idx],
-                    label=f"{fov_deg}(deg)-Tangential",
-                )
-                plt.plot(
-                    freq,
-                    mtf_sag,
-                    color_list[fov_idx],
-                    label=f"{fov_deg}(deg)-Sagittal",
-                    linestyle="--",
-                )
-
-        plt.legend()
-        plt.xlabel("Spatial Frequency [cycles/mm]")
-        plt.ylabel("MTF")
-
-        # Save figure
-        plt.savefig(f"{save_name}", bbox_inches="tight", format="png", dpi=300)
-        plt.close()
-
-    def draw_distortion(self, filename=None, depth=DEPTH, grid_size=16):
-        """Draw distortion."""
-        # Ray tracing to calculate distortion map
-        distortion_grid = self.distortion(depth=depth, grid_size=grid_size)
-        x1 = distortion_grid[..., 0].cpu().numpy()
-        y1 = distortion_grid[..., 1].cpu().numpy()
-
-        # Draw image
-        fig, ax = plt.subplots()
-        ax.set_title("Lens distortion")
-        ax.scatter(x1, y1, s=2)
-        ax.axis("scaled")
-        ax.grid(True)
-
-        # Add grid lines based on grid_size
-        ax.set_xticks(np.linspace(-1, 1, grid_size))
-        ax.set_yticks(np.linspace(-1, 1, grid_size))
-
-        if filename is None:
-            plt.savefig(
-                f"./distortion{-depth}mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
-        else:
-            plt.savefig(
-                f"{filename[:-4]}_distortion_{-depth}mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
-
-    def draw_distortion_1D(
-        self, hfov, filename=None, num_points=GEO_GRID, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=True
-    ):
-        """Draw distortion. zemax format(default): ray_aiming = False.
-
-        Args:
-            hfov: view angle (degrees)
-            filename: Save filename. Defaults to None.
-            num_points: Number of points. Defaults to GEO_GRID.
-            plane: Meridional or sagittal. Defaults to meridional.
-            ray_aiming: Whether to use ray aiming. Defaults to False.
-        """
-
-        # Sample view angles
-        hfov_samples = torch.linspace(0, hfov, num_points)
-        distortions = []
-
-        # Calculate distortion
-        distortions = self.calc_distortion_1D(hfov=hfov_samples, wvln=wvln, plane=plane, ray_aiming=ray_aiming)
-
-        # Handle possible NaN values and convert to percentage
-        values = [
-            t.item() * 100 if not math.isnan(t.item()) else 0 for t in distortions
-        ]
-
-        # Create figure
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.set_title(f"{plane} Surface Distortion")
-
-        # Draw distortion curve
-        ax.plot(values, hfov_samples, linestyle="-", color="g", linewidth=1.5)
-
-        # Draw reference line (vertical line)
-        ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
-
-        # Set grid
-        ax.grid(True, color="gray", linestyle="-", linewidth=0.5, alpha=1)
-
-        # Dynamically adjust x-axis range
-        value = max(abs(v) for v in values)
-        margin = value * 0.2  # 20% margin
-        x_min, x_max = -max(0.2, value + margin), max(0.2, value + margin)
-
-        # Set ticks
-        x_ticks = np.linspace(-value, value, 3)
-        y_ticks = np.linspace(0, hfov, 3)
-
-        ax.set_xticks(x_ticks)
-        ax.set_yticks(y_ticks)
-
-        # Format tick labels
-        x_labels = [f"{x:.1f}%" for x in x_ticks]
-        y_labels = [f"{y:.1f}" for y in y_ticks]
-
-        ax.set_xticklabels(x_labels)
-        ax.set_yticklabels(y_labels)
-
-        # Set axis labels
-        ax.set_xlabel("Distortion (%)")
-        ax.set_ylabel("Field of View (degrees)")
-
-        # Set axis range
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(0, hfov)
-        if filename is None:
-            plt.savefig(
-                f"./{plane}_distortion_infinite_mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
-        else:
-            plt.savefig(
-                f"{filename[:-4]}_{plane}_distortion_infinite_mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
-
-    # ====================================================================================
-    # Loss functions and lens design constraints
-    # ====================================================================================
-    def init_constraints(self):
-        """Initialize constraints for the lens design."""
-        if self.r_sensor < 12.0:
-            self.is_cellphone = True
-
-            self.dist_min = 0.1
-            self.dist_max = 0.6  # float("inf")
-            self.thickness_min = 0.3
-            self.thickness_max = 1.5
-            self.flange_min = 0.5
-            self.flange_max = float("inf")
-
-            self.sag_max = 0.8
-            self.grad_max = 1.0
-            self.grad2_max = 100.0
-        else:
-            self.is_cellphone = False
-
-            self.dist_min = 0.1
-            self.dist_max = float("inf")
-            self.thickness_min = 0.3
-            self.thickness_max = float("inf")
-            self.flange_min = 0.5
-            self.flange_max = float("inf")
-
-            self.sag_max = 8.0
-            self.grad_max = 1.0
-            self.grad2_max = 100.0
-
-    def loss_reg(self, w_focus=None):
-        """An empirical regularization loss for lens design. By default we should use weight 0.1 * self.loss_reg() in the total loss."""
-        loss_focus = self.loss_infocus()
-
-        if self.is_cellphone:
-            loss_intersec = self.loss_self_intersec()
-            loss_surf = self.loss_surface()
-            loss_angle = self.loss_ray_angle()
-
-            w_focus = 2.0 if w_focus is None else w_focus
-            loss_reg = (
-                w_focus * loss_focus
-                + 1.0 * loss_intersec
-                + 1.0 * loss_surf
-                + 0.1 * loss_angle
-            )
-        else:
-            loss_intersec = self.loss_self_intersec()
-            loss_surf = self.loss_surface()
-            loss_angle = self.loss_ray_angle()
-
-            w_focus = 5.0 if w_focus is None else w_focus
-            loss_reg = (
-                w_focus * loss_focus
-                + 1.0 * loss_intersec
-                + 1.0 * loss_surf
-                + 0.05 * loss_angle
-            )
-
-        return loss_reg
-
-    def loss_infocus(self, bound=0.005):
-        """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
-
-        Args:
-            bound (float, optional): bound of RMS loss. Defaults to 0.005 [mm].
-        """
-        focz = self.d_sensor
-        loss = []
-        for wv in WAVE_RGB:
-            # Ray tracing
-            ray = self.sample_parallel(
-                fov_x=0.0, fov_y=0.0, num_rays=SPP_CALC, wvln=wv, entrance_pupil=True
-            )
-            ray, _ = self.trace(ray)
-            p = ray.project_to(focz)
-
-            # Calculate RMS spot size as loss function
-            rms_size = torch.sqrt(
-                torch.sum((p**2 + EPSILON) * ray.ra.unsqueeze(-1))
-                / (torch.sum(ray.ra) + EPSILON)
-            )
-            loss.append(max(rms_size, bound))
-
-        loss_avg = sum(loss) / len(loss)
-        return loss_avg
-
-    def loss_rms(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC, importance_sampling=False):
-        """Compute RGB RMS error per pixel, forward rms error.
-
-        Can also revise this function to plot PSF.
-        """
-        # PSF and RMS by patch
-        all_rms_errors = []
-        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-            ray = self.sample_point_source(
-                depth=depth,
-                num_rays=num_rays,
-                num_grid=num_grid,
-                wvln=wvln,
-                importance_sampling=importance_sampling,
-            )
-            ray = self.trace2sensor(ray)
-            
-            # Green light point center for reference
-            if i == 0:
-                pointc_green = ((ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(-2) /
-                                ray.ra.sum(-1).add(EPSILON).unsqueeze(-1))  # shape [num_grid, num_grid, 2]
-                pointc_green = pointc_green.unsqueeze(-2).repeat(
-                    1, 1, num_rays, 1
-                )  # shape [1, num_grid, num_grid, 2]
-
-            # Calculate RMS error
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
-            o2_norm = o2_norm[num_grid // 2, num_grid // 2, ...]
-            ray.ra = ray.ra[num_grid // 2, num_grid // 2, ...]
-
-            rms_error = torch.mean((((o2_norm ** 2).sum(-1) * ray.ra).sum(-1) /
-                         (ray.ra.sum(-1) + EPSILON)).sqrt()
-                       )
-            all_rms_errors.append(rms_error)
-
-        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-        return avg_rms_error
-
-    def loss_rms_infinite(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC):
-        """Compute RGB RMS error per pixel using Zernike polynomials.
-
-        Args:
-            num_fields: Number of fields. Defaults to 3.
-            depth: object space depth. Defaults to DEPTH.
-        """
-        # calculate fov_x and fov_y
-        [H, W] = self.sensor_res
-        tan_fov_y = np.sqrt(np.tan(self.hfov)**2 / (1 + W**2 / H**2))
-        tan_fov_x = np.sqrt(np.tan(self.hfov)**2 - tan_fov_y**2)
-        fov_y = np.rad2deg(np.arctan(tan_fov_y))
-        fov_x = np.rad2deg(np.arctan(tan_fov_x))
-        fov_y = torch.linspace(0.0, fov_y, num_grid).tolist()
-        fov_x = torch.linspace(0.0, fov_x, num_grid).tolist()
-        
-        # calculate RMS error
-        all_rms_errors = []
-        all_rms_radii = []
-        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-            # Ray tracing
-            ray = self.sample_parallel(
-                fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth
-            )
-            ray = self.trace2sensor(ray)
-
-            # Green light point center for reference
-            if i == 0:
-                pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
-                    -2
-                ) / ray.ra.sum(-1).add(EPSILON).unsqueeze(-1)   # shape [1, num_fields, 2]
-                pointc_green = pointc_green.unsqueeze(-2).repeat(
-                    1, 1, SPP_PSF, 1
-                )  # shape [num_fields, num_fields, num_rays, 2]
-
-            # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
-            
-            # error
-            rms_error = torch.mean(
-                (((o2_norm**2).sum(-1) * ray.ra).sum(-1) / 
-                            (ray.ra.sum(-1) + EPSILON)
-                            ).sqrt()
-            )
-            
-            # radius
-            rms_radius = torch.mean(
-                ((o2_norm**2).sum(-1) * ray.ra).sqrt().max(dim=-1).values
-            )
-            all_rms_errors.append(rms_error)
-            all_rms_radii.append(rms_radius)
-
-        # Calculate and print average across wavelengths
-        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-        avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-        
-        return avg_rms_error
-    
-    def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
-        """Loss function designed on the MTF. We want to maximize MTF values."""
-        loss = 0.0
-        for fov in relative_fov:
-            # ==> Calculate PSF
-            point = torch.tensor([fov, fov, depth])
-            psf = self.psf(points=point, wvln=wvln, ks=256)
-
-            # ==> Calculate MTF
-            x = torch.linspace(-1, 1, psf.shape[1]) * self.pixel_size * psf.shape[1] / 2
-            y = torch.linspace(-1, 1, psf.shape[0]) * self.pixel_size * psf.shape[0] / 2
-
-            # Extract 1D PSFs along the sagittal and tangential directions
-            center_x = psf.shape[1] // 2
-            center_y = psf.shape[0] // 2
-            sagittal_psf = psf[center_y, :]
-            tangential_psf = psf[:, center_x]
-
-            # Fourier Transform to get the MTFs
-            sagittal_mtf = torch.abs(torch.fft.fft(sagittal_psf))
-            tangential_mtf = torch.abs(torch.fft.fft(tangential_psf))
-
-            # Normalize the MTFs
-            sagittal_mtf /= sagittal_mtf.max().detach()
-            tangential_mtf /= tangential_mtf.max().detach()
-            delta_x = self.pixel_size
-
-            # Create frequency axis in cycles/mm
-            freq = np.fft.fftfreq(psf.shape[0], delta_x)
-
-            # Only keep the positive frequencies
-            positive_freq_idx = freq > 0
-
-            loss += torch.sum(
-                sagittal_mtf[positive_freq_idx] + tangential_mtf[positive_freq_idx]
-            ) / len(positive_freq_idx)
-
-        return -loss
-
-    def loss_fov(self, depth=DEPTH):
-        """Trace rays from full FoV and converge them to the edge of the sensor. This loss term can constrain the FoV of the lens."""
-        raise NotImplementedError("Need to check this function.")
-        ray = self.sample_point_source_2D(depth=depth, num_rays=7, entrance_pupil=True)
-        ray = self.trace2sensor(ray)
-        loss = (
-            (ray.o[:, 0] * ray.ra).sum() / (ray.ra.sum() + EPSILON) - self.r_sensor
-        ).abs()
-        return loss
-
-    def loss_surface(self):
-        """Penalize large sag, first-order derivative, and second-order derivative to prevent surface from being too curved."""
-        sag_max = self.sag_max
-        grad_max = self.grad_max
-        grad2_max = self.grad2_max
-
-        loss = 0.0
-        for i in self.find_diff_surf():
-            x_ls = torch.linspace(0.0, 1.0, 20).to(self.device) * self.surfaces[i].r
-            y_ls = torch.zeros_like(x_ls)
-
-            # Sag
-            sag_ls = self.surfaces[i].sag(x_ls, y_ls)
-            loss += max(sag_ls.max() - sag_ls.min(), sag_max)
-
-            # 1st-order derivative
-            grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
-            loss += 10 * max(grad_ls.abs().max(), grad_max)
-
-            # 2nd-order derivative
-            grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
-            loss += 10 * max(grad2_ls.abs().max(), grad2_max)
-
-        return loss
-
-    def loss_self_intersec(self):
-        """Loss function to avoid self-intersection. Loss is designed by the distance to the next surfaces."""
-        dist_min = self.dist_min
-        dist_max = self.dist_max
-        thickness_min = self.thickness_min
-        thickness_max = self.thickness_max
-        flange_min = self.flange_min
-        flange_max = self.flange_max
-
-        loss_min = 0.0
-        loss_max = 0.0
-
-        # Constraints for distance/thickness between surfaces
-        for i in range(len(self.surfaces) - 1):
-            current_surf = self.surfaces[i]
-            next_surf = self.surfaces[i + 1]
-
-            r = torch.linspace(0.0, 1.0, 20).to(self.device) * current_surf.r
-            z_front = current_surf.surface_with_offset(r, 0)
-            z_next = next_surf.surface_with_offset(r, 0)
-
-            # Minimum distance between surfaces
-            dist_min = torch.min(z_next - z_front)
-            if self.surfaces[i].mat2.name != "air":
-                loss_min += min(thickness_min, dist_min)
-            else:
-                loss_min += min(dist_min, dist_min)
-
-            # Maximum distance between surfaces
-            dist_max = torch.max(z_next - z_front)
-            if self.surfaces[i].mat2.name != "air":
-                pass
-            else:
-                loss_max += max(thickness_max, dist_max)
-
-        # Constraints for distance to the sensor (flange distance)
-        last_surf = self.surfaces[-1]
-        r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
-        z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0)
-        loss_min += min(flange_min, torch.min(z_last_surf))
-        loss_max += max(flange_max, torch.min(z_last_surf))
-
-        return loss_max - loss_min
-
-    def loss_ray_angle(self, target=0.5, depth=DEPTH):
-        """Loss function designed to penalize large incident angle rays.
-
-        Reference value: > 0.7
-        """
-        # Sample rays [512, M, M]
-        M = GEO_GRID
-        spp = 512
-        ray = self.sample_point_source(depth=depth, num_rays=spp, num_grid=M)
-
-        # Ray tracing
-        ray, _ = self.trace(ray)
-
-        # Loss (we want to maximize ray angle term)
-        loss = ray.obliq.min()
-        loss = min(loss, target)
-
-        return -loss
 
     # ====================================================================================
     # Optimization
@@ -3280,144 +2226,6 @@ class GeoLens(Lens):
         params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
         optimizer = torch.optim.Adam(params)
         return optimizer
-
-    def optimize(
-        self,
-        lrs=[5e-4, 1e-4, 0.1, 1e-3],
-        decay=0.01,
-        iterations=2000,
-        test_per_iter=100,
-        centroid=False,
-        optim_mat=False,
-        match_mat=False,
-        shape_control=True,
-        importance_sampling=False,
-        result_dir="./results",
-    ):
-        """Optimize the lens by minimizing rms errors.
-
-        Debug hints:
-            *, Slowly and continuously update!
-            1, thickness (fov and ttl should match)
-            2, alpha order (higher is better but more sensitive)
-            3, learning rate and decay (prefer smaller lr and decay)
-            4, correct params range
-        """
-        # Preparation
-        depth = DEPTH
-        num_grid = 31
-        spp = 1024
-
-        sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
-
-        result_dir = (
-            result_dir + "/" + datetime.now().strftime("%m%d-%H%M%S") + "-DesignLens"
-        )
-        os.makedirs(result_dir, exist_ok=True)
-        if not logging.getLogger().hasHandlers():
-            set_logger(result_dir)
-        logging.info(
-            f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
-        )
-
-        optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=200, num_training_steps=iterations
-        )
-
-        # Training loop
-        pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss": 0})
-        for i in range(iterations + 1):
-            # ===> Evaluate the lens
-            if i % test_per_iter == 0:
-                with torch.no_grad():
-                    if i > 0:
-                        if shape_control:
-                            self.correct_shape()
-
-                        if optim_mat and match_mat:
-                            self.match_materials()
-
-                    self.write_lens_json(f"{result_dir}/iter{i}.json")
-                    self.analysis(
-                        f"{result_dir}/iter{i}",
-                        multi_plot=False,
-                    )
-
-            # ===> Sample new rays and calculate center
-            if i % sample_rays_per_iter == 0:
-                with torch.no_grad():
-                    # Sample rays
-                    rays_backup = []
-                    for wv in WAVE_RGB:
-                        ray = self.sample_point_source(
-                            depth=depth,
-                            num_rays=spp,
-                            num_grid=num_grid,
-                            wvln=wv,
-                            importance_sampling=importance_sampling,
-                        )
-                        rays_backup.append(ray)
-
-                    # Calculate ray centers
-                    if centroid:
-                        center_p = -self.psf_center(
-                            point=ray.o[:, :, 0, :], method="chief_ray"
-                        )
-                        center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
-                    else:
-                        center_p = -self.psf_center(
-                            point=ray.o[:, :, 0, :], method="pinhole"
-                        )
-                        center_p = center_p.unsqueeze(-2).repeat(1, 1, spp, 1)
-
-            # ===> Optimize lens by minimizing RMS
-            loss_rms = []
-            for j, wv in enumerate(WAVE_RGB):
-                # Ray tracing
-                ray = rays_backup[j].clone()
-                ray = self.trace2sensor(ray)
-                xy = ray.o[..., :2]  # [h, w, spp, 2]
-                ra = ray.ra.clone().detach()  # [h, w, spp]
-                xy_norm = (xy - center_p) * ra.unsqueeze(-1)  # [h, w, spp, 2]
-
-                # Use only quater of the sensor
-                xy_norm = xy_norm[num_grid // 2 :, num_grid // 2 :, :, :]
-                ra = ra[num_grid // 2 :, num_grid // 2 :, :]  # [h/2, w/2, spp]
-
-                # Weight mask
-                with torch.no_grad():
-                    weight_mask = (xy_norm.clone().detach() ** 2).sum(-1).sqrt().sum(
-                        -1
-                    ) / (ra.sum(-1) + EPSILON)  # Use L2 error as weight mask
-                    weight_mask /= weight_mask.mean()  # shape of [h/2, w/2]
-
-                # Weighted L2 loss
-                # l_rms = torch.mean(xy_norm.abs().sum(-1).sum(-1) / (ra.sum(-1) + EPSILON) * weight_mask)
-                l_rms = torch.mean(
-                    (xy_norm**2 + EPSILON).sum(-1).sqrt().sum(-1)
-                    / (ra.sum(-1) + EPSILON)
-                    * weight_mask
-                )
-                loss_rms.append(l_rms)
-
-            loss_rms = sum(loss_rms) / len(loss_rms)
-
-            # Total loss
-            loss_reg = self.loss_reg()
-            w_reg = 0.1
-            L_total = loss_rms + w_reg * loss_reg
-
-            # Back-propagation
-            optimizer.zero_grad()
-            L_total.backward()
-            optimizer.step()
-            scheduler.step()
-
-            pbar.set_postfix(loss=loss_rms.item())
-            pbar.update(1)
-
-        pbar.close()
 
     # ====================================================================================
     # Lens file IO
@@ -3511,6 +2319,7 @@ class GeoLens(Lens):
     def read_lens_zmx(self, filename="./test.zmx"):
         """Read the lens from .zmx file."""
         from .geolens_utils import read_zmx
+
         loaded_lens = read_zmx(filename)
 
         # Copy all attributes from loaded_lens to self
