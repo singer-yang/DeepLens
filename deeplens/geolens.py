@@ -230,7 +230,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray = ray.squeeze(1)
         else:
             point_obj_x = torch.zeros(num_field, device=self.device)
-            point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180)
+            point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180.)
             point_obj = torch.stack(
                 [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
             )
