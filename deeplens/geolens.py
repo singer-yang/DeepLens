@@ -270,7 +270,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray_o = ray_o.to(self.device)
 
         # Sample points on the pupil
-        pupilz, pupilr = self.get_entrance_pupil(resize_pupil_ratio==resize_pupil_ratio)
+        pupilz, pupilr = self.get_entrance_pupil(resize_pupil_ratio=resize_pupil_ratio)
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(*ray_o.shape[:-1], num_rays)
         )
