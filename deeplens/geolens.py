@@ -250,20 +250,21 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         wvln=DEFAULT_WAVE,
         resize_pupil_ratio=1,
     ):
-        """Sample rays from given point source (absolute physical coordinates) from the object space.
-
-        Used for (1) PSF calculation, (2) chief ray calculation.
+        """
+        Sample rays from point sources in object space (absolute 3D coordinates).
+        Used for PSF and chief ray calculation.
 
         Args:
-            points (list): absolute ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
-            num_rays (int): sample per pixel. Defaults to 8.
-            forward (bool): forward or backward rays. Defaults to True.
-            pupil (bool): whether to use pupil. Defaults to True.
-            fov (float): cone angle. Defaults to 10.
-            wvln (float): ray wvln. Defaults to DEFAULT_WAVE.
+            points (list or Tensor): Ray origins in shape [3], [N, 3], or [Nx, Ny, 3].
+            num_rays (int): Number of rays per point. Default: SPP_PSF.
+            wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
+            resize_pupil_ratio (float): Scale factor for pupil radius.  
+                - 1.0: for paraxial ray tracing (default)  
+                - <1.0: for faster chief ray computation  
+                - >1.0: to reduce vignetting from sparse pupil sampling
 
         Returns:
-            ray: Ray object. Shape [*shape_points, num_rays, 3]
+            Ray: Sampled rays with shape [*points.shape[:-1], num_rays, 3].
         """
         # Ray origin is given
         ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
@@ -311,23 +312,26 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         resize_pupil_ratio=1,
         depth=-1.0,
     ):
-        """Sample parallel rays in object space.
-
-        Used for geometric optics calculation.
+        """
+        Sample parallel rays in object space for geometric optics calculations.
 
         Args:
-            fov_x (float or list): degree angle in x0z plane.
-            fov_y (float or list): degree angle in y0z plane.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-            resize_pupil_ratio (bool, optional): whether to shrink the pupil. Defaults to False.
-            depth (float, optional): sampling depth. Defaults to 0.0.
+            fov_x (float or list): Field angle(s) in the x–z plane (degrees). Default: [0.0].
+            fov_y (float or list): Field angle(s) in the y–z plane (degrees). Default: [0.0].
+            num_rays (int): Number of rays per field point. Default: SPP_CALC.
+            wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
+            entrance_pupil (bool): If True, sample origins on entrance pupil; otherwise, on surface 0. Default: True.
+            resize_pupil_ratio (float): Scale factor for pupil radius.  
+                - 1.0: for paraxial ray tracing (default)  
+                - <1.0: for faster chief ray computation  
+                - >1.0: to reduce vignetting from sparse pupil sampling
+            depth (float): Propagation depth in z. Default: -1.0.
 
         Returns:
-            ray (Ray object): Ray object. Shape [num_fov_y, num_fov_x, num_rays, 3], arranged in uv order.
+            Ray: Ray object with shape [len(fov_y), len(fov_x), num_rays, 3], ordered as (u, v).
         """
+
+
         # Preprocess fov angles
         if isinstance(fov_x, float):
             fov_x = [fov_x]
@@ -1565,6 +1569,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
     @torch.no_grad()
     def calc_pupil(self, paraxial=True):
+        """
+        Compute entrance and exit pupil positions and radii.
+        The entrance and exit pupils must be recalculated whenever:
+            - First-order parameters change (e.g., field of view, object height, image height),
+            - Lens geometry or materials change (e.g., surface curvatures, refractive indices, thicknesses),
+            - Or generally, any time the lens configuration is modified.
+            
+        Args:
+            paraxial (bool): If True, use paraxial approximation. Default: True.
+
+        Notes:
+            - If `self.float_enpd` is True, set ENPD based on computed pupil radius.
+            - Otherwise, override computed entrance pupil radius using fixed ENPD.
+        """
         self.exit_pupilz, self.exit_pupilr = self.calc_exit_pupil(paraxial)
         self.entrance_pupilz, self.entrance_pupilr = self.calc_entrance_pupil(paraxial)
 
@@ -1573,17 +1591,53 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         else:
             self.entrance_pupilr = self.enpd/2.0
 
-    def get_entrance_pupil(self, resize_pupil_ratio=1):
+    def get_entrance_pupil(self, resize_pupil_ratio=1, lens_changed=False):
+        """
+        Get entrance pupil location and radius with optional scaling.
+
+        Args:
+            resize_pupil_ratio (float): Scale factor for pupil radius. Default: 1.
+            lens_changed (bool): If True, recompute pupil parameters due to lens changes.
+
+        Returns:
+            tuple: (z position, radius) of entrance pupil.
+        """
+
+        if lens_changed: 
+            self.calc_pupil()
         entrance_pupilz, entrance_pupilr = self.entrance_pupilz, self.entrance_pupilr*resize_pupil_ratio
         return entrance_pupilz, entrance_pupilr
 
-    def get_exit_pupil(self, resize_pupil_ratio=1):
+    def get_exit_pupil(self, resize_pupil_ratio=1, lens_changed=False):
+        """
+        Get exit pupil location and radius with optional scaling.
+        The exit pupils must be recalculated when the lens is modified.
+
+        Args:
+            resize_pupil_ratio (float): Scale factor for pupil radius. Default: 1.
+            lens_changed (bool): If True, recompute pupil parameters due to lens changes.
+
+        Returns:
+            tuple: (z position, radius) of exit pupil.
+        """
+
+        if lens_changed: 
+            self.calc_pupil()
         exit_pupilz, exit_pupilr = self.exit_pupilz, self.exit_pupilr*resize_pupil_ratio
         return exit_pupilz, exit_pupilr
 
     @torch.no_grad()
     def calc_exit_pupil(self, paraxial=True):
-        """Sample **forward** rays from aperture edge to sensor plane to compute exit pupil.
+        """
+        Paraxial mode: 
+            Rays are emitted from near the center of the aperture stop and are close to the optical axis. 
+            This mode estimates the exit pupil position and radius under ideal (first-order) optical assumptions. 
+            It is fast and stable.
+        Non-paraxial mode: 
+            Rays are emitted from the edge of the aperture stop in large quantities. 
+            The exit pupil position and radius are determined based on the intersection points of these rays. 
+            This mode is slower and affected by aperture-related aberrations.
+            Use paraxial mode unless precise ray aiming is required.
 
         Args:
             paraxial (bool): center (True) or edge (False).
@@ -1652,8 +1706,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     @torch.no_grad()
     def calc_entrance_pupil(self, paraxial=True):
         """Caclulate entrance pupil of the lens.
-
-        Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2]. We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
+        Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2].
+          We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. 
+          The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
+        Paraxial mode: 
+            Rays are emitted from near the center of the aperture stop and are close to the optical axis. 
+            This mode estimates the entrance pupil position and radius under ideal (first-order) optical assumptions. 
+            It is fast and stable.
+        Non-paraxial mode: 
+            Rays are emitted from the edge of the aperture stop in large quantities. 
+            The entrance pupil position and radius are determined based on the intersection points of these rays. 
+            This mode is slower and affected by aperture-related aberrations.
+            Use paraxial mode unless precise ray aiming is required.
 
         Args:
             paraxial (bool): center (True) or edge (False).
@@ -1664,7 +1728,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         Reference:
             [1] Entrance pupil: how many rays can come from object space to sensor.
-            [2] https://en.wikipedia.org/wiki/Entrance_pupil: "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
+            [2] https://en.wikipedia.org/wiki/Entrance_pupil: 
+                "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
         """
         if self.aper_idx is None or hasattr(self, "aper_idx") is False:
             print("No aperture, use the first surface as entrance pupil.")
