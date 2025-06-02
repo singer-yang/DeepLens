@@ -248,7 +248,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         points=[[0.0, 0.0, -10000.0]],
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
-        resize_pupil_ratio=1,
+        scale_pupil=1,
     ):
         """
         Sample rays from point sources in object space (absolute 3D coordinates).
@@ -258,10 +258,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             points (list or Tensor): Ray origins in shape [3], [N, 3], or [Nx, Ny, 3].
             num_rays (int): Number of rays per point. Default: SPP_PSF.
             wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
-            resize_pupil_ratio (float): Scale factor for pupil radius.  
+            scale_pupil (float): Scale factor for pupil radius.  
                 - 1.0: for paraxial ray tracing (default)  
                 - <1.0: for faster chief ray computation  
-                - >1.0: to reduce vignetting from sparse pupil sampling
+                - >1.0: to ensure no vignetting
 
         Returns:
             Ray: Sampled rays with shape [*points.shape[:-1], num_rays, 3].
@@ -271,7 +271,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray_o = ray_o.to(self.device)
 
         # Sample points on the pupil
-        pupilz, pupilr = self.get_entrance_pupil(resize_pupil_ratio=resize_pupil_ratio)
+        pupilz, pupilr = self.get_entrance_pupil(scale_pupil=scale_pupil)
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(*ray_o.shape[:-1], num_rays)
         )
@@ -309,7 +309,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         num_rays=SPP_CALC,
         wvln=DEFAULT_WAVE,
         entrance_pupil=True,
-        resize_pupil_ratio=1,
+        scale_pupil=1,
         depth=-1.0,
     ):
         """
@@ -321,10 +321,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             num_rays (int): Number of rays per field point. Default: SPP_CALC.
             wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
             entrance_pupil (bool): If True, sample origins on entrance pupil; otherwise, on surface 0. Default: True.
-            resize_pupil_ratio (float): Scale factor for pupil radius.  
+            scale_pupil (float): Scale factor for pupil radius.  
                 - 1.0: for paraxial ray tracing (default)  
                 - <1.0: for faster chief ray computation  
-                - >1.0: to reduce vignetting from sparse pupil sampling
+                - >1.0: to ensure no vignetting
             depth (float): Propagation depth in z. Default: -1.0.
 
         Returns:
@@ -343,7 +343,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Sample ray origins on the pupil, shape [num_fov_x, num_fov_y, num_rays, 3]
         if entrance_pupil:
-            pupilz, pupilr = self.get_entrance_pupil(resize_pupil_ratio=resize_pupil_ratio)
+            pupilz, pupilr = self.get_entrance_pupil(scale_pupil=scale_pupil)
         else:
             pupilz, pupilr = 0, self.surfaces[0].r
 
@@ -954,7 +954,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray.
-            ray = self.sample_from_points(point, num_rays=SPP_CALC, resize_pupil_ratio=0.2)
+            ray = self.sample_from_points(point, num_rays=SPP_CALC, scale_pupil=0.2)
             ray = self.trace2sensor(ray)
             assert (ray.valid == 1).any(), "No sampled rays is valid."
             valid = ray.valid.unsqueeze(-1)
@@ -1298,7 +1298,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         # )
         # ===========>
         # Sample paraxial rays, shape [1, 1, num_rays, 3]
-        ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, resize_pupil_ratio=0.2)
+        ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
         image_height = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[
             0, 0, :
@@ -1575,7 +1575,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             - First-order parameters change (e.g., field of view, object height, image height),
             - Lens geometry or materials change (e.g., surface curvatures, refractive indices, thicknesses),
             - Or generally, any time the lens configuration is modified.
-            
+
         Args:
             paraxial (bool): If True, use paraxial approximation. Default: True.
 
@@ -1591,12 +1591,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         else:
             self.entrance_pupilr = self.enpd/2.0
 
-    def get_entrance_pupil(self, resize_pupil_ratio=1, lens_changed=False):
+    def get_entrance_pupil(self, scale_pupil=1, lens_changed=False):
         """
         Get entrance pupil location and radius with optional scaling.
 
         Args:
-            resize_pupil_ratio (float): Scale factor for pupil radius. Default: 1.
+            scale_pupil (float): Scale factor for pupil radius. Default: 1.
             lens_changed (bool): If True, recompute pupil parameters due to lens changes.
 
         Returns:
@@ -1605,16 +1605,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         if lens_changed: 
             self.calc_pupil()
-        entrance_pupilz, entrance_pupilr = self.entrance_pupilz, self.entrance_pupilr*resize_pupil_ratio
+        entrance_pupilz, entrance_pupilr = self.entrance_pupilz, self.entrance_pupilr*scale_pupil
         return entrance_pupilz, entrance_pupilr
 
-    def get_exit_pupil(self, resize_pupil_ratio=1, lens_changed=False):
+    def get_exit_pupil(self, scale_pupil=1, lens_changed=False):
         """
         Get exit pupil location and radius with optional scaling.
         The exit pupils must be recalculated when the lens is modified.
 
         Args:
-            resize_pupil_ratio (float): Scale factor for pupil radius. Default: 1.
+            scale_pupil (float): Scale factor for pupil radius. Default: 1.
             lens_changed (bool): If True, recompute pupil parameters due to lens changes.
 
         Returns:
@@ -1623,7 +1623,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         if lens_changed: 
             self.calc_pupil()
-        exit_pupilz, exit_pupilr = self.exit_pupilz, self.exit_pupilr*resize_pupil_ratio
+        exit_pupilz, exit_pupilr = self.exit_pupilz, self.exit_pupilr*scale_pupil
         return exit_pupilz, exit_pupilr
 
     @torch.no_grad()
@@ -1637,7 +1637,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             Rays are emitted from the edge of the aperture stop in large quantities. 
             The exit pupil position and radius are determined based on the intersection points of these rays. 
             This mode is slower and affected by aperture-related aberrations.
-            Use paraxial mode unless precise ray aiming is required.
+        Use paraxial mode unless precise ray aiming is required.
 
         Args:
             paraxial (bool): center (True) or edge (False).
@@ -1717,7 +1717,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             Rays are emitted from the edge of the aperture stop in large quantities. 
             The entrance pupil position and radius are determined based on the intersection points of these rays. 
             This mode is slower and affected by aperture-related aberrations.
-            Use paraxial mode unless precise ray aiming is required.
+        Use paraxial mode unless precise ray aiming is required.
 
         Args:
             paraxial (bool): center (True) or edge (False).
