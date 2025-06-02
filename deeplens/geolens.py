@@ -1709,6 +1709,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2].
           We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. 
           The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
+        Entrance Pupil Position [3]: The paraxial position of the entrance pupil with respect to the first surface in the system.
+        Exit Pupil Diameter [3]: The diameter in lens units of the paraxial image of the stop in image space.
         Paraxial mode: 
             Rays are emitted from near the center of the aperture stop and are close to the optical axis. 
             This mode estimates the entrance pupil position and radius under ideal (first-order) optical assumptions. 
@@ -1730,6 +1732,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             [1] Entrance pupil: how many rays can come from object space to sensor.
             [2] https://en.wikipedia.org/wiki/Entrance_pupil: 
                 "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
+            [3] Zemax LLC, *OpticStudio User Manual*, Version 19.4, Document No. 2311, 2019.
         """
         if self.aper_idx is None or hasattr(self, "aper_idx") is False:
             print("No aperture, use the first surface as entrance pupil.")
