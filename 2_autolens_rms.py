@@ -111,41 +111,42 @@ def curriculum_design(
         # Evaluate the lens
         # =======================================
         if i % test_per_iter == 0:
-            # Curriculum learning: gradually change aperture size
-            aper_r = min(
-                (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
-                aper_final,
-            )
-            # aper_r = aper_scheduler(i, iterations, self.surfaces[self.aper_idx].r)
-            self.surfaces[self.aper_idx].r = aper_r
-            self.fnum = self.foclen / aper_r / 2
-
-            # Correct lens shape and evaluate current design
-            if i > 0:
-                if shape_control:
-                    self.correct_shape()
-
-                if optim_mat and match_mat:
-                    self.match_materials()
-
-            # Save lens
-            self.write_lens_json(f"{result_dir}/iter{i}.json")
-            self.analysis(f"{result_dir}/iter{i}")
-
-            # Sample new rays and calculate target centers
-            rays_backup = []
-            for wv in WAVE_RGB:
-                ray = self.sample_grid_rays(
-                    num_grid=num_grid,
-                    depth=depth,
-                    num_rays=spp,
-                    wvln=wv,
-                    sample_more_off_axis=sample_more_off_axis,
+            with torch.no_grad():
+                # Curriculum learning: gradually change aperture size
+                aper_r = min(
+                    (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
+                    aper_final,
                 )
-                rays_backup.append(ray)
+                # aper_r = aper_scheduler(i, iterations, self.surfaces[self.aper_idx].r)
+                self.surfaces[self.aper_idx].r = aper_r
+                self.update_computation()
 
-            center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
-            center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
+                # Correct lens shape and evaluate current design
+                if i > 0:
+                    if shape_control:
+                        self.correct_shape()
+
+                    if optim_mat and match_mat:
+                        self.match_materials()
+
+                # Save lens
+                self.write_lens_json(f"{result_dir}/iter{i}.json")
+                self.analysis(f"{result_dir}/iter{i}")
+
+                # Sample new rays and calculate target centers
+                rays_backup = []
+                for wv in WAVE_RGB:
+                    ray = self.sample_grid_rays(
+                        num_grid=num_grid,
+                        depth=depth,
+                        num_rays=spp,
+                        wvln=wv,
+                        sample_more_off_axis=sample_more_off_axis,
+                    )
+                    rays_backup.append(ray)
+
+                center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+                center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =======================================
         # Optimize lens by minimizing rms

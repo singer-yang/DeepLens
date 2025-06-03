@@ -93,6 +93,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             self.materials = []
             self.to(self.device)
 
+        # Initialize lens design constraints (edge thickness, etc.)
+        self.init_constraints()
+
     def read_lens(self, filename):
         """Read a GeoLens from a file.
 
@@ -117,14 +120,22 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     def post_computation(self):
         """After loading lens, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
-        self.find_aperture()
         self.calc_pupil()
         self.foclen = self.calc_efl()
         self.hfov = self.calc_hfov()
         self.fnum = self.calc_fnum()
 
-        # Initialize lens design constraints (edge thickness, etc.)
-        self.init_constraints()
+    def update_float_setting(self):
+        """After lens changed, compute foclen, fov and fnum."""
+        # Basic lens parameter calculation
+        self.calc_pupil()
+        if self.float_enpd is False:
+            self.entrance_pupilr = self.enpd/2.0
+        if self.float_foclen is True:
+            self.foclen = self.calc_efl()
+        if self.float_hfov is True:
+            self.hfov = self.calc_hfov()
+        self.fnum = self.calc_fnum()
 
     def double(self):
         """Use double-precision for coherent ray tracing."""
@@ -1298,6 +1309,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         # )
         # ===========>
         # Sample paraxial rays, shape [1, 1, num_rays, 3]
+        self.calc_pupil()
         ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
         image_height = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[
@@ -1398,7 +1410,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             )
         else:
             ray = self.sample_from_points(
-                points=torch.tensor([0, 0, depth]),
+                points=torch.tensor([0.0, 0.0, depth]),
                 num_rays=SPP_CALC,
                 wvln=DEFAULT_WAVE,
             )
@@ -1583,46 +1595,34 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             - If `self.float_enpd` is True, set ENPD based on computed pupil radius.
             - Otherwise, override computed entrance pupil radius using fixed ENPD.
         """
+        self.find_aperture()
         self.exit_pupilz, self.exit_pupilr = self.calc_exit_pupil(paraxial)
         self.entrance_pupilz, self.entrance_pupilr = self.calc_entrance_pupil(paraxial)
 
-        if self.float_enpd == True:
-            self.enpd = self.entrance_pupilr*2
-        else:
-            self.entrance_pupilr = self.enpd/2.0
-
-    def get_entrance_pupil(self, scale_pupil=1, lens_changed=False):
+    def get_entrance_pupil(self, scale_pupil=1):
         """
         Get entrance pupil location and radius with optional scaling.
 
         Args:
             scale_pupil (float): Scale factor for pupil radius. Default: 1.
-            lens_changed (bool): If True, recompute pupil parameters due to lens changes.
 
         Returns:
             tuple: (z position, radius) of entrance pupil.
         """
-
-        if lens_changed: 
-            self.calc_pupil()
         entrance_pupilz, entrance_pupilr = self.entrance_pupilz, self.entrance_pupilr*scale_pupil
         return entrance_pupilz, entrance_pupilr
 
-    def get_exit_pupil(self, scale_pupil=1, lens_changed=False):
+    def get_exit_pupil(self, scale_pupil=1):
         """
         Get exit pupil location and radius with optional scaling.
         The exit pupils must be recalculated when the lens is modified.
 
         Args:
             scale_pupil (float): Scale factor for pupil radius. Default: 1.
-            lens_changed (bool): If True, recompute pupil parameters due to lens changes.
 
         Returns:
             tuple: (z position, radius) of exit pupil.
         """
-
-        if lens_changed: 
-            self.calc_pupil()
         exit_pupilz, exit_pupilr = self.exit_pupilz, self.exit_pupilr*scale_pupil
         return exit_pupilz, exit_pupilr
 
@@ -1850,7 +1850,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         self.d_sensor = d_sensor_new
 
         # FoV will be slightly changed
-        self.post_computation()
+        self.update_float_setting()
 
     @torch.no_grad()
     def set_aperture(self, fnum=None, foclen=None, aper_r=None):
@@ -1945,7 +1945,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
             self.pixel_size = sensor_size[0] / sensor_res[0]
 
-            self.post_computation()
+            self.update_float_setting()
 
         elif r_sensor is not None:
             assert sensor_size is None, (
@@ -1967,7 +1967,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ]
             self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
 
-            self.post_computation()
+            self.update_float_setting()
 
         else:
             raise ValueError(
@@ -2296,6 +2296,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         self.lens_info = data.get("info", "None")
         self.enpd = data.get('enpd', None)
         self.float_enpd = True if self.enpd is None else False
+        self.float_foclen = False
+        self.float_hfov = False
 
         sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]
@@ -2307,7 +2309,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
         data["foclen"] = round(self.foclen, 4)
         data["fnum"] = round(self.fnum, 4)
-        data["enpd"] = round(self.enpd, 4)
+        if self.float_enpd is False:
+            data["enpd"] = round(self.enpd, 4)
         data["r_sensor"] = self.r_sensor
         data["(d_sensor)"] = round(self.d_sensor.item(), 4)
         data["(sensor_size)"] = [round(i, 4) for i in self.sensor_size]
