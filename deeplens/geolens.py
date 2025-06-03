@@ -518,7 +518,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray_o_record (list): list of intersection points.
         """
         # Manually propagate ray to a shallow depth to improve accuracy
-        if (ray.o[..., 2].min() < -1000.0).any():
+        if (ray.o[..., 2].min() < -100.0).any():
             ray = ray.prop_to(-10.0)
 
         if lens_range is None:
@@ -556,7 +556,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray_o_record (list): list of intersection points.
         """
         # Manually propagate ray to a shallow depth to improve accuracy
-        if (ray.o[..., 2].min() < -1000.0).any():
+        if (ray.o[..., 2].min() < -100.0).any():
             ray = ray.prop_to(-10.0)
 
         # Trace rays
@@ -940,10 +940,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """Compute reference PSF center (flipped to match the original point, green light) for given point source.
 
         Args:
-            point: [N, 3] un-normalized point is in object plane.
+            point: [..., 3] un-normalized point is in object plane.
 
         Returns:
-            psf_center: [N, 2] un-normalized psf center in sensor plane.
+            psf_center: [..., 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray.
@@ -951,8 +951,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray = self.trace2sensor(ray)
             assert (ray.valid == 1).any(), "No sampled rays is valid."
             valid = ray.valid.unsqueeze(-1)
-            psf_center = (ray.o * valid).sum(-2) / valid.sum(-2).add(EPSILON)  # shape [N, 3]
-            psf_center = -psf_center[..., :2]  # shape [N, 2]
+            psf_center = (ray.o * valid).sum(-2) / valid.sum(-2).add(EPSILON)  # shape [..., 3]
+            psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
             # Pinhole camera perspective projection.
@@ -2203,6 +2203,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
 
             elif isinstance(surf, Plane):
+                print(f"Plane {i} can not be optimized.")
                 pass
 
             # elif isinstance(surf, PolyEven):
@@ -2224,13 +2225,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         return params
 
-    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_surf_range=None, optim_mat=False):
+    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.01, optim_surf_range=None, optim_mat=False):
         """Get optimizers and schedulers for different lens parameters.
 
         Args:
-            lrs (_type_): _description_
-            epochs (int, optional): _description_. Defaults to 100.
-            ai_decay (float, optional): _description_. Defaults to 0.2.
+            lr (list): learning rate for different parameters [c, d, k, a]. Defaults to [1e-4, 1e-4, 0, 1e-4].
+            decay (float): decay rate for higher order a. Defaults to 0.2.
+            optim_surf_range (list): surface indices to be optimized. Defaults to None.
+            optim_mat (bool): whether to optimize material. Defaults to False.
+
+        Returns:
+            list: optimizer parameters
         """
         params = self.get_optimizer_params(lr, decay, optim_surf_range, optim_mat)
         optimizer = torch.optim.Adam(params)

@@ -125,7 +125,7 @@ class GeoLensOptim:
         self,
         num_grid=GEO_GRID,
         depth=DEPTH,
-        num_rays=SPP_CALC,
+        num_rays=SPP_PSF,
         sample_more_off_axis=False,
     ):
         """Compute average RMS errors. Baseline RMS loss function.
@@ -150,12 +150,20 @@ class GeoLensOptim:
                 wvln=wvln,
                 sample_more_off_axis=sample_more_off_axis,
             )
-            ray = self.trace2sensor(ray)
 
-            # Green light point center for reference
+            # Calculate reference center, shape of (..., 2)
             if i == 0:
                 with torch.no_grad():
-                    ray_center_green = ray.centroid()
+                    ray_center_green = - self.psf_center(
+                        point=ray.o[:, :, 0, :], method="pinhole"
+                    )
+
+            ray = self.trace2sensor(ray)
+
+            # # Green light point center for reference
+            # if i == 0:
+            #     with torch.no_grad():
+            #         ray_center_green = ray.centroid()
 
             # Calculate RMS error with reference center
             rms_error = ray.rms_error(center_ref=ray_center_green)
