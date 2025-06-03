@@ -58,6 +58,8 @@ def read_zmx(filename="./test.zmx"):
                 geolens.float_enpd = False
                 geolens.enpd = float(line.split()[1])
 
+    geolens.float_foclen = False
+    geolens.float_hfov = False
     # Read the extracted data from each SURF
     geolens.surfaces = []
     d = 0.0
@@ -180,6 +182,7 @@ def create_lens(
     fov,
     fnum,
     flange,
+    enpd=None,
     thickness=None,
     lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
     save_dir="./",
@@ -259,6 +262,10 @@ def create_lens(
     # Lens calculation
     lens = lens.to(lens.device)
     lens.d_sensor = torch.tensor(thickness).to(lens.device)
+    lens.enpd = enpd
+    lens.float_enpd = True if enpd is None else False
+    lens.float_foclen = False
+    lens.float_hfov = False
     lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh / 2)
     lens.post_computation()
 
