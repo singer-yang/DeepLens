@@ -32,26 +32,34 @@ class Phase(Surface):
         self.r = r
         self.w = r * float(np.sqrt(2))
         self.h = r * float(np.sqrt(2))
-        # self.thickness = thickness
-        # self.glass = glass
-
+        
         # Use ray tracing to simulate diffraction, the same as Zemax
         self.diffraction = True
         self.diffraction_order = 1
-        # print(
-        #     "A Phase diffractive surface is created, but diffraction is not activated."
-        # )
 
         self.to(device)
         self.init_param_model(param_model)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        # glass = surf_dict.get("mat2", "test")
-        # thickness = surf_dict.get("thickness", 0.5)
-        param_model = surf_dict.get("param_model", "binary2")
+        """Initialize phase surface from dictionary."""
+        # Initialize phase surface
         mat2 = surf_dict.get("mat2", "air")
-        return cls(surf_dict["r"], surf_dict["d"], param_model, mat2)
+        param_model = surf_dict.get("param_model", "binary2")
+        obj = cls(surf_dict["r"], surf_dict["d"], param_model, mat2)
+
+        # Load parameters
+        if param_model == "binary2":
+            obj.order2 += surf_dict.get("order2", 0.0)
+            obj.order4 += surf_dict.get("order4", 0.0)
+            obj.order6 += surf_dict.get("order6", 0.0)
+            obj.order8 += surf_dict.get("order8", 0.0)
+            obj.order10 += surf_dict.get("order10", 0.0)
+            obj.order12 += surf_dict.get("order12", 0.0)
+        else:
+            print(f"Parameter randomly initialized for {param_model}")
+        
+        return obj
 
     def init_param_model(self, param_model="binary2"):
         self.param_model = param_model
@@ -66,6 +74,7 @@ class Phase(Surface):
             self.order6 = torch.tensor(0.0)
             self.order8 = torch.tensor(0.0)
             self.order10 = torch.tensor(0.0)
+            self.order12 = torch.tensor(0.0)
 
         elif self.param_model == "poly1d":
             rand_value = np.random.rand(6) * 0.001
@@ -123,7 +132,7 @@ class Phase(Surface):
             ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
         # Refraction by the plane surface
-        ray = self.refract(ray, n2/n1)
+        ray = self.refract(ray, n2 / n1)
 
         if self.diffraction:
             # Diffraction 1: DOE phase modulation
@@ -155,7 +164,7 @@ class Phase(Surface):
         """Reference phase map at design wavelength (independent to wavelength). We have the same definition of phase (phi) as Zemax."""
         x_norm = x / self.r
         y_norm = y / self.r
-        r = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
+        r_norm = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         if self.param_model == "fresnel":
             phi = (
@@ -164,15 +173,20 @@ class Phase(Surface):
 
         elif self.param_model == "binary2":
             phi = (
-                self.order2 * r**2
-                + self.order4 * r**4
-                + self.order6 * r**6
-                + self.order8 * r**8
-                + self.order10 * r**10
+                self.order2 * r_norm**2
+                + self.order4 * r_norm**4
+                + self.order6 * r_norm**6
+                + self.order8 * r_norm**8
+                + self.order10 * r_norm**10
+                + self.order12 * r_norm**12
             )
 
         elif self.param_model == "poly1d":
-            phi_even = self.order2 * r**2 + self.order4 * r**4 + self.order6 * r**6
+            phi_even = (
+                self.order2 * r_norm**2
+                + self.order4 * r_norm**4
+                + self.order6 * r_norm**6
+            )
             phi_odd = (
                 self.order3 * (x_norm**3 + y_norm**3)
                 + self.order5 * (x_norm**5 + y_norm**5)
@@ -210,6 +224,7 @@ class Phase(Surface):
                 + 6 * self.order6 * r**5
                 + 8 * self.order8 * r**7
                 + 10 * self.order10 * r**9
+                + 12 * self.order12 * r**11
             )
             dphidx = dphidr * x_norm / r / self.r
             dphidy = dphidr * y_norm / r / self.r
@@ -245,7 +260,7 @@ class Phase(Surface):
             )
 
         return dphidx, dphidy
-    
+
     def _sag(self, x, y):
         """Diffractive surface is now attached to a plane surface."""
         return torch.zeros_like(x)
@@ -256,7 +271,7 @@ class Phase(Surface):
 
     def normal_vec(self, ray):
         """Calculate surface normal vector at intersection points.
-        
+
         Normal vector points from the surface toward the side where the light is coming from.
         """
         normal_vec = torch.zeros_like(ray.d)
@@ -275,17 +290,19 @@ class Phase(Surface):
         """Generate optimizer parameters."""
         params = []
         if self.param_model == "binary2":
-            lr = 0.001 if lr is None else lr
+            lr = 0.1 if lr is None else lr
             self.order2.requires_grad = True
             self.order4.requires_grad = True
             self.order6.requires_grad = True
             self.order8.requires_grad = True
             self.order10.requires_grad = True
+            self.order12.requires_grad = True
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
             params.append({"params": [self.order6], "lr": lr})
             params.append({"params": [self.order8], "lr": lr})
             params.append({"params": [self.order10], "lr": lr})
+            params.append({"params": [self.order12], "lr": lr})
 
         elif self.param_model == "poly1d":
             lr = 0.001 if lr is None else lr
@@ -361,7 +378,7 @@ class Phase(Surface):
         r = np.sqrt(x**2 + y**2 + EPSILON)
         sag = roc * (1 - np.sqrt(1 - r**2 / roc**2))
         sag = max_offset - np.fmod(sag, max_offset)
-        ax.plot(d + sag, x, color=color, linestyle=linestyle, linewidth=0.75)
+        ax.plot(d + sag, x, color='orange', linestyle=linestyle, linewidth=0.75)
 
         # # Draw DOE base
         # z_bound = [
@@ -387,6 +404,7 @@ class Phase(Surface):
                     "order6": self.order6.clone().detach().cpu(),
                     "order8": self.order8.clone().detach().cpu(),
                     "order10": self.order10.clone().detach().cpu(),
+                    "order12": self.order12.clone().detach().cpu(),
                 },
                 save_path,
             )
@@ -420,7 +438,7 @@ class Phase(Surface):
         self.diffraction = True
         ckpt = torch.load(load_path)
         self.param_model = ckpt["param_model"]
-        
+
         if self.param_model == "binary2" or self.param_model == "poly_even":
             self.param_model = "binary2"
             self.order2 = ckpt["order2"].to(self.device)
@@ -428,7 +446,8 @@ class Phase(Surface):
             self.order6 = ckpt["order6"].to(self.device)
             self.order8 = ckpt["order8"].to(self.device)
             self.order10 = ckpt["order10"].to(self.device)
-
+            self.order12 = ckpt["order12"].to(self.device)
+            
         elif self.param_model == "poly1d":
             self.order2 = ckpt["order2"].to(self.device)
             self.order3 = ckpt["order3"].to(self.device)
@@ -468,6 +487,7 @@ class Phase(Surface):
                 "order6": self.order6.item(),
                 "order8": self.order8.item(),
                 "order10": self.order10.item(),
+                "order12": self.order12.item(),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
