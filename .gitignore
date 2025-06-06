@@ -12,7 +12,7 @@ deeplens/do_code/
 !images/*.png
 debug.py
 *.log
-
+temp/*
 
 lenses/pancake/
 
