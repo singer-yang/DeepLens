@@ -459,6 +459,7 @@ class GeoLensOptim:
             if i % sample_rays_per_iter == 0:
                 with torch.no_grad():
                     # Sample rays
+                    self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
                         ray = self.sample_grid_rays(
