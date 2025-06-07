@@ -50,7 +50,16 @@ def read_zmx(filename="./test.zmx"):
                     surfs_dict[current_surf][new_key] = new_value
                 else:
                     surfs_dict[current_surf][key] = value
+        elif line.startswith("FLOA") or line.startswith("ENPD"):
+            if line.startswith("FLOA"):
+                geolens.float_enpd = True
+                geolens.enpd = None
+            else:
+                geolens.float_enpd = False
+                geolens.enpd = float(line.split()[1])
 
+    geolens.float_foclen = False
+    geolens.float_hfov = False
     # Read the extracted data from each SURF
     geolens.surfaces = []
     d = 0.0
@@ -102,7 +111,10 @@ def read_zmx(filename="./test.zmx"):
 def write_zmx(geolens, filename="./test.zmx"):
     """Write the lens into .zmx file."""
     lens_zmx_str = ""
-    ENPD = geolens.calc_entrance_pupil()[1] * 2
+    if geolens.float_enpd == True:
+        enpd_str = 'FLOA'
+    else:
+        enpd_str = f'ENPD {geolens.enpd}'
     # Head string
     head_str = f"""VERS 190513 80 123457 L123457
 MODE SEQ
@@ -110,7 +122,7 @@ NAME
 PFIL 0 0 0
 LANG 0
 UNIT MM X W X CM MR CPMM
-ENPD {ENPD}
+{enpd_str}
 ENVD 2.0E+1 1 0
 GFAC 0 0
 GCAT OSAKAGASCHEMICAL MISC
@@ -170,6 +182,7 @@ def create_lens(
     fov,
     fnum,
     flange,
+    enpd=None,
     thickness=None,
     lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
     save_dir="./",
@@ -249,6 +262,10 @@ def create_lens(
     # Lens calculation
     lens = lens.to(lens.device)
     lens.d_sensor = torch.tensor(thickness).to(lens.device)
+    lens.enpd = enpd
+    lens.float_enpd = True if enpd is None else False
+    lens.float_foclen = False
+    lens.float_hfov = False
     lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh / 2)
     lens.post_computation()
 
