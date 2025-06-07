@@ -256,7 +256,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         points=[[0.0, 0.0, -10000.0]],
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
-        scale_pupil=1,
+        scale_pupil=1.0,
     ):
         """
         Sample rays from point sources in object space (absolute 3D coordinates).
@@ -1662,21 +1662,21 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             print("No aperture, use the last surface as exit pupil.")
             return self.surfaces[-1].d.item(), self.surfaces[-1].r
 
-        # Sample rays from edge of aperture
+        # Sample rays from aperture (edge or center)
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
 
         if paraxial:
-            ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(SPP_PARAXIAL, 1)
-            phi = torch.linspace(-0.1, 0.1, SPP_PARAXIAL)/180.0*torch.pi
+            ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(32, 1)
+            phi = torch.linspace(-0.1, 0.1, 32) / 180.0 * torch.pi
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             phi = torch.linspace(-0.5, 0.5, SPP_CALC)
+        
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), torch.cos(phi)), axis=-1
         )
-
         ray = Ray(ray_o, d, device=self.device)
 
         # Ray tracing from aperture edge to last surface
@@ -1701,62 +1701,57 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             avg_pupilr = torch.mean(intersection_points[:, 0]).item()
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
+            if paraxial:
+                avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
+
             if avg_pupilr < EPSILON:
-                print("Small pupil is detected, use the last surface as pupil.")
+                print("Zero or negative exit pupil is detected, use the last surface as pupil.")
                 avg_pupilr = self.surfaces[-1].r
                 avg_pupilz = self.surfaces[-1].d.item()
-
-            if paraxial:
-                avg_pupilr = abs(avg_pupilr/DELTA_PARAXIAL*aper_r)
 
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
     def calc_entrance_pupil(self, paraxial=True):
-        """Caclulate entrance pupil of the lens.
-        Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2].
-          We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. 
-          The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
-        Entrance Pupil Position [3]: The paraxial position of the entrance pupil with respect to the first surface in the system.
-        Exit Pupil Diameter [3]: The diameter in lens units of the paraxial image of the stop in image space.
-        Paraxial mode: 
-            Rays are emitted from near the center of the aperture stop and are close to the optical axis. 
-            This mode estimates the entrance pupil position and radius under ideal (first-order) optical assumptions. 
-            It is fast and stable.
-        Non-paraxial mode: 
-            Rays are emitted from the edge of the aperture stop in large quantities. 
-            The entrance pupil position and radius are determined based on the intersection points of these rays. 
-            This mode is slower and affected by aperture-related aberrations.
-        Use paraxial mode unless precise ray aiming is required.
+        """Calculate entrance pupil of the lens.
+        
+        The entrance pupil is the optical image of the physical aperture stop, as seen through the optical elements in front of the stop. We sample backward rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points defines the entrance pupil position and radius.
 
         Args:
-            paraxial (bool): center (True) or edge (False).
-
+            paraxial (bool): Ray sampling mode. Default: True.
+                - True: Rays emitted from near the center of the aperture stop, close to 
+                  the optical axis. Fast and stable under ideal optical assumptions.
+                - False: Rays emitted from the edge of the aperture stop in large quantities. 
+                  Slower and affected by aperture-related aberrations.
+                  
         Returns:
-            avg_pupilz (float): z coordinate of entrance pupil.
-            avg_pupilr (float): radius of entrance pupil.
+            tuple: (z_position, radius) of entrance pupil.
+            
+        Note:
+            [1] Use paraxial mode unless precise ray aiming is required.
+            [2] This function only works for object at a far distance. For microscopes, this function usually returns a negative entrance pupil.
 
-        Reference:
+        References:
             [1] Entrance pupil: how many rays can come from object space to sensor.
-            [2] https://en.wikipedia.org/wiki/Entrance_pupil: 
-                "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
+            [2] https://en.wikipedia.org/wiki/Entrance_pupil: "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
             [3] Zemax LLC, *OpticStudio User Manual*, Version 19.4, Document No. 2311, 2019.
         """
         if self.aper_idx is None or hasattr(self, "aper_idx") is False:
             print("No aperture, use the first surface as entrance pupil.")
             return self.surfaces[0].d.item(), self.surfaces[0].r
 
-        # Sample rays from edge of aperture
+        # Sample rays from aperture stop
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
 
         if paraxial:
-            ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(SPP_PARAXIAL, 1)
-            phi = torch.linspace(-0.1, 0.1, SPP_PARAXIAL)/180.0*torch.pi
+            ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(32, 1)
+            phi = torch.linspace(-0.1, 0.1, 32) / 180.0 * torch.pi
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
-            phi = torch.linspace(-0.5, 0.5, SPP_CALC)
+            phi = torch.linspace(-0.25, 0.25, SPP_CALC)
+        
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
         )
@@ -1780,13 +1775,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             avg_pupilr = torch.mean(intersection_points[:, 0]).item()
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
-            if avg_pupilr < EPSILON:
-                print("Small entrance pupil is detected, use the first surface.")
-                avg_pupilr = self.surfaces[0].r
-                avg_pupilz = self.surfaces[0].d.item()
-
             if paraxial:
                 avg_pupilr = abs(avg_pupilr/DELTA_PARAXIAL*aper_r)
+            
+            if avg_pupilr < EPSILON:
+                print("Zero or negative entrance pupil is detected, use the first surface.")
+                avg_pupilr = self.surfaces[0].r
+                avg_pupilz = self.surfaces[0].d.item()
 
         return avg_pupilz, avg_pupilr
 
@@ -2315,6 +2310,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]
+        
+        self.to(self.device)
         self.set_sensor(sensor_res=sensor_res, r_sensor=self.r_sensor)
 
     def write_lens_json(self, filename="./test.json"):

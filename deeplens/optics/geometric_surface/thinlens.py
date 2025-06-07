@@ -7,9 +7,9 @@ from .base import Surface
 
 
 class ThinLens(Surface):
-    def __init__(self, r, d, f=100, mat2="air", is_square=False, device="cpu"):
+    def __init__(self, r, d, f=100, device="cpu"):
         """Thin lens surface."""
-        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
+        Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
         self.f = torch.tensor(f, dtype=torch.float32)
         self.device = device
         
@@ -18,7 +18,7 @@ class ThinLens(Surface):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        return cls( surf_dict["r"], surf_dict["d"], surf_dict["f"], surf_dict["mat2"])
+        return cls( surf_dict["r"], surf_dict["d"], surf_dict["f"])
 
     # =========================================
     # Optimization
@@ -45,8 +45,7 @@ class ThinLens(Surface):
 
         # Update ray position
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
         ray.valid = ray.valid * valid
 
         if ray.coherent:
@@ -119,6 +118,10 @@ class ThinLens(Surface):
         d = self.d.item()
         r = self.r
         
+        # Draw a vertical line to represent the thin lens
+        ax.plot([d, d], [-r, r], color=color, linestyle=linestyle, linewidth=0.75)        
+        
+        # Draw arrow to indicate the focal length
         arrowstyle = '<->' if self.f > 0 else ']-['
         ax.annotate(
             "",
