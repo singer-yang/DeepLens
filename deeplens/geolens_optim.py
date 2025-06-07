@@ -38,6 +38,8 @@ from deeplens.utils import set_logger
 
 
 class GeoLensOptim:
+    """This class contains the optimization functions for the geometric lens design.
+    """
     # ================================================================
     # Lens design constraints
     # ================================================================
@@ -48,8 +50,8 @@ class GeoLensOptim:
 
             self.dist_min = 0.05
             self.dist_max = 0.6
-            self.thickness_min = 0.2
-            self.thickness_max = 1.5
+            self.thickness_min = 0.25
+            self.thickness_max = 2.0
             self.flange_min = 0.25
             self.flange_max = 3.0
 
@@ -350,12 +352,11 @@ class GeoLensOptim:
         last_surf = self.surfaces[-1]
         r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
-        flange_min = torch.min(z_last_surf)
-        flange_max = torch.max(z_last_surf)
-        if flange_min < flange_min_allowed:
-            loss_min += flange_min
-        if flange_max > flange_max_allowed:
-            loss_max += flange_max
+        flange = torch.min(z_last_surf)
+        if flange < flange_min_allowed:
+            loss_min += flange
+        if flange > flange_max_allowed:
+            loss_max += flange
 
         # Loss, minimize loss_max and maximize loss_min
         return loss_max - loss_min
@@ -393,13 +394,13 @@ class GeoLensOptim:
         lrs=[1e-3, 1e-4, 1e-1, 1e-4],
         decay=0.001,
         iterations=2000,
-        test_per_iter=50,
+        test_per_iter=100,
         centroid=False,
         optim_mat=False,
         match_mat=False,
         shape_control=True,
         sample_more_off_axis=False,
-        result_dir="./results",
+        result_dir=None,
     ):
         """Optimize the lens by minimizing rms errors.
 
@@ -418,9 +419,9 @@ class GeoLensOptim:
 
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
-        result_dir = (
-            result_dir + "/" + datetime.now().strftime("%m%d-%H%M%S") + "-DesignLens"
-        )
+        if result_dir is None:
+            result_dir = f"./results/{datetime.now().strftime('%m%d-%H%M%S')}-DesignLens"   
+        
         os.makedirs(result_dir, exist_ok=True)
         if not logging.getLogger().hasHandlers():
             set_logger(result_dir)
@@ -430,7 +431,7 @@ class GeoLensOptim:
 
         optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
         scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=200, num_training_steps=iterations
+            optimizer, num_warmup_steps=100, num_training_steps=iterations
         )
 
         # Training loop
