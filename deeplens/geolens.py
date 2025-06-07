@@ -146,9 +146,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         sample_more_off_axis=False,
     ):
         """Sample grid rays from object space.
-
-        If depth is infinite, sample parallel rays at different field angles.
-        If depth is finite, sample point source rays from the object plane.
+            (1) If depth is infinite, sample parallel rays at different field angles.
+            (2) If depth is finite, sample point source rays from the object plane.
 
         This function is usually used for (1) PSF map, (2) RMS error map, and (3) spot diagram calculation.
 
@@ -165,20 +164,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if isinstance(num_grid, int):
             num_grid = [num_grid, num_grid]
 
-        # Calculate field angles. Top-left field has positive fov_x and negative fov_y
+        # Calculate field angles for grid source. Top-left field has positive fov_x and negative fov_y
+        x_list = [x for x in np.linspace(1, -1, num_grid[0])]
+        y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
         if sample_more_off_axis:
-            x_list = [
-                np.sign(x) * np.abs(x) ** 0.5 for x in np.linspace(1, -1, num_grid[0])
-            ]
-            y_list = [
-                np.sign(y) * np.abs(y) ** 0.5 for y in np.linspace(-1, 1, num_grid[1])
-            ]
-        else:
-            x_list = [x for x in np.linspace(1, -1, num_grid[0])]
-            y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
+            x_list = [np.sign(x) * np.abs(x) ** 0.5 for x in x_list]
+            y_list = [np.sign(y) * np.abs(y) ** 0.5 for y in y_list]
 
-        hfov_x = np.rad2deg(self.hfov_x)
-        hfov_y = np.rad2deg(self.hfov_y)
+        # Calculate FoV_x and FoV_y
+        hfov_x = np.atan(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
+        hfov_y = np.atan(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
+        hfov_x = np.rad2deg(hfov_x)
+        hfov_y = np.rad2deg(hfov_y)
         fov_x_list = [float(x * hfov_x) for x in x_list]
         fov_y_list = [float(y * hfov_y) for y in y_list]
 
@@ -955,9 +952,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
-            # Pinhole camera perspective projection.
-            scale = self.calc_scale_pinhole(point[..., 2])
-            psf_center = point[..., :2] / scale.unsqueeze(-1)
+            # ======>
+            # # Pinhole camera perspective projection.
+            # scale = self.calc_scale_pinhole(point[..., 2])
+            # psf_center = point[..., :2] / scale.unsqueeze(-1)
+            # ======>
+            # Calculate the FoV of incident ray, then map to sensor plane
+            tan_point_fov_x = -point[..., 0] / point[..., 2]
+            tan_point_fov_y = -point[..., 1] / point[..., 2]
+            tan_hfov_x = float(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
+            tan_hfov_y = float(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
+            psf_center_x = tan_point_fov_x / tan_hfov_x * self.sensor_size[1] / 2
+            psf_center_y = tan_point_fov_y / tan_hfov_y * self.sensor_size[0] / 2
+            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1)
+            # ======>
 
         else:
             raise ValueError(f"Unsupported method: {method}.")
@@ -2126,7 +2134,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             render_unwarp (bool): whether unwarp the rendered image.
             lens_title (str): lens title
         """
-
         # Draw lens layout and ray path
         self.draw_layout(
             filename=f"{save_name}.png",
@@ -2181,6 +2188,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if optim_surf_range is None:
             optim_surf_range = self.find_diff_surf()
 
+        # Optimize lens surface parameters
         params = []
         for i in optim_surf_range:
             surf = self.surfaces[i]
@@ -2220,6 +2228,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                     f"Surface type {surf.__class__.__name__} is not supported for optimization yet."
                 )
 
+        # Optimize sensor place
         self.d_sensor.requires_grad = True
         params += [{"params": self.d_sensor, "lr": lr[1]}]
 
