@@ -209,6 +209,7 @@ class GeoLensVis:
                         wvln=WAVE_RGB[2 - i],
                         entrance_pupil=entrance_pupil,
                     )  # shape (num_rays, 3)
+                    ray.prop_to(-1.0)
 
                 # Trace rays to sensor and plot ray paths
                 _, ray_o_record = self.trace2sensor(ray=ray, record=True)
