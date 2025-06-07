@@ -32,7 +32,7 @@ class Phase(Surface):
         self.r = r
         self.w = r * float(np.sqrt(2))
         self.h = r * float(np.sqrt(2))
-        
+
         # Use ray tracing to simulate diffraction, the same as Zemax
         self.diffraction = True
         self.diffraction_order = 1
@@ -58,7 +58,7 @@ class Phase(Surface):
             obj.order12 += surf_dict.get("order12", 0.0)
         else:
             print(f"Parameter randomly initialized for {param_model}")
-        
+
         return obj
 
     def init_param_model(self, param_model="binary2"):
@@ -104,24 +104,19 @@ class Phase(Surface):
     # Computation (ray tracing)
     # ==============================
     def ray_reaction(self, ray, n1=None, n2=None):
-        """Ray reaction on DOE surface. Imagine the DOE as a wrapped positive convex lens for debugging.
+        """Ray reaction on DOE surface."""
+        ray = self.intersect(ray)
+        ray = self.refract(ray, n1 / n2)
+        if self.diffraction:
+            ray = self.diffract(ray)
+        return ray
 
-        1, The phase φ in radians adds to the optical path length of the ray
-        2, The gradient of the phase profile (phase slope) change the direction of rays.
-
-        Reference:
-            [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
-            [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
-        """
-        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
-
+    def intersect(self, ray):
+        """Ray intersection with a DOE surface."""
         # Intersection with a plane
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
-        # valid = (new_o[...,0].abs() <= self.h/2) & (new_o[...,1].abs() <= self.w/2) & (ray.valid > 0) # square
-        valid_aper = (
-            torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r
-        )  # circular
+        valid_aper = torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r
         valid = valid_aper & (ray.valid > 0)
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
         ray.valid = ray.valid * valid
@@ -131,32 +126,42 @@ class Phase(Surface):
             new_opl = ray.opl + t
             ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
-        # Refraction by the plane surface
-        ray = self.refract(ray, n2 / n1)
+        return ray
 
-        if self.diffraction:
-            # Diffraction 1: DOE phase modulation
-            if ray.coherent:
-                phi = self.phi(ray.o[..., 0], ray.o[..., 1])
-                new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * torch.pi)
-                ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
+    def diffract(self, ray):
+        """Diffraction of DOE surface.
+            1, The phase φ in radians adds to the optical path length of the ray
+            2, The gradient of the phase profile (phase slope) change the direction of rays.
 
-            # Diffraction 2: bend rays
-            # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
-            dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
+        Reference:
+            [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+            [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
+        """
+        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
+        valid = ray.valid > 0
 
-            wvln_mm = ray.wvln.squeeze(-1) * 1e-3
-            order = self.diffraction_order
-            if forward:
-                new_d_x = ray.d[..., 0] + wvln_mm / (2 * torch.pi) * dphidx * order
-                new_d_y = ray.d[..., 1] + wvln_mm / (2 * torch.pi) * dphidy * order
-            else:
-                new_d_x = ray.d[..., 0] - wvln_mm / (2 * torch.pi) * dphidx * order
-                new_d_y = ray.d[..., 1] - wvln_mm / (2 * torch.pi) * dphidy * order
+        # Diffraction 1: DOE phase modulation
+        if ray.coherent:
+            phi = self.phi(ray.o[..., 0], ray.o[..., 1])
+            new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * torch.pi)
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
-            new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
-            new_d = F.normalize(new_d, p=2, dim=-1)
-            ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
+        # Diffraction 2: bend rays
+        # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
+        dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
+
+        wvln_mm = ray.wvln.squeeze(-1) * 1e-3
+        order = self.diffraction_order
+        if forward:
+            new_d_x = ray.d[..., 0] + wvln_mm / (2 * torch.pi) * dphidx * order
+            new_d_y = ray.d[..., 1] + wvln_mm / (2 * torch.pi) * dphidy * order
+        else:
+            new_d_x = ray.d[..., 0] - wvln_mm / (2 * torch.pi) * dphidx * order
+            new_d_y = ray.d[..., 1] - wvln_mm / (2 * torch.pi) * dphidy * order
+
+        new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
+        new_d = F.normalize(new_d, p=2, dim=-1)
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
@@ -378,7 +383,7 @@ class Phase(Surface):
         r = np.sqrt(x**2 + y**2 + EPSILON)
         sag = roc * (1 - np.sqrt(1 - r**2 / roc**2))
         sag = max_offset - np.fmod(sag, max_offset)
-        ax.plot(d + sag, x, color='orange', linestyle=linestyle, linewidth=0.75)
+        ax.plot(d + sag, x, color="orange", linestyle=linestyle, linewidth=0.75)
 
         # # Draw DOE base
         # z_bound = [
@@ -447,7 +452,7 @@ class Phase(Surface):
             self.order8 = ckpt["order8"].to(self.device)
             self.order10 = ckpt["order10"].to(self.device)
             self.order12 = ckpt["order12"].to(self.device)
-            
+
         elif self.param_model == "poly1d":
             self.order2 = ckpt["order2"].to(self.device)
             self.order3 = ckpt["order3"].to(self.device)
@@ -482,12 +487,12 @@ class Phase(Surface):
                 "r": self.r,
                 # "glass": self.glass,
                 "param_model": self.param_model,
-                "order2": self.order2.item(),
-                "order4": self.order4.item(),
-                "order6": self.order6.item(),
-                "order8": self.order8.item(),
-                "order10": self.order10.item(),
-                "order12": self.order12.item(),
+                "order2": round(self.order2.item(), 4),
+                "order4": round(self.order4.item(), 4),
+                "order6": round(self.order6.item(), 4),
+                "order8": round(self.order8.item(), 4),
+                "order10": round(self.order10.item(), 4),
+                "order12": round(self.order12.item(), 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
@@ -498,12 +503,12 @@ class Phase(Surface):
                 "r": self.r,
                 # "glass": self.glass,
                 "param_model": self.param_model,
-                "order2": self.order2.item(),
-                "order3": self.order3.item(),
-                "order4": self.order4.item(),
-                "order5": self.order5.item(),
-                "order6": self.order6.item(),
-                "order7": self.order7.item(),
+                "order2": round(self.order2.item(), 4),
+                "order3": round(self.order3.item(), 4),
+                "order4": round(self.order4.item(), 4),
+                "order5": round(self.order5.item(), 4),
+                "order6": round(self.order6.item(), 4),
+                "order7": round(self.order7.item(), 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
@@ -514,8 +519,8 @@ class Phase(Surface):
                 "r": self.r,
                 # "glass": self.glass,
                 "param_model": self.param_model,
-                "theta": self.theta.item(),
-                "alpha": self.alpha.item(),
+                "theta": round(self.theta.item(), 4),
+                "alpha": round(self.alpha.item(), 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
