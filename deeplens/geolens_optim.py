@@ -274,7 +274,7 @@ class GeoLensOptim:
 
     #     return -loss
 
-    def loss_surface(self):
+    def loss_surface(self, d_to_t_max=10.0, tmax_to_tmin_max=5.0):
         """Penalize surface to prevent surface from being too curved.
 
         Loss is designed by the maximum sag, first-order derivative, and second-order derivative.
@@ -284,6 +284,8 @@ class GeoLensOptim:
         grad2_max_allowed = self.grad2_max
 
         loss = torch.tensor(0.0, device=self.device)
+        loss_d_to_t = torch.tensor(0.0, device=self.device)
+        loss_tmax_to_tmin = torch.tensor(0.0, device=self.device)
         for i in self.find_diff_surf():
             # Sample points on the surface
             x_ls = torch.linspace(0.0, 1.0, 20).to(self.device) * self.surfaces[i].r
@@ -307,7 +309,28 @@ class GeoLensOptim:
             # if grad2_max > grad2_max_allowed:
             #     loss += 10 * grad2_max
 
-        return loss
+            if not self.surfaces[i].mat2.name == "air":
+                surf2 = self.surfaces[i + 1]
+                surf1 = self.surfaces[i]
+                
+                # Penalize diameter to thickness ratio
+                d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
+                if d_to_t > d_to_t_max:
+                    loss_d_to_t += d_to_t
+
+                # Penalize thick_max to thick_min ratio
+                r_edge = min(surf2.r, surf1.r)
+                thick_center = surf2.d - surf1.d
+                thick_edge = surf2.surface_with_offset(r_edge, 0.0) - surf1.surface_with_offset(r_edge, 0.0)
+                if thick_center > thick_edge:
+                    tmax_to_tmin = thick_center / thick_edge    
+                else:
+                    tmax_to_tmin = thick_edge / thick_center
+
+                if tmax_to_tmin > tmax_to_tmin_max:
+                    loss_tmax_to_tmin += tmax_to_tmin
+            
+        return loss + loss_d_to_t + loss_tmax_to_tmin
 
     def loss_self_intersec(self):
         """Loss function to avoid self-intersection.
