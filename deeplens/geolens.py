@@ -2199,7 +2199,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 )
 
             elif isinstance(surf, Phase):
-                params += surf.get_optimizer_params(lr=lr[3])
+                if len(lr) > 4:
+                    params += surf.get_optimizer_params(lr=lr[4])
+                else:
+                    params += surf.get_optimizer_params(lr=lr[3])
 
             # elif isinstance(surf, GaussianRBF):
             #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
