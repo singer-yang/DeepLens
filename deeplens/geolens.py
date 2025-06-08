@@ -26,6 +26,7 @@ from torchvision.utils import save_image
 
 from deeplens.geolens_eval import GeoLensEval
 from deeplens.geolens_optim import GeoLensOptim
+from deeplens.geolens_io import GeoLensIO
 from deeplens.geolens_vis import GeoLensVis
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
@@ -65,7 +66,7 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def __init__(
         self,
         filename=None,
@@ -107,7 +108,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         elif filename[-5:] == ".json":
             self.read_lens_json(filename)
         elif filename[-4:] == ".zmx":
-            self.read_lens_zmx(filename)
+            self.read_zmx(filename)
         elif filename[-4:] == ".seq":
             raise NotImplementedError("File format .seq is not supported yet.")
         else:
@@ -2346,23 +2347,3 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         with open(filename, "w") as f:
             json.dump(data, f, indent=4)
-
-    def read_lens_zmx(self, filename="./test.zmx"):
-        """Read the lens from .zmx file."""
-        from .geolens_utils import read_zmx
-
-        loaded_lens = read_zmx(filename)
-
-        # Copy all attributes from loaded_lens to self
-        for attr_name, attr_value in loaded_lens.__dict__.items():
-            setattr(self, attr_name, attr_value)
-
-        # Set sensor size and resolution
-        self.set_sensor(sensor_res=self.sensor_res, r_sensor=self.r_sensor)
-        return self
-
-    def write_lens_zmx(self, filename="./test.zmx"):
-        """Write the lens into .zmx file."""
-        from .geolens_utils import write_zmx
-
-        write_zmx(self, filename)
