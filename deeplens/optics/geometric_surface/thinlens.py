@@ -7,14 +7,13 @@ from .base import Surface
 
 
 class ThinLens(Surface):
-    def __init__(self, r, d, f=100, device="cpu"):
+    def __init__(self, r, d, f=100.0, device="cpu"):
         """Thin lens surface."""
         Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
-        self.f = torch.tensor(f, dtype=torch.float32)
-        self.device = device
+        self.f = torch.tensor(f)
         
     def set_f(self,f):
-        self.f = torch.tensor(f, dtype=torch.float32).to(self.device)
+        self.f = torch.tensor(f).to(self.device)
 
     @classmethod
     def init_from_dict(cls, surf_dict):

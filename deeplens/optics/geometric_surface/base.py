@@ -7,10 +7,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-torch._dynamo.config.cache_size_limit = 64
-
-from ..basics import DeepObj
-from ..materials import Material
+from deeplens.optics.basics import DeepObj
+from deeplens.optics.materials import Material
 
 # Newton's method parameters
 NEWTONS_MAXITER = 10  # maximum number of Newton iterations

@@ -25,8 +25,8 @@ class Phase(Surface):
         [3] https://optics.ansys.com/hc/en-us/articles/18254409091987-Large-Scale-Metalens-Ray-Propagation
     """
 
-    def __init__(self, r, d, param_model="binary2", mat2="air", device="cpu"):
-        Surface.__init__(self, r, d, mat2, is_square=True, device=device)
+    def __init__(self, r, d, param_model="binary2", norm_radii=None, mat2="air", device="cpu"):
+        Surface.__init__(self, r, d, mat2, is_square=False, device=device)
 
         # DOE geometry
         self.r = r
@@ -36,6 +36,7 @@ class Phase(Surface):
         # Use ray tracing to simulate diffraction, the same as Zemax
         self.diffraction = True
         self.diffraction_order = 1
+        self.norm_radii = self.r if norm_radii is None else norm_radii
 
         self.to(device)
         self.init_param_model(param_model)
@@ -46,7 +47,8 @@ class Phase(Surface):
         # Initialize phase surface
         mat2 = surf_dict.get("mat2", "air")
         param_model = surf_dict.get("param_model", "binary2")
-        obj = cls(surf_dict["r"], surf_dict["d"], param_model, mat2)
+        norm_radii = surf_dict.get("norm_radii", None)
+        obj = cls(surf_dict["r"], surf_dict["d"], param_model, norm_radii, mat2)
 
         # Load parameters
         if param_model == "binary2":
@@ -56,6 +58,7 @@ class Phase(Surface):
             obj.order8 += surf_dict.get("order8", 0.0)
             obj.order10 += surf_dict.get("order10", 0.0)
             obj.order12 += surf_dict.get("order12", 0.0)
+        
         else:
             print(f"Parameter randomly initialized for {param_model}")
 
@@ -112,7 +115,7 @@ class Phase(Surface):
         return ray
 
     def intersect(self, ray):
-        """Ray intersection with a DOE surface."""
+        """Ray intersection with a flat DOE surface."""
         # Intersection with a plane
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
@@ -167,8 +170,8 @@ class Phase(Surface):
 
     def phi(self, x, y):
         """Reference phase map at design wavelength (independent to wavelength). We have the same definition of phase (phi) as Zemax."""
-        x_norm = x / self.r
-        y_norm = y / self.r
+        x_norm = x / self.norm_radii
+        y_norm = y / self.norm_radii
         r_norm = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         if self.param_model == "fresnel":
@@ -214,9 +217,9 @@ class Phase(Surface):
 
     def dphi_dxy(self, x, y):
         """Calculate phase derivatives (dphi/dx, dphi/dy) for given points."""
-        x_norm = x / self.r
-        y_norm = y / self.r
-        r = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
+        x_norm = x / self.norm_radii
+        y_norm = y / self.norm_radii
+        r_norm = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         if self.param_model == "fresnel":
             dphidx = -2 * torch.pi * x / (0.55e-3 * self.f0)  # unit [mm]
@@ -224,40 +227,40 @@ class Phase(Surface):
 
         elif self.param_model == "binary2":
             dphidr = (
-                2 * self.order2 * r
-                + 4 * self.order4 * r**3
-                + 6 * self.order6 * r**5
-                + 8 * self.order8 * r**7
-                + 10 * self.order10 * r**9
-                + 12 * self.order12 * r**11
+                2 * self.order2 * r_norm
+                + 4 * self.order4 * r_norm**3
+                + 6 * self.order6 * r_norm**5
+                + 8 * self.order8 * r_norm**7
+                + 10 * self.order10 * r_norm**9
+                + 12 * self.order12 * r_norm**11
             )
-            dphidx = dphidr * x_norm / r / self.r
-            dphidy = dphidr * y_norm / r / self.r
+            dphidx = dphidr * x_norm / r_norm / self.norm_radii
+            dphidy = dphidr * y_norm / r_norm / self.norm_radii
 
         elif self.param_model == "poly1d":
             dphi_even_dr = (
-                2 * self.order2 * r + 4 * self.order4 * r**3 + 6 * self.order6 * r**5
+                2 * self.order2 * r_norm + 4 * self.order4 * r_norm**3 + 6 * self.order6 * r_norm**5
             )
-            dphi_even_dz = dphi_even_dr * x_norm / r / self.r
-            dphi_even_dy = dphi_even_dr * y_norm / r / self.r
+            dphi_even_dz = dphi_even_dr * x_norm / r_norm / self.norm_radii
+            dphi_even_dy = dphi_even_dr * y_norm / r_norm / self.norm_radii
 
             dphi_odd_dx = (
                 3 * self.order3 * x_norm**2
                 + 5 * self.order5 * x_norm**4
                 + 7 * self.order7 * x_norm**6
-            ) / self.r
+            ) / self.norm_radii
             dphi_odd_dy = (
                 3 * self.order3 * y_norm**2
                 + 5 * self.order5 * y_norm**4
                 + 7 * self.order7 * y_norm**6
-            ) / self.r
+            ) / self.norm_radii
 
             dphidx = dphi_even_dz + dphi_odd_dx
             dphidy = dphi_even_dy + dphi_odd_dy
 
         elif self.param_model == "grating":
-            dphidx = self.alpha * torch.sin(self.theta) / self.r
-            dphidy = self.alpha * torch.cos(self.theta) / self.r
+            dphidx = self.alpha * torch.sin(self.theta) / self.norm_radii
+            dphidy = self.alpha * torch.cos(self.theta) / self.norm_radii
 
         else:
             raise NotImplementedError(
@@ -294,7 +297,12 @@ class Phase(Surface):
     def get_optimizer_params(self, lr=None):
         """Generate optimizer parameters."""
         params = []
-        if self.param_model == "binary2":
+        if self.param_model == "fresnel":
+            lr = 0.1 if lr is None else lr
+            self.f0.requires_grad = True
+            params.append({"params": [self.f0], "lr": lr})
+
+        elif self.param_model == "binary2":
             lr = 0.1 if lr is None else lr
             self.order2.requires_grad = True
             self.order4.requires_grad = True
@@ -400,7 +408,15 @@ class Phase(Surface):
     # =========================================
     def save_ckpt(self, save_path="./doe.pth"):
         """Save DOE height map."""
-        if self.param_model == "binary2":
+        if self.param_model == "fresnel":
+            torch.save(
+                {
+                    "param_model": self.param_model,
+                    "f0": self.f0.clone().detach().cpu(),
+                },
+                save_path,
+            )
+        elif self.param_model == "binary2":
             torch.save(
                 {
                     "param_model": self.param_model,
@@ -443,8 +459,11 @@ class Phase(Surface):
         self.diffraction = True
         ckpt = torch.load(load_path)
         self.param_model = ckpt["param_model"]
-
-        if self.param_model == "binary2" or self.param_model == "poly_even":
+        
+        if self.param_model == "fresnel":
+            self.f0 = ckpt["f0"].to(self.device)
+        
+        elif self.param_model == "binary2":
             self.param_model = "binary2"
             self.order2 = ckpt["order2"].to(self.device)
             self.order4 = ckpt["order4"].to(self.device)
@@ -452,6 +471,7 @@ class Phase(Surface):
             self.order8 = ckpt["order8"].to(self.device)
             self.order10 = ckpt["order10"].to(self.device)
             self.order12 = ckpt["order12"].to(self.device)
+            self.norm_radii = ckpt["norm_radii"].to(self.device)
 
         elif self.param_model == "poly1d":
             self.order2 = ckpt["order2"].to(self.device)
@@ -474,7 +494,6 @@ class Phase(Surface):
             surf_dict = {
                 "type": self.__class__.__name__,
                 "r": self.r,
-                # "glass": self.glass,
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
                 "(d)": round(self.d.item(), 4),
@@ -485,7 +504,6 @@ class Phase(Surface):
             surf_dict = {
                 "type": self.__class__.__name__,
                 "r": self.r,
-                # "glass": self.glass,
                 "param_model": self.param_model,
                 "order2": round(self.order2.item(), 4),
                 "order4": round(self.order4.item(), 4),
@@ -493,6 +511,7 @@ class Phase(Surface):
                 "order8": round(self.order8.item(), 4),
                 "order10": round(self.order10.item(), 4),
                 "order12": round(self.order12.item(), 4),
+                "norm_radii": round(self.norm_radii, 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
@@ -501,7 +520,6 @@ class Phase(Surface):
             surf_dict = {
                 "type": self.__class__.__name__,
                 "r": self.r,
-                # "glass": self.glass,
                 "param_model": self.param_model,
                 "order2": round(self.order2.item(), 4),
                 "order3": round(self.order3.item(), 4),
@@ -517,7 +535,6 @@ class Phase(Surface):
             surf_dict = {
                 "type": self.__class__.__name__,
                 "r": self.r,
-                # "glass": self.glass,
                 "param_model": self.param_model,
                 "theta": round(self.theta.item(), 4),
                 "alpha": round(self.alpha.item(), 4),
