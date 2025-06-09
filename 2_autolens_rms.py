@@ -253,7 +253,7 @@ if __name__ == "__main__":
         match_mat=False,
         shape_control=True,
         sample_more_off_axis=True,
-        result_dir=args["result_dir"],
+        result_dir=f"{args['result_dir']}/fine-tune",
     )
 
     # =====> 3. Analyze final result
