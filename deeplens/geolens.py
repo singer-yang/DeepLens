@@ -85,6 +85,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # Lens sensor size and resolution
         self.sensor_res = sensor_res
         self.sensor_size = sensor_size
+        self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
 
         # Load lens file
         if filename is not None:
@@ -95,6 +96,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             self.to(self.device)
 
         # Initialize lens design constraints (edge thickness, etc.)
+        # TODO: we should consider to move this to geolens.get_optimizer_params()
         self.init_constraints()
 
     def read_lens(self, filename):
@@ -339,8 +341,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         Returns:
             Ray: Ray object with shape [len(fov_y), len(fov_x), num_rays, 3], ordered as (u, v).
         """
-
-
         # Preprocess fov angles
         if isinstance(fov_x, float):
             fov_x = [fov_x]
@@ -1295,37 +1295,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
     @torch.no_grad()
     def calc_efl(self):
-        """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
-        # Trace a paraxial chief ray
-        small_fov_rad = 0.001
-        small_fov_deg = float(np.rad2deg(small_fov_rad))
-        # ===========>
-        # chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
-        #     hfov=small_fov_deg, wvln=DEFAULT_WAVE, ray_aiming=True
-        # )
-        # ray = Ray(
-        #     chief_ray_o[1, ...],
-        #     chief_ray_d[1, ...],
-        #     wvln=DEFAULT_WAVE,
-        #     device=self.device,
-        # )
-        # ray, _ = self.trace(ray)
+        """Compute effective focal length (EFL). 
+        
+        Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL.
 
-        # # Compute the effective focal length
-        # image_height = (
-        #     ray.o[..., 1]
-        #     + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
-        # )
-        # ===========>
-        # Sample paraxial rays, shape [1, 1, num_rays, 3]
+        Reference:
+            [1] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/10/Tutorial_MorelSophie.pdf
+        """
+        # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
+        paraxial_fov_rad = 0.001
+        paraxial_fov_deg = float(np.rad2deg(paraxial_fov_rad))
         self.calc_pupil()
-        ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, scale_pupil=0.2)
+        ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
-        image_height = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[
-            0, 0, :
-        ].sum()
-        # ===========>
-        eff_foclen = image_height.item() / float(np.tan(small_fov_rad))
+
+        # Compute the effective focal length
+        paraxial_imgh = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[0, 0, :].sum()
+        eff_foclen = paraxial_imgh.item() / float(np.tan(paraxial_fov_rad))
         return eff_foclen
 
     @torch.no_grad()
@@ -1333,6 +1319,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         """Compute back focal length (BFL).
 
         BFL: Distance from the second principal point to focal plane.
+
+        FIXME: this definition is not correct.
         """
         # Forward ray tracing
         ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, num_rays=SPP_CALC, wvln=wvln)
@@ -1495,7 +1483,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def calc_scale_pinhole(self, depth):
         """Scale factor computed by pinhole camera model.
 
-        Note: if there is distortion, the scale factor computed with pinhole camera model will be inaccurate.
+        This function assumes the first principal point is at (0, 0, 0) and the second principal point is at (0, 0, d_sensor - focal_length).
 
         Args:
             depth (float): depth of the object.
@@ -1907,13 +1895,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         """Set FoV, ImgH and F number, only use this function to assign design targets.
 
         Args:
-            hfov (float): half diagonal-FoV in degree.
+            hfov (float): half diagonal-FoV in radian.
             fnum (float): F number.
             foclen (float): focal length in [mm].
         """
         self.hfov = hfov
         self.fnum = fnum
-        self.foclen = foclen
+        # ======>
+        # self.foclen = foclen
+        # ======>
+        self.foclen = self.r_sensor / math.tan(hfov)
+        # ======>
 
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].r = float(aper_r)
@@ -2183,6 +2175,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         Returns:
             list: optimizer parameters
         """
+        self.init_constraints()
+
+        # Find the surface indices to be optimized
         if optim_surf_range is None:
             optim_surf_range = self.find_diff_surf()
 
