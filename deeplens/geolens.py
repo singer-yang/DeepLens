@@ -123,7 +123,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def post_computation(self):
         """After loading lens, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
-        self.calc_pupil()
+        self.calc_pupil(paraxial=False)
         self.foclen = self.calc_efl()
         self.hfov = self.calc_hfov()
         self.fnum = self.calc_fnum()
@@ -131,7 +131,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def update_float_setting(self):
         """After lens changed, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
-        self.calc_pupil()
+        self.calc_pupil(paraxial=False)
         if self.float_enpd is False:
             self.entrance_pupilr = self.enpd/2.0
         if self.float_foclen is True:
