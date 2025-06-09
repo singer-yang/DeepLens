@@ -1,5 +1,13 @@
 """Optimization and constraint functions for GeoLens.
 
+TODO:
+    1. chief ray angle loss.
+    2. better intermediate ray tracing parameters usage.
+    3. ignore lens aperture clipping during optimization. Rays can go outside the aperture during optimization.
+    4. iterative pupil plane calculation.
+    5. more lens design examples: microscope
+    6. fast lens design with seidel coefficients.
+
 Differentiable lens design is typically better than conventional optimization methods for several reasons:
     1. AutoDiff calculates more accurate gradients, which is important for complex optical systems.
     2. First-order optimization methods are more stable than second-order methods (e.g., Levenberg-Marquardt).
