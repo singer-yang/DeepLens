@@ -25,11 +25,11 @@ class Plane(Surface):
             valid = (
                 (torch.abs(new_o[..., 0]) < self.w / 2)
                 & (torch.abs(new_o[..., 1]) < self.h / 2)
-                & (ray.ra > 0)
+                & (ray.valid > 0)
             )
         else:
             valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-                ray.ra > 0
+                ray.valid > 0
             )
 
         # Update rays
@@ -37,7 +37,7 @@ class Plane(Surface):
 
         new_o[~valid] = ray.o[~valid]
         ray.o = new_o
-        ray.ra = ray.ra * valid
+        ray.valid = ray.valid * valid
 
         if ray.coherent:
             new_opl = ray.opl + n * t
@@ -47,10 +47,14 @@ class Plane(Surface):
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at intersection points."""
-        n = torch.zeros_like(ray.d)
-        n[..., 2] = -1
-        return n
+        """Calculate surface normal vector at intersection points.
+        
+        Normal vector points from the surface toward the side where the light is coming from.
+        """
+        normal_vec = torch.zeros_like(ray.d)
+        normal_vec[..., 2] = -1
+        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+        return normal_vec
 
     def _sag(self, x, y):
         return torch.zeros_like(x)

@@ -1,7 +1,11 @@
-"""Diffractive surfaces (Local gratings) simulated with ray tracing.
+"""Diffractive surface phase profile (metasurface or DOE).
 
-Reference:
-    https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+Copyright (c) 2025 Xinge Yang (xinge.yang@kaust.edu.sa)
+
+This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
+    # The material is provided as-is, with no warranties whatsoever.
+    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import matplotlib.pyplot as plt
@@ -12,42 +16,53 @@ import torch.nn.functional as F
 from .base import EPSILON, Surface
 
 
-class Diffractive_GEO(Surface):
-    def __init__(
-        self, r, d, glass="test", param_model="binary2", thickness=0.5, device="cpu"
-    ):
-        Surface.__init__(self, r, d, mat2="air", is_square=True, device=device)
+class Phase(Surface):
+    """Phase profile for diffractive surfaces (metasurface or DOE).
+
+    Reference:
+        [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
+        [2] https://optics.ansys.com/hc/en-us/articles/360042097313-Small-Scale-Metalens-Field-Propagation
+        [3] https://optics.ansys.com/hc/en-us/articles/18254409091987-Large-Scale-Metalens-Ray-Propagation
+    """
+
+    def __init__(self, r, d, param_model="binary2", norm_radii=None, mat2="air", device="cpu"):
+        Surface.__init__(self, r, d, mat2, is_square=False, device=device)
 
         # DOE geometry
         self.r = r
         self.w = r * float(np.sqrt(2))
         self.h = r * float(np.sqrt(2))
-        self.thickness = thickness
-        self.glass = glass
 
         # Use ray tracing to simulate diffraction, the same as Zemax
-        self.diffraction = False
+        self.diffraction = True
         self.diffraction_order = 1
-        print(
-            "A Diffractive_GEO is created, but ray-tracing diffraction is not activated."
-        )
+        self.norm_radii = self.r if norm_radii is None else norm_radii
 
         self.to(device)
         self.init_param_model(param_model)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        if "glass" in surf_dict:
-            glass = surf_dict["glass"]
+        """Initialize phase surface from dictionary."""
+        # Initialize phase surface
+        mat2 = surf_dict.get("mat2", "air")
+        param_model = surf_dict.get("param_model", "binary2")
+        norm_radii = surf_dict.get("norm_radii", None)
+        obj = cls(surf_dict["r"], surf_dict["d"], param_model, norm_radii, mat2)
+
+        # Load parameters
+        if param_model == "binary2":
+            obj.order2 += surf_dict.get("order2", 0.0)
+            obj.order4 += surf_dict.get("order4", 0.0)
+            obj.order6 += surf_dict.get("order6", 0.0)
+            obj.order8 += surf_dict.get("order8", 0.0)
+            obj.order10 += surf_dict.get("order10", 0.0)
+            obj.order12 += surf_dict.get("order12", 0.0)
+        
         else:
-            glass = "test"
-        if "thickness" in surf_dict:
-            thickness = surf_dict["thickness"]
-        else:
-            thickness = 0.5
-        return cls(
-            surf_dict["l"], surf_dict["d"], glass, surf_dict["param_model"], thickness
-        )
+            print(f"Parameter randomly initialized for {param_model}")
+
+        return obj
 
     def init_param_model(self, param_model="binary2"):
         self.param_model = param_model
@@ -61,6 +76,8 @@ class Diffractive_GEO(Surface):
             self.order4 = torch.tensor(0.0)
             self.order6 = torch.tensor(0.0)
             self.order8 = torch.tensor(0.0)
+            self.order10 = torch.tensor(0.0)
+            self.order12 = torch.tensor(0.0)
 
         elif self.param_model == "poly1d":
             rand_value = np.random.rand(6) * 0.001
@@ -90,78 +107,72 @@ class Diffractive_GEO(Surface):
     # Computation (ray tracing)
     # ==============================
     def ray_reaction(self, ray, n1=None, n2=None):
-        """Ray reaction on DOE surface. Imagine the DOE as a wrapped positive convex lens for debugging.
+        """Ray reaction on DOE surface."""
+        ray = self.intersect(ray)
+        ray = self.refract(ray, n1 / n2)
+        if self.diffraction:
+            ray = self.diffract(ray)
+        return ray
 
-        1, The phase φ in radians adds to the optical path length of the ray
-        2, The gradient of the phase profile (phase slope) change the direction of rays.
+    def intersect(self, ray):
+        """Ray intersection with a flat DOE surface."""
+        # Intersection with a plane
+        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        new_o = ray.o + t.unsqueeze(-1) * ray.d
+        valid_aper = torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r
+        valid = valid_aper & (ray.valid > 0)
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+        ray.valid = ray.valid * valid
+
+        # OPL change
+        if ray.coherent:
+            new_opl = ray.opl + t
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
+
+        return ray
+
+    def diffract(self, ray):
+        """Diffraction of DOE surface.
+            1, The phase φ in radians adds to the optical path length of the ray
+            2, The gradient of the phase profile (phase slope) change the direction of rays.
 
         Reference:
             [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
             [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
         """
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
+        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
+        valid = ray.valid > 0
 
-        # Intersection
-        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
-        new_o = ray.o + t.unsqueeze(-1) * ray.d
-        # valid = (new_o[...,0].abs() <= self.h/2) & (new_o[...,1].abs() <= self.w/2) & (ray.ra > 0) # square
-        valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
-            ray.ra > 0
-        )  # circular
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
-        ray.ra = ray.ra * valid
-
+        # Diffraction 1: DOE phase modulation
         if ray.coherent:
-            # OPL change
-            new_opl = ray.opl + t
-            new_opl[~valid] = ray.opl[~valid]
-            ray.opl = new_opl
+            phi = self.phi(ray.o[..., 0], ray.o[..., 1])
+            new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * torch.pi)
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
-        if self.diffraction:
-            # Diffraction 1: DOE phase modulation
-            if ray.coherent:
-                phi = self.phi(ray.o[..., 0], ray.o[..., 1])
-                new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * np.pi)
-                new_opl[~valid] = ray.opl[~valid]
-                ray.opl = new_opl
+        # Diffraction 2: bend rays
+        # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
+        dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
 
-            # Diffraction 2: bend rays
-            # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
-            dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
+        wvln_mm = ray.wvln.squeeze(-1) * 1e-3
+        order = self.diffraction_order
+        if forward:
+            new_d_x = ray.d[..., 0] + wvln_mm / (2 * torch.pi) * dphidx * order
+            new_d_y = ray.d[..., 1] + wvln_mm / (2 * torch.pi) * dphidy * order
+        else:
+            new_d_x = ray.d[..., 0] - wvln_mm / (2 * torch.pi) * dphidx * order
+            new_d_y = ray.d[..., 1] - wvln_mm / (2 * torch.pi) * dphidy * order
 
-            if forward:
-                new_d_x = (
-                    ray.d[..., 0]
-                    + (ray.wvln * 1e-3) / (2 * np.pi) * dphidx * self.diffraction_order
-                )
-                new_d_y = (
-                    ray.d[..., 1]
-                    + (ray.wvln * 1e-3) / (2 * np.pi) * dphidy * self.diffraction_order
-                )
-            else:
-                new_d_x = (
-                    ray.d[..., 0]
-                    - (ray.wvln * 1e-3) / (2 * np.pi) * dphidx * self.diffraction_order
-                )
-                new_d_y = (
-                    ray.d[..., 1]
-                    - (ray.wvln * 1e-3) / (2 * np.pi) * dphidy * self.diffraction_order
-                )
-
-            new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
-            new_d = F.normalize(new_d, p=2, dim=-1)
-
-            new_d[~valid] = ray.d[~valid]
-            ray.d = new_d
+        new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
+        new_d = F.normalize(new_d, p=2, dim=-1)
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
     def phi(self, x, y):
         """Reference phase map at design wavelength (independent to wavelength). We have the same definition of phase (phi) as Zemax."""
-        x_norm = x / self.r
-        y_norm = y / self.r
-        r = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
+        x_norm = x / self.norm_radii
+        y_norm = y / self.norm_radii
+        r_norm = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         if self.param_model == "fresnel":
             phi = (
@@ -170,14 +181,20 @@ class Diffractive_GEO(Surface):
 
         elif self.param_model == "binary2":
             phi = (
-                self.order2 * r**2
-                + self.order4 * r**4
-                + self.order6 * r**6
-                + self.order8 * r**8
+                self.order2 * r_norm**2
+                + self.order4 * r_norm**4
+                + self.order6 * r_norm**6
+                + self.order8 * r_norm**8
+                + self.order10 * r_norm**10
+                + self.order12 * r_norm**12
             )
 
         elif self.param_model == "poly1d":
-            phi_even = self.order2 * r**2 + self.order4 * r**4 + self.order6 * r**6
+            phi_even = (
+                self.order2 * r_norm**2
+                + self.order4 * r_norm**4
+                + self.order6 * r_norm**6
+            )
             phi_odd = (
                 self.order3 * (x_norm**3 + y_norm**3)
                 + self.order5 * (x_norm**5 + y_norm**5)
@@ -195,53 +212,55 @@ class Diffractive_GEO(Surface):
                 f"phi() is not implemented for {self.param_model}"
             )
 
-        phi = torch.remainder(phi, 2 * np.pi)
+        phi = torch.remainder(phi, 2 * torch.pi)
         return phi
 
     def dphi_dxy(self, x, y):
         """Calculate phase derivatives (dphi/dx, dphi/dy) for given points."""
-        x_norm = x / self.r
-        y_norm = y / self.r
-        r = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
+        x_norm = x / self.norm_radii
+        y_norm = y / self.norm_radii
+        r_norm = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         if self.param_model == "fresnel":
-            dphidx = -2 * np.pi * x / (0.55e-3 * self.f0)  # unit [mm]
-            dphidy = -2 * np.pi * y / (0.55e-3 * self.f0)
+            dphidx = -2 * torch.pi * x / (0.55e-3 * self.f0)  # unit [mm]
+            dphidy = -2 * torch.pi * y / (0.55e-3 * self.f0)
 
         elif self.param_model == "binary2":
             dphidr = (
-                2 * self.order2 * r
-                + 4 * self.order4 * r**3
-                + 6 * self.order6 * r**5
-                + 8 * self.order8 * r**7
+                2 * self.order2 * r_norm
+                + 4 * self.order4 * r_norm**3
+                + 6 * self.order6 * r_norm**5
+                + 8 * self.order8 * r_norm**7
+                + 10 * self.order10 * r_norm**9
+                + 12 * self.order12 * r_norm**11
             )
-            dphidx = dphidr * x_norm / r / self.r
-            dphidy = dphidr * y_norm / r / self.r
+            dphidx = dphidr * x_norm / r_norm / self.norm_radii
+            dphidy = dphidr * y_norm / r_norm / self.norm_radii
 
         elif self.param_model == "poly1d":
             dphi_even_dr = (
-                2 * self.order2 * r + 4 * self.order4 * r**3 + 6 * self.order6 * r**5
+                2 * self.order2 * r_norm + 4 * self.order4 * r_norm**3 + 6 * self.order6 * r_norm**5
             )
-            dphi_even_dz = dphi_even_dr * x_norm / r / self.r
-            dphi_even_dy = dphi_even_dr * y_norm / r / self.r
+            dphi_even_dz = dphi_even_dr * x_norm / r_norm / self.norm_radii
+            dphi_even_dy = dphi_even_dr * y_norm / r_norm / self.norm_radii
 
             dphi_odd_dx = (
                 3 * self.order3 * x_norm**2
                 + 5 * self.order5 * x_norm**4
                 + 7 * self.order7 * x_norm**6
-            ) / self.r
+            ) / self.norm_radii
             dphi_odd_dy = (
                 3 * self.order3 * y_norm**2
                 + 5 * self.order5 * y_norm**4
                 + 7 * self.order7 * y_norm**6
-            ) / self.r
+            ) / self.norm_radii
 
             dphidx = dphi_even_dz + dphi_odd_dx
             dphidy = dphi_even_dy + dphi_odd_dy
 
         elif self.param_model == "grating":
-            dphidx = self.alpha * torch.sin(self.theta) / self.r
-            dphidy = self.alpha * torch.cos(self.theta) / self.r
+            dphidx = self.alpha * torch.sin(self.theta) / self.norm_radii
+            dphidy = self.alpha * torch.cos(self.theta) / self.norm_radii
 
         else:
             raise NotImplementedError(
@@ -251,14 +270,26 @@ class Diffractive_GEO(Surface):
         return dphidx, dphidy
 
     def _sag(self, x, y):
-        raise ValueError(
-            "sag() function is meaningless for phase DOE, use phi() function."
-        )
+        """Diffractive surface is now attached to a plane surface."""
+        return torch.zeros_like(x)
 
     def _dfdxy(self, x, y):
-        raise ValueError(
-            "_dfdxy() function is meaningless for DOE, use dphi_dxy() function."
-        )
+        """Diffractive surface is now attached to a plane surface."""
+        return torch.zeros_like(x), torch.zeros_like(y)
+
+    def normal_vec(self, ray):
+        """Calculate surface normal vector at intersection points.
+
+        Normal vector points from the surface toward the side where the light is coming from.
+        """
+        normal_vec = torch.zeros_like(ray.d)
+        normal_vec[..., 2] = -1
+        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+        return normal_vec
+
+    def surface_with_offset(self, *args, **kwargs):
+        """Surface sag with offset, only used in layout drawing."""
+        return self.d
 
     # ==============================
     # Optimization
@@ -266,16 +297,25 @@ class Diffractive_GEO(Surface):
     def get_optimizer_params(self, lr=None):
         """Generate optimizer parameters."""
         params = []
-        if self.param_model == "binary2":
-            lr = 0.001 if lr is None else lr
+        if self.param_model == "fresnel":
+            lr = 0.1 if lr is None else lr
+            self.f0.requires_grad = True
+            params.append({"params": [self.f0], "lr": lr})
+
+        elif self.param_model == "binary2":
+            lr = 0.1 if lr is None else lr
             self.order2.requires_grad = True
             self.order4.requires_grad = True
             self.order6.requires_grad = True
             self.order8.requires_grad = True
+            self.order10.requires_grad = True
+            self.order12.requires_grad = True
             params.append({"params": [self.order2], "lr": lr})
             params.append({"params": [self.order4], "lr": lr})
             params.append({"params": [self.order6], "lr": lr})
             params.append({"params": [self.order8], "lr": lr})
+            params.append({"params": [self.order10], "lr": lr})
+            params.append({"params": [self.order12], "lr": lr})
 
         elif self.param_model == "poly1d":
             lr = 0.001 if lr is None else lr
@@ -332,7 +372,7 @@ class Diffractive_GEO(Surface):
         pmap = self.phi(x, y)
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * np.pi)
+        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * torch.pi)
         ax[0].set_title("Phase map 0.55um", fontsize=10)
         ax[0].grid(False)
         fig.colorbar(ax[0].get_images()[0])
@@ -351,24 +391,32 @@ class Diffractive_GEO(Surface):
         r = np.sqrt(x**2 + y**2 + EPSILON)
         sag = roc * (1 - np.sqrt(1 - r**2 / roc**2))
         sag = max_offset - np.fmod(sag, max_offset)
-        ax.plot(d + sag, x, color=color, linestyle=linestyle, linewidth=0.75)
+        ax.plot(d + sag, x, color="orange", linestyle=linestyle, linewidth=0.75)
 
-        # Draw DOE base
-        z_bound = [
-            d + sag[0],
-            d + sag[0] + max_offset,
-            d + sag[0] + max_offset,
-            d + sag[-1],
-        ]
-        x_bound = [-self.r, -self.r, self.r, self.r]
-        ax.plot(z_bound, x_bound, color=color, linestyle=linestyle, linewidth=0.75)
+        # # Draw DOE base
+        # z_bound = [
+        #     d + sag[0],
+        #     d + sag[0] + max_offset,
+        #     d + sag[0] + max_offset,
+        #     d + sag[-1],
+        # ]
+        # x_bound = [-self.r, -self.r, self.r, self.r]
+        # ax.plot(z_bound, x_bound, color=color, linestyle=linestyle, linewidth=0.75)
 
     # =========================================
     # IO
     # =========================================
     def save_ckpt(self, save_path="./doe.pth"):
         """Save DOE height map."""
-        if self.param_model == "binary2":
+        if self.param_model == "fresnel":
+            torch.save(
+                {
+                    "param_model": self.param_model,
+                    "f0": self.f0.clone().detach().cpu(),
+                },
+                save_path,
+            )
+        elif self.param_model == "binary2":
             torch.save(
                 {
                     "param_model": self.param_model,
@@ -376,6 +424,8 @@ class Diffractive_GEO(Surface):
                     "order4": self.order4.clone().detach().cpu(),
                     "order6": self.order6.clone().detach().cpu(),
                     "order8": self.order8.clone().detach().cpu(),
+                    "order10": self.order10.clone().detach().cpu(),
+                    "order12": self.order12.clone().detach().cpu(),
                 },
                 save_path,
             )
@@ -409,12 +459,20 @@ class Diffractive_GEO(Surface):
         self.diffraction = True
         ckpt = torch.load(load_path)
         self.param_model = ckpt["param_model"]
-        if self.param_model == "binary2" or self.param_model == "poly_even":
+        
+        if self.param_model == "fresnel":
+            self.f0 = ckpt["f0"].to(self.device)
+        
+        elif self.param_model == "binary2":
             self.param_model = "binary2"
             self.order2 = ckpt["order2"].to(self.device)
             self.order4 = ckpt["order4"].to(self.device)
             self.order6 = ckpt["order6"].to(self.device)
             self.order8 = ckpt["order8"].to(self.device)
+            self.order10 = ckpt["order10"].to(self.device)
+            self.order12 = ckpt["order12"].to(self.device)
+            self.norm_radii = ckpt["norm_radii"].to(self.device)
+
         elif self.param_model == "poly1d":
             self.order2 = ckpt["order2"].to(self.device)
             self.order3 = ckpt["order3"].to(self.device)
@@ -422,9 +480,11 @@ class Diffractive_GEO(Surface):
             self.order5 = ckpt["order5"].to(self.device)
             self.order6 = ckpt["order6"].to(self.device)
             self.order7 = ckpt["order7"].to(self.device)
+
         elif self.param_model == "grating":
             self.theta = ckpt["theta"].to(self.device)
             self.alpha = ckpt["alpha"].to(self.device)
+
         else:
             raise ValueError(f"Unknown parameterization: {self.param_model}")
 
@@ -433,8 +493,7 @@ class Diffractive_GEO(Surface):
         if self.param_model == "fresnel":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
                 "param_model": self.param_model,
                 "f0": self.f0.item(),
                 "(d)": round(self.d.item(), 4),
@@ -444,13 +503,15 @@ class Diffractive_GEO(Surface):
         elif self.param_model == "binary2":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
                 "param_model": self.param_model,
-                "order2": self.order2.item(),
-                "order4": self.order4.item(),
-                "order6": self.order6.item(),
-                "order8": self.order8.item(),
+                "order2": round(self.order2.item(), 4),
+                "order4": round(self.order4.item(), 4),
+                "order6": round(self.order6.item(), 4),
+                "order8": round(self.order8.item(), 4),
+                "order10": round(self.order10.item(), 4),
+                "order12": round(self.order12.item(), 4),
+                "norm_radii": round(self.norm_radii, 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
@@ -458,15 +519,14 @@ class Diffractive_GEO(Surface):
         elif self.param_model == "poly1d":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
                 "param_model": self.param_model,
-                "order2": self.order2.item(),
-                "order3": self.order3.item(),
-                "order4": self.order4.item(),
-                "order5": self.order5.item(),
-                "order6": self.order6.item(),
-                "order7": self.order7.item(),
+                "order2": round(self.order2.item(), 4),
+                "order3": round(self.order3.item(), 4),
+                "order4": round(self.order4.item(), 4),
+                "order5": round(self.order5.item(), 4),
+                "order6": round(self.order6.item(), 4),
+                "order7": round(self.order7.item(), 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }
@@ -474,11 +534,10 @@ class Diffractive_GEO(Surface):
         elif self.param_model == "grating":
             surf_dict = {
                 "type": self.__class__.__name__,
-                "l": self.l,
-                "glass": self.glass,
+                "r": self.r,
                 "param_model": self.param_model,
-                "theta": self.theta.item(),
-                "alpha": self.alpha.item(),
+                "theta": round(self.theta.item(), 4),
+                "alpha": round(self.alpha.item(), 4),
                 "(d)": round(self.d.item(), 4),
                 "mat2": self.mat2.get_name(),
             }

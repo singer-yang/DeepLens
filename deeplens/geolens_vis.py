@@ -124,16 +124,16 @@ class GeoLensVis:
             ray (Ray object): Ray object. Shape [num_rays, 3]
         """
         # Sample point on the object plane
-        ray_o = torch.tensor([depth * float(np.tan(np.deg2rad(fov))), 0, depth])
+        ray_o = torch.tensor([depth * float(np.tan(np.deg2rad(fov))), 0.0, depth])
         ray_o = ray_o.unsqueeze(0).repeat(num_rays, 1)
 
         # Sample points (second point) on the pupil
         if entrance_pupil:
-            pupilz, pupilx = self.calc_entrance_pupil()
+            pupilz, pupilr = self.calc_entrance_pupil()
         else:
-            pupilz, pupilx = 0, self.surfaces[0].r
+            pupilz, pupilr = 0, self.surfaces[0].r
 
-        x2 = torch.linspace(-pupilx, pupilx, num_rays) * 0.99
+        x2 = torch.linspace(-pupilr, pupilr, num_rays) * 0.99
         y2 = torch.zeros_like(x2)
         z2 = torch.full_like(x2, pupilz)
         ray_o2 = torch.stack((x2, y2, z2), axis=1)
@@ -209,6 +209,7 @@ class GeoLensVis:
                         wvln=WAVE_RGB[2 - i],
                         entrance_pupil=entrance_pupil,
                     )  # shape (num_rays, 3)
+                    ray.prop_to(-1.0)
 
                 # Trace rays to sensor and plot ray paths
                 _, ray_o_record = self.trace2sensor(ray=ray, record=True)

@@ -7,18 +7,17 @@ from .base import Surface
 
 
 class ThinLens(Surface):
-    def __init__(self, r, d, f=100, mat2="air", is_square=False, device="cpu"):
+    def __init__(self, r, d, f=100.0, device="cpu"):
         """Thin lens surface."""
-        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
-        self.f = torch.tensor(f, dtype=torch.float32)
-        self.device = device
+        Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
+        self.f = torch.tensor(f)
         
     def set_f(self,f):
-        self.f = torch.tensor(f, dtype=torch.float32).to(self.device)
+        self.f = torch.tensor(f).to(self.device)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        return cls( surf_dict["r"], surf_dict["d"], surf_dict["f"], surf_dict["mat2"])
+        return cls( surf_dict["r"], surf_dict["d"], surf_dict["f"])
 
     # =========================================
     # Optimization
@@ -40,14 +39,13 @@ class ThinLens(Surface):
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-            ray.ra > 0
+            ray.valid > 0
         )
 
         # Update ray position
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
-        ray.ra = ray.ra * valid
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+        ray.valid = ray.valid * valid
 
         if ray.coherent:
             new_opl = ray.opl + t
@@ -63,7 +61,7 @@ class ThinLens(Surface):
         (1) Lens maker's equation
         (2) Spherical lens function
         """
-        forward = (ray.d * ray.ra.unsqueeze(-1))[..., 2].sum() > 0
+        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
 
         # Calculate convergence point
         if forward:
@@ -119,6 +117,10 @@ class ThinLens(Surface):
         d = self.d.item()
         r = self.r
         
+        # Draw a vertical line to represent the thin lens
+        ax.plot([d, d], [-r, r], color=color, linestyle=linestyle, linewidth=0.75)        
+        
+        # Draw arrow to indicate the focal length
         arrowstyle = '<->' if self.f > 0 else ']-['
         ax.annotate(
             "",

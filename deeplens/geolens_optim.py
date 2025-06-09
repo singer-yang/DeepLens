@@ -38,6 +38,8 @@ from deeplens.utils import set_logger
 
 
 class GeoLensOptim:
+    """This class contains the optimization functions for the geometric lens design.
+    """
     # ================================================================
     # Lens design constraints
     # ================================================================
@@ -48,8 +50,8 @@ class GeoLensOptim:
 
             self.dist_min = 0.05
             self.dist_max = 0.6
-            self.thickness_min = 0.2
-            self.thickness_max = 1.5
+            self.thickness_min = 0.25
+            self.thickness_max = 2.0
             self.flange_min = 0.25
             self.flange_max = 3.0
 
@@ -125,7 +127,7 @@ class GeoLensOptim:
         self,
         num_grid=GEO_GRID,
         depth=DEPTH,
-        num_rays=SPP_CALC,
+        num_rays=SPP_PSF,
         sample_more_off_axis=False,
     ):
         """Compute average RMS errors. Baseline RMS loss function.
@@ -150,12 +152,20 @@ class GeoLensOptim:
                 wvln=wvln,
                 sample_more_off_axis=sample_more_off_axis,
             )
-            ray = self.trace2sensor(ray)
 
-            # Green light point center for reference
+            # Calculate reference center, shape of (..., 2)
             if i == 0:
                 with torch.no_grad():
-                    ray_center_green = ray.centroid()
+                    ray_center_green = - self.psf_center(
+                        point=ray.o[:, :, 0, :], method="pinhole"
+                    )
+
+            ray = self.trace2sensor(ray)
+
+            # # Green light point center for reference
+            # if i == 0:
+            #     with torch.no_grad():
+            #         ray_center_green = ray.centroid()
 
             # Calculate RMS error with reference center
             rms_error = ray.rms_error(center_ref=ray_center_green)
@@ -193,9 +203,9 @@ class GeoLensOptim:
 
             # Green light point center for reference
             if i == 0:
-                pointc_green = (ray.o[..., :2] * ray.ra.unsqueeze(-1)).sum(
+                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(
                     -2
-                ) / ray.ra.sum(-1).add(EPSILON).unsqueeze(
+                ) / ray.valid.sum(-1).add(EPSILON).unsqueeze(
                     -1
                 )  # shape [1, num_fields, 2]
                 pointc_green = pointc_green.unsqueeze(-2).repeat(
@@ -203,18 +213,18 @@ class GeoLensOptim:
                 )  # shape [num_fields, num_fields, num_rays, 2]
 
             # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.ra.unsqueeze(-1)
+            o2_norm = (ray.o[..., :2] - pointc_green) * ray.valid.unsqueeze(-1)
 
             # error
             rms_error = torch.mean(
                 (
-                    ((o2_norm**2).sum(-1) * ray.ra).sum(-1) / (ray.ra.sum(-1) + EPSILON)
+                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1) / (ray.valid.sum(-1) + EPSILON)
                 ).sqrt()
             )
 
             # radius
             rms_radius = torch.mean(
-                ((o2_norm**2).sum(-1) * ray.ra).sqrt().max(dim=-1).values
+                ((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values
             )
             all_rms_errors.append(rms_error)
             all_rms_radii.append(rms_radius)
@@ -264,7 +274,7 @@ class GeoLensOptim:
 
     #     return -loss
 
-    def loss_surface(self):
+    def loss_surface(self, d_to_t_max=10.0, tmax_to_tmin_max=5.0):
         """Penalize surface to prevent surface from being too curved.
 
         Loss is designed by the maximum sag, first-order derivative, and second-order derivative.
@@ -274,6 +284,8 @@ class GeoLensOptim:
         grad2_max_allowed = self.grad2_max
 
         loss = torch.tensor(0.0, device=self.device)
+        loss_d_to_t = torch.tensor(0.0, device=self.device)
+        loss_tmax_to_tmin = torch.tensor(0.0, device=self.device)
         for i in self.find_diff_surf():
             # Sample points on the surface
             x_ls = torch.linspace(0.0, 1.0, 20).to(self.device) * self.surfaces[i].r
@@ -297,7 +309,28 @@ class GeoLensOptim:
             # if grad2_max > grad2_max_allowed:
             #     loss += 10 * grad2_max
 
-        return loss
+            if not self.surfaces[i].mat2.name == "air":
+                surf2 = self.surfaces[i + 1]
+                surf1 = self.surfaces[i]
+                
+                # Penalize diameter to thickness ratio
+                d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
+                if d_to_t > d_to_t_max:
+                    loss_d_to_t += d_to_t
+
+                # Penalize thick_max to thick_min ratio
+                r_edge = min(surf2.r, surf1.r)
+                thick_center = surf2.d - surf1.d
+                thick_edge = surf2.surface_with_offset(r_edge, 0.0) - surf1.surface_with_offset(r_edge, 0.0)
+                if thick_center > thick_edge:
+                    tmax_to_tmin = thick_center / thick_edge    
+                else:
+                    tmax_to_tmin = thick_edge / thick_center
+
+                if tmax_to_tmin > tmax_to_tmin_max:
+                    loss_tmax_to_tmin += tmax_to_tmin
+            
+        return loss + loss_d_to_t + loss_tmax_to_tmin
 
     def loss_self_intersec(self):
         """Loss function to avoid self-intersection.
@@ -342,12 +375,11 @@ class GeoLensOptim:
         last_surf = self.surfaces[-1]
         r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
-        flange_min = torch.min(z_last_surf)
-        flange_max = torch.max(z_last_surf)
-        if flange_min < flange_min_allowed:
-            loss_min += flange_min
-        if flange_max > flange_max_allowed:
-            loss_max += flange_max
+        flange = torch.min(z_last_surf)
+        if flange < flange_min_allowed:
+            loss_min += flange
+        if flange > flange_max_allowed:
+            loss_max += flange
 
         # Loss, minimize loss_max and maximize loss_min
         return loss_max - loss_min
@@ -385,13 +417,13 @@ class GeoLensOptim:
         lrs=[1e-3, 1e-4, 1e-1, 1e-4],
         decay=0.001,
         iterations=2000,
-        test_per_iter=50,
+        test_per_iter=100,
         centroid=False,
         optim_mat=False,
         match_mat=False,
         shape_control=True,
         sample_more_off_axis=False,
-        result_dir="./results",
+        result_dir=None,
     ):
         """Optimize the lens by minimizing rms errors.
 
@@ -410,9 +442,9 @@ class GeoLensOptim:
 
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
-        result_dir = (
-            result_dir + "/" + datetime.now().strftime("%m%d-%H%M%S") + "-DesignLens"
-        )
+        if result_dir is None:
+            result_dir = f"./results/{datetime.now().strftime('%m%d-%H%M%S')}-DesignLens"   
+        
         os.makedirs(result_dir, exist_ok=True)
         if not logging.getLogger().hasHandlers():
             set_logger(result_dir)
@@ -422,7 +454,7 @@ class GeoLensOptim:
 
         optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
         scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=200, num_training_steps=iterations
+            optimizer, num_warmup_steps=100, num_training_steps=iterations
         )
 
         # Training loop
@@ -450,6 +482,7 @@ class GeoLensOptim:
             if i % sample_rays_per_iter == 0:
                 with torch.no_grad():
                     # Sample rays
+                    self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
                         ray = self.sample_grid_rays(
@@ -482,24 +515,24 @@ class GeoLensOptim:
 
                 # Ray error to center and valid mask
                 ray_xy = ray.o[..., :2]
-                ray_ra = ray.ra
+                ray_valid = ray.valid
                 ray_err = ray_xy - center_ref
 
                 # # Use only quater of the sensor
                 # ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-                # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
+                # ray_valid = ray_valid[num_grid // 2 :, num_grid // 2 :, :]
 
                 # Weight mask, shape of [num_grid, num_grid]
                 if wv_idx == 0:
                     with torch.no_grad():
-                        weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
-                        weight_mask /= ray_ra.sum(-1) + EPSILON
+                        weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
+                        weight_mask /= ray_valid.sum(-1) + EPSILON
                         weight_mask = weight_mask.sqrt()
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
-                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
-                l_rms /= ray_ra.sum(-1) + EPSILON
+                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+                l_rms /= ray_valid.sum(-1) + EPSILON
 
                 # Weighted loss
                 l_rms_weighted = (l_rms * weight_mask).sum()

@@ -15,154 +15,6 @@ from deeplens.geolens import GeoLens
 
 
 # ====================================================================================
-# ZEMAX file IO
-# ====================================================================================
-def read_zmx(filename="./test.zmx"):
-    """Load the lens from .zmx file."""
-    # Initialize a GeoLens
-    from .geolens import GeoLens
-
-    geolens = GeoLens()
-
-    # Read .zmx file
-    try:
-        with open(filename, "r", encoding="utf-8") as file:
-            lines = file.readlines()
-    except UnicodeDecodeError:
-        with open(filename, "r", encoding="utf-16") as file:
-            lines = file.readlines()
-
-    # Iterate through the lines and extract SURF dict
-    surfs_dict = {}
-    current_surf = None
-    for line in lines:
-        if line.startswith("SURF"):
-            current_surf = int(line.split()[1])
-            surfs_dict[current_surf] = {}
-        elif current_surf is not None and line.strip() != "":
-            if len(line.strip().split(maxsplit=1)) == 1:
-                continue
-            else:
-                key, value = line.strip().split(maxsplit=1)
-                if key == "PARM":
-                    new_key = "PARM" + value.split()[0]
-                    new_value = value.split()[1]
-                    surfs_dict[current_surf][new_key] = new_value
-                else:
-                    surfs_dict[current_surf][key] = value
-
-    # Read the extracted data from each SURF
-    geolens.surfaces = []
-    d = 0.0
-    for surf_idx, surf_dict in surfs_dict.items():
-        if surf_idx > 0 and surf_idx < current_surf:
-            mat2 = (
-                f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}"
-                if "GLAS" in surf_dict
-                else "air"
-            )
-            surf_r = float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 1.0
-            surf_c = float(surf_dict["CURV"].split()[0]) if "CURV" in surf_dict else 0.0
-            surf_d_next = (
-                float(surf_dict["DISZ"].split()[0]) if "DISZ" in surf_dict else 0.0
-            )
-
-            if surf_dict["TYPE"] == "STANDARD":
-                # Aperture
-                if surf_c == 0.0 and mat2 == "air":
-                    s = Aperture(r=surf_r, d=d)
-
-                # Spherical surface
-                else:
-                    s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2)
-
-            # Aspherical surface
-            elif surf_dict["TYPE"] == "EVENASPH":
-                raise NotImplementedError()
-                s = Aspheric()
-
-            else:
-                print(f"Surface type {surf_dict['TYPE']} not implemented.")
-                continue
-
-            geolens.surfaces.append(s)
-            d += surf_d_next
-
-        elif surf_idx == current_surf:
-            # Image sensor
-            geolens.r_sensor = float(surf_dict["DIAM"].split()[0])
-
-        else:
-            pass
-
-    geolens.d_sensor = torch.tensor(d)
-    return geolens
-
-
-def write_zmx(geolens, filename="./test.zmx"):
-    """Write the lens into .zmx file."""
-    lens_zmx_str = ""
-    ENPD = geolens.calc_entrance_pupil()[1] * 2
-    # Head string
-    head_str = f"""VERS 190513 80 123457 L123457
-MODE SEQ
-NAME 
-PFIL 0 0 0
-LANG 0
-UNIT MM X W X CM MR CPMM
-ENPD {ENPD}
-ENVD 2.0E+1 1 0
-GFAC 0 0
-GCAT OSAKAGASCHEMICAL MISC
-XFLN 0. 0. 0.
-YFLN 0.0 {0.707 * geolens.hfov * 57.3} {0.99 * geolens.hfov * 57.3}
-WAVL 0.4861327 0.5875618 0.6562725
-RAIM 0 0 1 1 0 0 0 0 0
-PUSH 0 0 0 0 0 0
-SDMA 0 1 0
-FTYP 0 0 3 3 0 0 0
-ROPD 2
-PICB 1
-PWAV 2
-POLS 1 0 1 0 0 1 0
-GLRS 1 0
-GSTD 0 100.000 100.000 100.000 100.000 100.000 100.000 0 1 1 0 0 1 1 1 1 1 1
-NSCD 100 500 0 1.0E-3 5 1.0E-6 0 0 0 0 0 0 1000000 0 2
-COFN QF "COATING.DAT" "SCATTER_PROFILE.DAT" "ABG_DATA.DAT" "PROFILE.GRD"
-COFN COATING.DAT SCATTER_PROFILE.DAT ABG_DATA.DAT PROFILE.GRD
-SURF 0
-TYPE STANDARD
-CURV 0.0
-DISZ INFINITY
-"""
-    lens_zmx_str += head_str
-
-    # Surface string
-    for i, s in enumerate(geolens.surfaces):
-        d_next = (
-            geolens.surfaces[i + 1].d - geolens.surfaces[i].d
-            if i < len(geolens.surfaces) - 1
-            else geolens.d_sensor - geolens.surfaces[i].d
-        )
-        surf_str = s.zmx_str(surf_idx=i + 1, d_next=d_next)
-        lens_zmx_str += surf_str
-
-    # Sensor string
-    sensor_str = f"""SURF {i + 2}
-TYPE STANDARD
-CURV 0.
-DISZ 0.0
-DIAM {geolens.r_sensor}
-"""
-    lens_zmx_str += sensor_str
-
-    # Write lens zmx string into file
-    with open(filename, "w") as f:
-        f.writelines(lens_zmx_str)
-        f.close()
-
-
-# ====================================================================================
 # Lens starting point generation
 # ====================================================================================
 def create_lens(
@@ -170,6 +22,7 @@ def create_lens(
     fov,
     fnum,
     flange,
+    enpd=None,
     thickness=None,
     lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
     save_dir="./",
@@ -249,6 +102,10 @@ def create_lens(
     # Lens calculation
     lens = lens.to(lens.device)
     lens.d_sensor = torch.tensor(thickness).to(lens.device)
+    lens.enpd = enpd
+    lens.float_enpd = True if enpd is None else False
+    lens.float_foclen = False
+    lens.float_hfov = False
     lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh / 2)
     lens.post_computation()
 

@@ -30,11 +30,10 @@ from .optics.basics import (
     WAVE_RGB,
 )
 from .optics.monte_carlo import forward_integral
-from .optics.geometric_surface import Diffractive_GEO
+from .optics.geometric_surface import Phase
 from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from .optics.wave import AngularSpectrumMethod
 from .optics.utils import diff_float
-from .geolens_utils import draw_setup_2d, draw_raytraces_2d
 
 
 class HybridLens(Lens):
@@ -93,7 +92,7 @@ class HybridLens(Lens):
 
             # Add a geometric DOE surface to GeoLens
             r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
-            geolens.surfaces.append(Diffractive_GEO(r=r_doe, d=doe.d))
+            geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
             self.geolens = geolens
 
         # Update hybrid lens sensor resolution and pixel size
@@ -242,7 +241,7 @@ class HybridLens(Lens):
             )
 
         # Check lens last surface
-        assert isinstance(self.geolens.surfaces[-1], Diffractive_GEO), (
+        assert isinstance(self.geolens.surfaces[-1], Phase), (
             "The last lens surface should be a DOE."
         )
         geolens, doe = self.geolens, self.doe
@@ -323,7 +322,7 @@ class HybridLens(Lens):
 
         # Draw lens layout
         if ax is None:
-            ax, fig = draw_setup_2d(geolens)
+            ax, fig = geolens.draw_lens_2d()
             save_fig = True
         else:
             save_fig = False
@@ -347,13 +346,13 @@ class HybridLens(Lens):
                 wvln=WAVE_RGB[2 - i],
             )
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
-            ax, fig = draw_raytraces_2d(
+            ax, fig = geolens.draw_ray_2d(
                 ray_o_record, ax=ax, fig=fig, color=color_list[i]
             )
 
             # Draw wave propagation
             ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
-            arc_center = (ray.o[:, 0] * ray.ra).sum() / ray.ra.sum()
+            arc_center = (ray.o[:, 0] * ray.valid).sum() / ray.valid.sum()
             arc_center = arc_center.item()
             # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
             arc_radi = geolens.d_sensor.item() - self.doe.d.item()

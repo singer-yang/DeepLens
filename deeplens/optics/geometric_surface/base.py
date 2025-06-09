@@ -7,13 +7,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ..basics import DeepObj
-from ..materials import Material
+from deeplens.optics.basics import DeepObj
+from deeplens.optics.materials import Material
 
 # Newton's method parameters
 NEWTONS_MAXITER = 10  # maximum number of Newton iterations
-NEWTONS_TOLERANCE_TIGHT = 25e-6  # [mm], Newton method solution threshold
-NEWTONS_TOLERANCE_LOOSE = 50e-6  # [mm], Newton method solution threshold
+NEWTONS_TOLERANCE = 50 * 1e-6  # [mm], Newton method solution threshold
 NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in each Newton iteration
 
 EPSILON = 1e-9
@@ -77,17 +76,16 @@ class Surface(DeepObj):
 
         # Update rays
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
-        ray.ra = ray.ra * valid
+        # new_o[~valid] = ray.o[~valid]
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+        ray.valid = ray.valid * valid
 
         if ray.coherent:
             assert t.min() < 100, (
                 "Precision problem caused by long propagation distance."
             )
             new_opl = ray.opl + n * t
-            new_opl[~valid] = ray.opl[~valid]
-            ray.opl = new_opl
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
         return ray
 
@@ -116,14 +114,14 @@ class Surface(DeepObj):
             it = 0
             t = t0  # initial guess of t
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
-            while (torch.abs(ft) > NEWTONS_TOLERANCE_LOOSE).any() and (
+            while (torch.abs(ft) > NEWTONS_TOLERANCE).any() and (
                 it < NEWTONS_MAXITER
             ):
                 it += 1
 
                 new_o = ray.o + ray.d * t.unsqueeze(-1)
                 new_x, new_y = new_o[..., 0], new_o[..., 1]
-                valid = self.is_within_data_range(new_x, new_y) & (ray.ra > 0)
+                valid = self.is_within_data_range(new_x, new_y) & (ray.valid > 0)
 
                 ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
                 dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
@@ -142,7 +140,7 @@ class Surface(DeepObj):
 
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_x, new_y = new_o[..., 0], new_o[..., 1]
-        valid = self.is_valid(new_x, new_y) & (ray.ra > 0)
+        valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
         ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
@@ -154,90 +152,86 @@ class Surface(DeepObj):
         with torch.no_grad():
             # Solution within the surface boundary and ray doesn't go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.ra > 0) & (t >= 0)
+            valid = self.is_valid(new_x, new_y) & (ray.valid > 0) & (t >= 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
-            valid = valid & (torch.abs(ft) < NEWTONS_TOLERANCE_TIGHT)
+            valid = valid & (torch.abs(ft) < NEWTONS_TOLERANCE)
 
         return t, valid
 
     def refract(self, ray, n):
         """Calculate refractive ray according to Snell's law.
 
-        Snell's law (surface normal n defined along the positive z axis):
-            [1] https://physics.stackexchange.com/a/436252/104805
-            [2] https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
-            We follow the first link and normal vector should have the same direction with incident ray(veci), but by default it points to left. We use the second link to check.
+        Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
-            ray (Ray): input ray.
+            ray (Ray): incident ray.
             n (float): relevant refraction coefficient, n = n_i / n_t
 
         Returns:
             ray (Ray): refractive ray.
+
+        References:
+            [1] https://en.wikipedia.org/wiki/Snell%27s_law, "Vector form" section.
         """
         # Compute normal vectors
-        n_vec = self.normal_vec(ray)
-        if ray.is_forward:
-            n_vec = -n_vec
+        normal_vec = self.normal_vec(ray)
 
-        # Compute refraction according to Snell's law
-        cosi = torch.sum(ray.d * n_vec, axis=-1)  # n * i
+        # Compute refraction according to Snell's law, normal_vec * ray_d
+        cosi = (-normal_vec * ray.d).sum(-1).unsqueeze(-1)
 
-        # Total internal reflection
-        valid = (n**2 * (1 - cosi**2) < 1) & (ray.ra > 0)
+        # Total internal reflection. Shape [N] now, maybe broadcasted to [N, 1] in the future.
+        valid = (n**2 * (1 - cosi**2) < 1).squeeze(-1) & (ray.valid > 0)
 
-        sr = torch.sqrt(
-            1 - n**2 * (1 - cosi.unsqueeze(-1) ** 2) * valid.unsqueeze(-1) + EPSILON
-        )  # square root
+        # Square root term in Snell's law
+        sr = torch.sqrt(1 - n**2 * (1 - cosi**2) * valid.unsqueeze(-1) + EPSILON)
 
-        # First term: vertical. Second term: parallel. Already normalized if both n and ray.d are normalized.
-        new_d = sr * n_vec + n * (ray.d - cosi.unsqueeze(-1) * n_vec)
-
-        # Update ray direction
-        new_d[~valid] = ray.d[~valid]
-        ray.d = new_d
+        # Update ray direction. Already normalized if both n and ray.d are normalized.
+        new_d = n * ray.d + (n * cosi - sr) * normal_vec
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray obliquity
-        new_obliq = torch.sum(new_d * ray.d, axis=-1)
-        new_obliq[~valid] = ray.obliq[~valid]
-        ray.obliq = new_obliq
+        new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
+        ray.obliq = torch.where(valid.unsqueeze(-1), new_obliq, ray.obliq)
 
-        # Update ray ra
-        ray.ra = ray.ra * valid
+        # Update ray valid mask
+        ray.valid = ray.valid * valid
 
         return ray
 
     def reflect(self, ray):
         """Calculate reflected ray.
 
+        Normal vector points from the surface toward the side where the light is coming from.
+
         Args:
-            ray (Ray): input ray.
+            ray (Ray): incident ray.
 
         Returns:
             ray (Ray): reflected ray.
+
+        References:
+            [1] https://en.wikipedia.org/wiki/Snell%27s_law, "Vector form" section.
         """
         # Compute surface normal vectors
-        n = self.normal_vec(ray)
-        if ray.is_forward:
-            n = -n
+        normal_vec = self.normal_vec(ray)
 
         # Reflect
         ray.is_forward = not ray.is_forward
-        cos_alpha = -(n * ray.d).sum(-1)
-        new_d = ray.d + 2 * cos_alpha.unsqueeze(-1) * n
+        cos_alpha = -(normal_vec * ray.d).sum(-1).unsqueeze(-1)
+        new_d = ray.d + 2 * cos_alpha * normal_vec
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
-        valid = ray.ra > 0
-        new_d[~valid] = ray.d[~valid]
-        ray.d = new_d
+        ray.d = torch.where(ray.valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at the intersection point. Normal vector points to the left by default.
+        """Calculate surface normal vector at the intersection point.
+
+        Normal vector points from the surface toward the side where the light is coming from.
 
         Args:
             ray (Ray): input ray.
@@ -248,8 +242,8 @@ class Surface(DeepObj):
         x, y = ray.o[..., 0], ray.o[..., 1]
         nx, ny, nz = self.dfdxyz(x, y)
         n_vec = torch.stack((nx, ny, nz), axis=-1)
-
         n_vec = F.normalize(n_vec, p=2, dim=-1)
+        n_vec = torch.where(ray.is_forward, n_vec, -n_vec)
         return n_vec
 
     def to_local_coord(self, ray):
@@ -379,10 +373,7 @@ class Surface(DeepObj):
         return self.is_within_data_range(x, y) & self.is_within_boundary(x, y)
 
     def is_within_boundary(self, x, y):
-        """Valid points within the boundary of the surface.
-
-        NOTE: DELTA is used to avoid the numerical error.
-        """
+        """Valid points within the boundary of the surface."""
         if self.is_square:
             valid = (torch.abs(x) <= (self.w / 2)) & (torch.abs(y) <= (self.h / 2))
         else:

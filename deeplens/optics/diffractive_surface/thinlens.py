@@ -2,10 +2,10 @@
 
 import torch
 import torch.nn.functional as F
-from .base import DOE
+from .diffractive import DiffractiveSurface
 
 
-class ThinLens(DOE):
+class ThinLens(DiffractiveSurface):
     def __init__(
         self,
         d,
