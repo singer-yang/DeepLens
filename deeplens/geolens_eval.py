@@ -51,17 +51,17 @@ class GeoLensEval:
         # Trace rays to sensor plane, shape [num_field, num_rays, 3]
         ray = self.trace2sensor(ray)
         ray_o = ray.o.clone().cpu().numpy()  # .squeeze(0)
-        ray_ra = ray.ra.clone().cpu().numpy()  # .squeeze(0)
+        ray_valid = ray.valid.clone().cpu().numpy()  # .squeeze(0)
 
         # Plot multiple spot diagrams in one figure
         _, axs = plt.subplots(1, num_field, figsize=(num_field * 4, 4))
         for i in range(num_field):
-            ra = ray_ra[i, :]
+            valid = ray_valid[i, :]
             x, y = ray_o[i, :, 0], ray_o[i, :, 1]
 
             # Filter valid rays
-            x_valid, y_valid = x[ra > 0], y[ra > 0]
-            ra_valid = ra[ra > 0]
+            x_valid, y_valid = x[valid > 0], y[valid > 0]
+            ra_valid = valid[valid > 0]
 
             # Calculate center of mass for valid rays
             if ra_valid.sum() > EPSILON:
@@ -107,7 +107,7 @@ class GeoLensEval:
 
         # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
         ray_o = -ray.o.clone().cpu().numpy()
-        ray_ra = ray.ra.clone().cpu().numpy()
+        ray_valid = ray.valid.clone().cpu().numpy()
 
         # Plot multiple spot diagrams in one figure
         fig, axs = plt.subplots(
@@ -115,12 +115,12 @@ class GeoLensEval:
         )
         for i in range(num_grid):
             for j in range(num_grid):
-                ra = ray_ra[i, j, :]
+                valid = ray_valid[i, j, :]
                 x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
 
                 # Filter valid rays
-                x_valid, y_valid = x[ra > 0], y[ra > 0]
-                ra_valid = ra[ra > 0]
+                x_valid, y_valid = x[valid > 0], y[valid > 0]
+                ra_valid = valid[valid > 0]
 
                 # Calculate center of mass for valid rays
                 if ra_valid.sum() > EPSILON:
@@ -174,20 +174,20 @@ class GeoLensEval:
 
             ray = self.trace2sensor(ray)
             ray_xy = ray.o[..., :2]
-            ray_ra = ray.ra
+            ray_valid = ray.valid
 
             # Calculate green centroid as reference, shape [num_grid, num_grid, 2]
             if i == 0:
-                ray_xy_center_green = (ray_xy * ray_ra.unsqueeze(-1)).sum(
+                ray_xy_center_green = (ray_xy * ray_valid.unsqueeze(-1)).sum(
                     -2
-                ) / ray_ra.sum(-1).add(EPSILON).unsqueeze(-1)
+                ) / ray_valid.sum(-1).add(EPSILON).unsqueeze(-1)
 
             # Calculate RMS relative to green centroid, shape [num_grid, num_grid]
             rms_map = torch.sqrt(
                 (
-                    ((ray_xy - ray_xy_center_green.unsqueeze(-2)) ** 2).sum(-1) * ray_ra
+                    ((ray_xy - ray_xy_center_green.unsqueeze(-2)) ** 2).sum(-1) * ray_valid
                 ).sum(-1)
-                / (ray_ra.sum(-1) + EPSILON)
+                / (ray_valid.sum(-1) + EPSILON)
             )
             all_rms_maps.append(rms_map)
 
@@ -216,18 +216,18 @@ class GeoLensEval:
         )
         ray = self.trace2sensor(ray)
         ray_xy = ray.o[..., :2]  # Shape [num_grid, num_grid, spp, 2]
-        ray_ra = ray.ra  # Shape [num_grid, num_grid, spp]
+        ray_valid = ray.valid  # Shape [num_grid, num_grid, spp]
 
         # Calculate centroid for each field point for this wavelength
-        ray_xy_center = (ray_xy * ray_ra.unsqueeze(-1)).sum(-2) / ray_ra.sum(-1).add(
+        ray_xy_center = (ray_xy * ray_valid.unsqueeze(-1)).sum(-2) / ray_valid.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
         # Shape [num_grid, num_grid, 2]
 
         # Calculate RMS error relative to its own centroid, shape [num_grid, num_grid]
         rms_map = torch.sqrt(
-            (((ray_xy - ray_xy_center.unsqueeze(-2)) ** 2).sum(-1) * ray_ra).sum(-1)
-            / (ray_ra.sum(-1) + EPSILON)
+            (((ray_xy - ray_xy_center.unsqueeze(-2)) ** 2).sum(-1) * ray_valid).sum(-1)
+            / (ray_valid.sum(-1) + EPSILON)
         )
 
         return rms_map
@@ -601,7 +601,7 @@ class GeoLensEval:
         ray = self.trace2sensor(ray)
 
         # Calculate vignetting map
-        vignetting = ray.ra.sum(-1) / (ray.ra.shape[-1])
+        vignetting = ray.valid.sum(-1) / (ray.valid.shape[-1])
         return vignetting
 
     def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512):

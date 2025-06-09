@@ -27,13 +27,13 @@ class Aperture(Surface):
         t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
-            ray.ra > 0
+            ray.valid > 0
         )
 
         # Update position
         new_o[~valid] = ray.o[~valid]
         ray.o = new_o
-        ray.ra = ray.ra * valid
+        ray.valid = ray.valid * valid
 
         # Update phase
         if ray.coherent:

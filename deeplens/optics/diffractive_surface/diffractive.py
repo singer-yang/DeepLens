@@ -10,7 +10,7 @@ from ..basics import EPSILON, DeepObj
 from ..materials import Material
 
 
-class DOE(DeepObj):
+class DiffractiveSurface(DeepObj):
     def __init__(
         self,
         d,
@@ -21,13 +21,15 @@ class DOE(DeepObj):
         design_ps=None,
         device="cpu",
     ):
-        """
+        """Diffractive surface class. Optical properties are simulated with wave optics.
+        
         Args:
             d (float): Distance of the DOE surface. [mm]
-            size (tuple or int): Size of the DOE, [w, h]. [mm]
             res (tuple or int): Resolution of the DOE, [w, h]. [pixel]
-            mat (str): Material of the DOE.
             fab_ps (float): Fabrication pixel size. [mm]
+            wvln0 (float): Design wavelength. [um]
+            mat (str): Material of the DOE.
+            design_ps (float): Design pixel size. [mm]
             device (str): Device to run the DOE.
         """
         # Geometry

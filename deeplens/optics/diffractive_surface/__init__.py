@@ -1,6 +1,6 @@
 """Diffractive surface module."""
 
-from .base import DOE    
+from .diffractive import DiffractiveSurface
 from .binary2 import Binary2
 from .fresnel import Fresnel
 from .pixel2d import Pixel2D

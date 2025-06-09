@@ -26,25 +26,28 @@ from torchvision.utils import save_image
 
 from deeplens.geolens_eval import GeoLensEval
 from deeplens.geolens_optim import GeoLensOptim
+from deeplens.geolens_io import GeoLensIO
 from deeplens.geolens_vis import GeoLensVis
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
     DEPTH,
     DELTA,
+    DELTA_PARAXIAL,
     EPSILON,
     PSF_KS,
     SPP_CALC,
     SPP_COHERENT,
     SPP_PSF,
     SPP_RENDER,
+    SPP_PARAXIAL,
     WAVE_RGB,
 )
 from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
     Cubic,
-    Diffractive_GEO,
+    Phase,
     Plane,
     Spheric,
     ThinLens,
@@ -63,7 +66,7 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def __init__(
         self,
         filename=None,
@@ -82,6 +85,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         # Lens sensor size and resolution
         self.sensor_res = sensor_res
         self.sensor_size = sensor_size
+        self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
 
         # Load lens file
         if filename is not None:
@@ -90,6 +94,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             self.surfaces = []
             self.materials = []
             self.to(self.device)
+
+        # Initialize lens design constraints (edge thickness, etc.)
+        # TODO: we should consider to move this to geolens.get_optimizer_params()
+        self.init_constraints()
 
     def read_lens(self, filename):
         """Read a GeoLens from a file.
@@ -102,7 +110,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         elif filename[-5:] == ".json":
             self.read_lens_json(filename)
         elif filename[-4:] == ".zmx":
-            self.read_lens_zmx(filename)
+            self.read_zmx(filename)
         elif filename[-4:] == ".seq":
             raise NotImplementedError("File format .seq is not supported yet.")
         else:
@@ -115,13 +123,22 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     def post_computation(self):
         """After loading lens, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
-        self.find_aperture()
+        self.calc_pupil(paraxial=False)
         self.foclen = self.calc_efl()
         self.hfov = self.calc_hfov()
         self.fnum = self.calc_fnum()
 
-        # Initialize lens design constraints (edge thickness, etc.)
-        self.init_constraints()
+    def update_float_setting(self):
+        """After lens changed, compute foclen, fov and fnum."""
+        # Basic lens parameter calculation
+        self.calc_pupil(paraxial=False)
+        if self.float_enpd is False:
+            self.entrance_pupilr = self.enpd/2.0
+        if self.float_foclen is True:
+            self.foclen = self.calc_efl()
+        if self.float_hfov is True:
+            self.hfov = self.calc_hfov()
+        self.fnum = self.calc_fnum()
 
     def double(self):
         """Use double-precision for coherent ray tracing."""
@@ -146,9 +163,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         sample_more_off_axis=False,
     ):
         """Sample grid rays from object space.
-
-        If depth is infinite, sample parallel rays at different field angles.
-        If depth is finite, sample point source rays from the object plane.
+            (1) If depth is infinite, sample parallel rays at different field angles.
+            (2) If depth is finite, sample point source rays from the object plane.
 
         This function is usually used for (1) PSF map, (2) RMS error map, and (3) spot diagram calculation.
 
@@ -165,20 +181,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if isinstance(num_grid, int):
             num_grid = [num_grid, num_grid]
 
-        # Calculate field angles. Top-left field has positive fov_x and negative fov_y
+        # Calculate field angles for grid source. Top-left field has positive fov_x and negative fov_y
+        x_list = [x for x in np.linspace(1, -1, num_grid[0])]
+        y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
         if sample_more_off_axis:
-            x_list = [
-                np.sign(x) * np.abs(x) ** 0.5 for x in np.linspace(1, -1, num_grid[0])
-            ]
-            y_list = [
-                np.sign(y) * np.abs(y) ** 0.5 for y in np.linspace(-1, 1, num_grid[1])
-            ]
-        else:
-            x_list = [x for x in np.linspace(1, -1, num_grid[0])]
-            y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
+            x_list = [np.sign(x) * np.abs(x) ** 0.5 for x in x_list]
+            y_list = [np.sign(y) * np.abs(y) ** 0.5 for y in y_list]
 
-        hfov_x = np.rad2deg(self.hfov_x)
-        hfov_y = np.rad2deg(self.hfov_y)
+        # Calculate FoV_x and FoV_y
+        hfov_x = np.atan(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
+        hfov_y = np.atan(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
+        hfov_x = np.rad2deg(hfov_x)
+        hfov_y = np.rad2deg(hfov_y)
         fov_x_list = [float(x * hfov_x) for x in x_list]
         fov_y_list = [float(y * hfov_y) for y in y_list]
 
@@ -230,7 +244,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray = ray.squeeze(1)
         else:
             point_obj_x = torch.zeros(num_field, device=self.device)
-            point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180)
+            point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180.)
             point_obj = torch.stack(
                 [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
             )
@@ -245,29 +259,30 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         points=[[0.0, 0.0, -10000.0]],
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
-        shrink_pupil=False,
+        scale_pupil=1.0,
     ):
-        """Sample rays from given point source (absolute physical coordinates) from the object space.
-
-        Used for (1) PSF calculation, (2) chief ray calculation.
+        """
+        Sample rays from point sources in object space (absolute 3D coordinates).
+        Used for PSF and chief ray calculation.
 
         Args:
-            points (list): absolute ray origin. Shape [3], [N, 3], [Nx, Ny, 3]
-            num_rays (int): sample per pixel. Defaults to 8.
-            forward (bool): forward or backward rays. Defaults to True.
-            pupil (bool): whether to use pupil. Defaults to True.
-            fov (float): cone angle. Defaults to 10.
-            wvln (float): ray wvln. Defaults to DEFAULT_WAVE.
+            points (list or Tensor): Ray origins in shape [3], [N, 3], or [Nx, Ny, 3].
+            num_rays (int): Number of rays per point. Default: SPP_PSF.
+            wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
+            scale_pupil (float): Scale factor for pupil radius.  
+                - 1.0: for paraxial ray tracing (default)  
+                - <1.0: for faster chief ray computation  
+                - >1.0: to ensure no vignetting
 
         Returns:
-            ray: Ray object. Shape [*shape_points, num_rays, 3]
+            Ray: Sampled rays with shape [*points.shape[:-1], num_rays, 3].
         """
         # Ray origin is given
         ray_o = torch.tensor(points) if not torch.is_tensor(points) else points
         ray_o = ray_o.to(self.device)
 
         # Sample points on the pupil
-        pupilz, pupilr = self.calc_entrance_pupil(shrink_pupil=shrink_pupil)
+        pupilz, pupilr = self.get_entrance_pupil(scale_pupil=scale_pupil)
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(*ray_o.shape[:-1], num_rays)
         )
@@ -305,25 +320,26 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         num_rays=SPP_CALC,
         wvln=DEFAULT_WAVE,
         entrance_pupil=True,
-        shrink_pupil=False,
+        scale_pupil=1,
         depth=-1.0,
     ):
-        """Sample parallel rays in object space.
-
-        Used for geometric optics calculation.
+        """
+        Sample parallel rays in object space for geometric optics calculations.
 
         Args:
-            fov_x (float or list): degree angle in x0z plane.
-            fov_y (float or list): degree angle in y0z plane.
-            depth (float, optional): sampling depth. Defaults to 0.0.
-            num_rays (int, optional): number of rays. Defaults to SPP_PSF.
-            wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            entrance_pupil (bool, optional): whether to use entrance pupil. Defaults to False.
-            shrink_pupil (bool, optional): whether to shrink the pupil. Defaults to False.
-            depth (float, optional): sampling depth. Defaults to 0.0.
+            fov_x (float or list): Field angle(s) in the x–z plane (degrees). Default: [0.0].
+            fov_y (float or list): Field angle(s) in the y–z plane (degrees). Default: [0.0].
+            num_rays (int): Number of rays per field point. Default: SPP_CALC.
+            wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
+            entrance_pupil (bool): If True, sample origins on entrance pupil; otherwise, on surface 0. Default: True.
+            scale_pupil (float): Scale factor for pupil radius.  
+                - 1.0: for paraxial ray tracing (default)  
+                - <1.0: for faster chief ray computation  
+                - >1.0: to ensure no vignetting
+            depth (float): Propagation depth in z. Default: -1.0.
 
         Returns:
-            ray (Ray object): Ray object. Shape [num_fov_y, num_fov_x, num_rays, 3], arranged in uv order.
+            Ray: Ray object with shape [len(fov_y), len(fov_x), num_rays, 3], ordered as (u, v).
         """
         # Preprocess fov angles
         if isinstance(fov_x, float):
@@ -336,7 +352,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Sample ray origins on the pupil, shape [num_fov_x, num_fov_y, num_rays, 3]
         if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil(shrink_pupil=shrink_pupil)
+            pupilz, pupilr = self.get_entrance_pupil(scale_pupil=scale_pupil)
         else:
             pupilz, pupilr = 0, self.surfaces[0].r
 
@@ -385,7 +401,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """
         # Sample second points on the pupil, shape [len(fov_y), len(fov_x), num_rays, 3]
         if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
+            pupilz, pupilr = self.get_entrance_pupil()
         else:
             pupilz, pupilr = 0, self.surfaces[0].r
 
@@ -498,7 +514,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         points = torch.stack((x, y, z_tensor), dim=-1)
 
         # Fix all chief rays to facilitate the design of telecentricity.
-        points[:,:,0,:2] = 0.0
+        points[..., 0, :2] = 0.0
 
         return points
 
@@ -517,10 +533,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray_final (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
+        # Manually propagate ray to a shallow depth to improve accuracy
+        if (ray.o[..., 2].min() < -100.0).any():
+            ray = ray.prop_to(-10.0)
+
         if lens_range is None:
             lens_range = range(0, len(self.surfaces))
 
-        if ray.is_forward:
+        if ray.is_forward.any():
             ray_out, ray_o_record = self.forward_tracing(ray, lens_range, record=record)
         else:
             ray_out, ray_o_record = self.backward_tracing(
@@ -552,7 +572,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray_o_record (list): list of intersection points.
         """
         # Manually propagate ray to a shallow depth to improve accuracy
-        if (ray.o[..., 2].min() < -1000.0).any():
+        if (ray.o[..., 2].min() < -100.0).any():
             ray = ray.prop_to(-10.0)
 
         # Trace rays
@@ -562,7 +582,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         if record:
             ray_o = ray.o.clone().detach()
             # Set to nan to be skipped in 2d layout visualization
-            ray_o[ray.ra == 0] = float("nan")
+            ray_o[ray.valid == 0] = float("nan")
             ray_o_record.append(ray_o)
             return ray, ray_o_record
         else:
@@ -591,7 +611,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
             if record:
                 ray_out_o = ray.o.clone().detach()
-                ray_out_o[ray.ra == 0] = float("nan")
+                ray_out_o[ray.valid == 0] = float("nan")
                 ray_o_record.append(ray_out_o)
 
         return ray, ray_o_record
@@ -619,7 +639,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
             if record:
                 ray_out_o = ray.o.clone().detach()
-                ray_out_o[ray.ra == 0] = float("nan")
+                ray_out_o[ray.valid == 0] = float("nan")
                 ray_o_record.append(ray_out_o)
 
         return ray, ray_o_record
@@ -759,8 +779,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray = ray.prop_to(depth)
         p = ray.o[..., :2]
         pixel_size = scale * self.pixel_size
-        ray.ra = (
-            ray.ra
+        ray.valid = (
+            ray.valid
             * (torch.abs(p[..., 0] / pixel_size) < (W / 2 + 1))
             * (torch.abs(p[..., 1] / pixel_size) < (H / 2 + 1))
         )
@@ -788,9 +808,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Computation image
         if not vignetting:
-            image = torch.sum(irr_img * ray.ra, -1) / (torch.sum(ray.ra, -1) + EPSILON)
+            image = torch.sum(irr_img * ray.valid, -1) / (torch.sum(ray.valid, -1) + EPSILON)
         else:
-            image = torch.sum(irr_img * ray.ra, -1) / torch.numel(ray.ra)
+            image = torch.sum(irr_img * ray.valid, -1) / torch.numel(ray.valid)
 
         return image
 
@@ -936,24 +956,35 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """Compute reference PSF center (flipped to match the original point, green light) for given point source.
 
         Args:
-            point: [N, 3] un-normalized point is in object plane.
+            point: [..., 3] un-normalized point is in object plane.
 
         Returns:
-            psf_center: [N, 2] un-normalized psf center in sensor plane.
+            psf_center: [..., 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray.
-            ray = self.sample_from_points(point, num_rays=SPP_CALC, shrink_pupil=True)
+            ray = self.sample_from_points(point, num_rays=SPP_CALC, scale_pupil=0.2)
             ray = self.trace2sensor(ray)
-            assert (ray.ra == 1).any(), "No sampled rays is valid."
-            ra = ray.ra.unsqueeze(-1)
-            psf_center = (ray.o * ra).sum(-2) / ra.sum(-2).add(EPSILON)  # shape [N, 3]
-            psf_center = -psf_center[..., :2]  # shape [N, 2]
+            assert (ray.valid == 1).any(), "No sampled rays is valid."
+            valid = ray.valid.unsqueeze(-1)
+            psf_center = (ray.o * valid).sum(-2) / valid.sum(-2).add(EPSILON)  # shape [..., 3]
+            psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
-            # Pinhole camera perspective projection.
-            scale = self.calc_scale_pinhole(point[..., 2])
-            psf_center = point[..., :2] / scale.unsqueeze(-1)
+            # ======>
+            # # Pinhole camera perspective projection.
+            # scale = self.calc_scale_pinhole(point[..., 2])
+            # psf_center = point[..., :2] / scale.unsqueeze(-1)
+            # ======>
+            # Calculate the FoV of incident ray, then map to sensor plane
+            tan_point_fov_x = -point[..., 0] / point[..., 2]
+            tan_point_fov_y = -point[..., 1] / point[..., 2]
+            tan_hfov_x = float(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
+            tan_hfov_y = float(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
+            psf_center_x = tan_point_fov_x / tan_hfov_x * self.sensor_size[1] / 2
+            psf_center_y = tan_point_fov_y / tan_hfov_y * self.sensor_size[0] / 2
+            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1)
+            # ======>
 
         else:
             raise ValueError(f"Unsupported method: {method}.")
@@ -1212,9 +1243,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                 ray_xy_center_green = ray.centroid()[..., :2].unsqueeze(-2)
 
             # Calculate RMS spot size and radius for different FoVs
-            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.ra.unsqueeze(-1)
-            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.ra).sum(-1) / (
-                ray.ra.sum(-1) + EPSILON
+            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.valid.unsqueeze(-1)
+            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.valid).sum(-1) / (
+                ray.valid.sum(-1) + EPSILON
             )
             rms_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
 
@@ -1264,36 +1295,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
     @torch.no_grad()
     def calc_efl(self):
-        """Compute effective focal length (EFL). Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL."""
-        # Trace a paraxial chief ray
-        small_fov_rad = 0.001
-        small_fov_deg = float(np.rad2deg(small_fov_rad))
-        # ===========>
-        # chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
-        #     hfov=small_fov_deg, wvln=DEFAULT_WAVE, ray_aiming=True
-        # )
-        # ray = Ray(
-        #     chief_ray_o[1, ...],
-        #     chief_ray_d[1, ...],
-        #     wvln=DEFAULT_WAVE,
-        #     device=self.device,
-        # )
-        # ray, _ = self.trace(ray)
+        """Compute effective focal length (EFL). 
+        
+        Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL.
 
-        # # Compute the effective focal length
-        # image_height = (
-        #     ray.o[..., 1]
-        #     + ray.d[..., 1] * (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
-        # )
-        # ===========>
-        # Sample paraxial rays, shape [1, 1, num_rays, 3]
-        ray = self.sample_parallel(fov_x=0.0, fov_y=small_fov_deg, shrink_pupil=True)
+        Reference:
+            [1] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/10/Tutorial_MorelSophie.pdf
+        """
+        # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
+        paraxial_fov_rad = 0.001
+        paraxial_fov_deg = float(np.rad2deg(paraxial_fov_rad))
+        self.calc_pupil()
+        ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
-        image_height = (ray.o[0, 0, :, 1] * ray.ra[0, 0, :]).sum() / ray.ra[
-            0, 0, :
-        ].sum()
-        # ===========>
-        eff_foclen = image_height.item() / float(np.tan(small_fov_rad))
+
+        # Compute the effective focal length
+        paraxial_imgh = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[0, 0, :].sum()
+        eff_foclen = paraxial_imgh.item() / float(np.tan(paraxial_fov_rad))
         return eff_foclen
 
     @torch.no_grad()
@@ -1301,6 +1319,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """Compute back focal length (BFL).
 
         BFL: Distance from the second principal point to focal plane.
+
+        FIXME: this definition is not correct.
         """
         # Forward ray tracing
         ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, num_rays=SPP_CALC, wvln=wvln)
@@ -1317,7 +1337,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Back focal length
         bfl = z_focus - z_principal
-        bfl = float(np.nanmean(bfl[ray.ra > 0].cpu().numpy()))
+        bfl = float(np.nanmean(bfl[ray.valid > 0].cpu().numpy()))
 
         return bfl
 
@@ -1332,7 +1352,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     @torch.no_grad()
     def calc_fnum(self):
         """Compute f-number."""
-        _, pupilr = self.calc_entrance_pupil()
+        _, pupilr = self.get_entrance_pupil()
         return self.calc_efl() / (2 * pupilr)
 
     @torch.no_grad()
@@ -1367,7 +1387,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
-        focus_p = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.ra > 0].cpu().numpy()
+        focus_p = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.valid > 0].cpu().numpy()
         focus_p = focus_p[~np.isnan(focus_p) & (focus_p < 0)]
 
         if len(focus_p) > 0:
@@ -1387,7 +1407,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             )
         else:
             ray = self.sample_from_points(
-                points=torch.tensor([0, 0, depth]),
+                points=torch.tensor([0.0, 0.0, depth]),
                 num_rays=SPP_CALC,
                 wvln=DEFAULT_WAVE,
             )
@@ -1398,7 +1418,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
         focus_p = ray.o[..., 2] - ray.d[..., 2] * t
-        focus_p = focus_p[ray.ra > 0]
+        focus_p = focus_p[ray.valid > 0]
         focus_p = focus_p[~torch.isnan(focus_p) & (focus_p > 0)]
         infocus_sensor_d = torch.mean(focus_p)
 
@@ -1415,7 +1435,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
 
         # Sample second points on exit pupil
-        pupilz, pupilx = self.calc_exit_pupil()
+        pupilz, pupilx = self.get_exit_pupil()
         x2 = torch.linspace(-pupilx, pupilx, SPP_CALC)
         z2 = torch.full_like(x2, pupilz)
         y2 = torch.full_like(x2, 0)
@@ -1427,7 +1447,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute fov from output ray direction
         tan_hfov = ray.d[..., 0] / ray.d[..., 2]
-        hfov = torch.atan(torch.sum(tan_hfov * ray.ra) / torch.sum(ray.ra))
+        hfov = torch.atan(torch.sum(tan_hfov * ray.valid) / torch.sum(ray.valid))
 
         # If calculation failed, use pinhole camera model to compute fov
         if torch.isnan(hfov):
@@ -1463,7 +1483,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     def calc_scale_pinhole(self, depth):
         """Scale factor computed by pinhole camera model.
 
-        Note: if there is distortion, the scale factor computed with pinhole camera model will be inaccurate.
+        This function assumes the first principal point is at (0, 0, 0) and the second principal point is at (0, 0, d_sensor - focal_length).
 
         Args:
             depth (float): depth of the object.
@@ -1498,7 +1518,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     #         center_end = num_grid // 2 + num_grid // 8
     #         o1_center = o1[center_start:center_end, center_start:center_end, :, :]
     #         o2_center = o2[center_start:center_end, center_start:center_end, :, :]
-    #         ra_center = ray.ra.clone().detach()[
+    #         ra_center = ray.valid.clone().detach()[
     #             center_start:center_end, center_start:center_end, :
     #         ]
 
@@ -1535,7 +1555,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         This function is currently not used and needs to be checked.
         """
         # sample rays with shape [SPP_CALC, 3]
-        pupilz, pupilx = self.calc_exit_pupil()
+        pupilz, pupilx = self.get_exit_pupil()
         o1 = torch.zeros([SPP_CALC, 3])
         o1[:, 0] = pupilx
         o1[:, 2] = self.d_sensor.item()
@@ -1557,11 +1577,67 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
 
     @torch.no_grad()
-    def calc_exit_pupil(self, shrink_pupil=False):
-        """Sample **forward** rays from aperture edge to sensor plane to compute exit pupil.
+    def calc_pupil(self, paraxial=True):
+        """
+        Compute entrance and exit pupil positions and radii.
+        The entrance and exit pupils must be recalculated whenever:
+            - First-order parameters change (e.g., field of view, object height, image height),
+            - Lens geometry or materials change (e.g., surface curvatures, refractive indices, thicknesses),
+            - Or generally, any time the lens configuration is modified.
 
         Args:
-            shrink_pupil (bool): shrink the pupil.
+            paraxial (bool): If True, use paraxial approximation. Default: True.
+
+        Notes:
+            - If `self.float_enpd` is True, set ENPD based on computed pupil radius.
+            - Otherwise, override computed entrance pupil radius using fixed ENPD.
+        """
+        self.find_aperture()
+        self.exit_pupilz, self.exit_pupilr = self.calc_exit_pupil(paraxial)
+        self.entrance_pupilz, self.entrance_pupilr = self.calc_entrance_pupil(paraxial)
+
+    def get_entrance_pupil(self, scale_pupil=1):
+        """
+        Get entrance pupil location and radius with optional scaling.
+
+        Args:
+            scale_pupil (float): Scale factor for pupil radius. Default: 1.
+
+        Returns:
+            tuple: (z position, radius) of entrance pupil.
+        """
+        entrance_pupilz, entrance_pupilr = self.entrance_pupilz, self.entrance_pupilr*scale_pupil
+        return entrance_pupilz, entrance_pupilr
+
+    def get_exit_pupil(self, scale_pupil=1):
+        """
+        Get exit pupil location and radius with optional scaling.
+        The exit pupils must be recalculated when the lens is modified.
+
+        Args:
+            scale_pupil (float): Scale factor for pupil radius. Default: 1.
+
+        Returns:
+            tuple: (z position, radius) of exit pupil.
+        """
+        exit_pupilz, exit_pupilr = self.exit_pupilz, self.exit_pupilr*scale_pupil
+        return exit_pupilz, exit_pupilr
+
+    @torch.no_grad()
+    def calc_exit_pupil(self, paraxial=True):
+        """
+        Paraxial mode: 
+            Rays are emitted from near the center of the aperture stop and are close to the optical axis. 
+            This mode estimates the exit pupil position and radius under ideal (first-order) optical assumptions. 
+            It is fast and stable.
+        Non-paraxial mode: 
+            Rays are emitted from the edge of the aperture stop in large quantities. 
+            The exit pupil position and radius are determined based on the intersection points of these rays. 
+            This mode is slower and affected by aperture-related aberrations.
+        Use paraxial mode unless precise ray aiming is required.
+
+        Args:
+            paraxial (bool): center (True) or edge (False).
 
         Returns:
             avg_pupilz (float): z coordinate of exit pupil.
@@ -1575,18 +1651,21 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             print("No aperture, use the last surface as exit pupil.")
             return self.surfaces[-1].d.item(), self.surfaces[-1].r
 
-        # Sample rays from edge of aperture
+        # Sample rays from aperture (edge or center)
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
-        ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
 
-        # Sample phi ranges from [-0.5rad, 0.5rad]
-        phi = torch.linspace(-0.5, 0.5, SPP_CALC)
+        if paraxial:
+            ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(32, 1)
+            phi = torch.linspace(-0.1, 0.1, 32) / 180.0 * torch.pi
+        else:
+            ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
+            phi = torch.linspace(-0.5, 0.5, SPP_CALC)
+        
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), torch.cos(phi)), axis=-1
         )
-
         ray = Ray(ray_o, d, device=self.device)
 
         # Ray tracing from aperture edge to last surface
@@ -1595,10 +1674,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
+            [ray.o[ray.valid != 0][:, 0], ray.o[ray.valid != 0][:, 2]], dim=-1
         )
         ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
+            [ray.d[ray.valid != 0][:, 0], ray.d[ray.valid != 0][:, 2]], dim=-1
         )
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
@@ -1611,49 +1690,57 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             avg_pupilr = torch.mean(intersection_points[:, 0]).item()
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
+            if paraxial:
+                avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
+
             if avg_pupilr < EPSILON:
-                print("Small pupil is detected, use the last surface as pupil.")
+                print("Zero or negative exit pupil is detected, use the last surface as pupil.")
                 avg_pupilr = self.surfaces[-1].r
                 avg_pupilz = self.surfaces[-1].d.item()
-
-        # Shrink the pupil
-        if shrink_pupil:
-            avg_pupilr *= 0.25
-        else:
-            avg_pupilr *= 0.98
 
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
-    def calc_entrance_pupil(self, shrink_pupil=False):
-        """Caclulate entrance pupil of the lens.
-
-        Entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop [2]. We sample **backward** rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points is the entrance pupil. We return z coordinate and radius of entrance pupil.
+    def calc_entrance_pupil(self, paraxial=True):
+        """Calculate entrance pupil of the lens.
+        
+        The entrance pupil is the optical image of the physical aperture stop, as seen through the optical elements in front of the stop. We sample backward rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points defines the entrance pupil position and radius.
 
         Args:
-            shrink_pupil (bool): shrink the pupil. Used when we want to calculate chief rays.
-
+            paraxial (bool): Ray sampling mode. Default: True.
+                - True: Rays emitted from near the center of the aperture stop, close to 
+                  the optical axis. Fast and stable under ideal optical assumptions.
+                - False: Rays emitted from the edge of the aperture stop in large quantities. 
+                  Slower and affected by aperture-related aberrations.
+                  
         Returns:
-            avg_pupilz (float): z coordinate of entrance pupil.
-            avg_pupilr (float): radius of entrance pupil.
+            tuple: (z_position, radius) of entrance pupil.
+            
+        Note:
+            [1] Use paraxial mode unless precise ray aiming is required.
+            [2] This function only works for object at a far distance. For microscopes, this function usually returns a negative entrance pupil.
 
-        Reference:
+        References:
             [1] Entrance pupil: how many rays can come from object space to sensor.
             [2] https://en.wikipedia.org/wiki/Entrance_pupil: "In an optical system, the entrance pupil is the optical image of the physical aperture stop, as 'seen' through the optical elements in front of the stop."
+            [3] Zemax LLC, *OpticStudio User Manual*, Version 19.4, Document No. 2311, 2019.
         """
         if self.aper_idx is None or hasattr(self, "aper_idx") is False:
             print("No aperture, use the first surface as entrance pupil.")
             return self.surfaces[0].d.item(), self.surfaces[0].r
 
-        # Sample rays from edge of aperture
+        # Sample rays from aperture stop
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
-        ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
 
-        # Sample phi ranges from [-0.5rad, 0.5rad]
-        # phi = torch.linspace(-self.hfov - 0.25, -self.hfov + 0.25, SPP_CALC)
-        phi = torch.linspace(-0.5, 0.5, SPP_CALC)
+        if paraxial:
+            ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(32, 1)
+            phi = torch.linspace(-0.1, 0.1, 32) / 180.0 * torch.pi
+        else:
+            ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
+            phi = torch.linspace(-0.25, 0.25, SPP_CALC)
+        
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
         )
@@ -1664,8 +1751,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         ray, _ = self.trace(ray, lens_range=lens_range)
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack([ray.o[ray.ra > 0][:, 0], ray.o[ray.ra > 0][:, 2]], dim=-1)
-        ray_d = torch.stack([ray.d[ray.ra > 0][:, 0], ray.d[ray.ra > 0][:, 2]], dim=-1)
+        ray_o = torch.stack([ray.o[ray.valid > 0][:, 0], ray.o[ray.valid > 0][:, 2]], dim=-1)
+        ray_d = torch.stack([ray.d[ray.valid > 0][:, 0], ray.d[ray.valid > 0][:, 2]], dim=-1)
         intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
 
         # Handle the case where no intersection points are found or small entrance pupil
@@ -1677,104 +1764,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             avg_pupilr = torch.mean(intersection_points[:, 0]).item()
             avg_pupilz = torch.mean(intersection_points[:, 1]).item()
 
+            if paraxial:
+                avg_pupilr = abs(avg_pupilr/DELTA_PARAXIAL*aper_r)
+            
             if avg_pupilr < EPSILON:
-                print("Small entrance pupil is detected, use the first surface.")
+                print("Zero or negative entrance pupil is detected, use the first surface.")
                 avg_pupilr = self.surfaces[0].r
                 avg_pupilz = self.surfaces[0].d.item()
 
-        # Shrink the pupil
-        if shrink_pupil:
-            avg_pupilr *= 0.25
-        else:
-            avg_pupilr *= 0.98
-        
         return avg_pupilz, avg_pupilr
-
-    @torch.no_grad()
-    def calc_entrance_pupil_paraxial(self,):
-        if self.aper_idx is None or hasattr(self, "aper_idx") is False:
-            print("No aperture, use the first surface as entrance pupil.")
-            return self.surfaces[0].d.item(), self.surfaces[0].r
-
-        # Sample rays from edge of aperture
-        aper_idx = self.aper_idx
-        aper_z = self.surfaces[aper_idx].d.item()
-        aper_r = self.surfaces[aper_idx].r
-        delta_r = DELTA
-        ray_o = torch.tensor([[delta_r, 0, aper_z]]).repeat(16, 1)
-
-        # Sample phi ranges from [-0.5rad, 0.5rad]
-        phi = torch.linspace(-0.1, 0.1, 16)/180.0*torch.pi
-        d = torch.stack(
-            (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
-        )
-
-        ray = Ray(ray_o, d, device=self.device)
-
-        # Ray tracing from aperture edge to first surface
-        lens_range = range(0, self.aper_idx)
-        ray, _ = self.trace(ray, lens_range=lens_range)
-
-        # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
-        )
-        ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
-        )
-        intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
-
-        # Handle the case where no intersection points are found
-        if len(intersection_points) == 0:
-            print("No intersection points found, use the first surface as pupil.")
-            avg_pupilr = self.surfaces[0].r
-            avg_pupilz = self.surfaces[0].d.item()
-        else:
-            avg_pupilr = torch.abs((torch.mean(intersection_points[:, 0]).item())/delta_r*aper_r)
-            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-        return avg_pupilz, avg_pupilr
-
-    @torch.no_grad()
-    def calc_entrance_pupil_paraxial_enpd(self, enpd):
-        if self.aper_idx is None or hasattr(self, "aper_idx") is False:
-            print("No aperture, use the first surface as entrance pupil.")
-            return self.surfaces[0].d.item(), self.surfaces[0].r
-
-        # Sample rays from edge of aperture
-        aper_idx = self.aper_idx
-        aper_z = self.surfaces[aper_idx].d.item()
-        ray_o = torch.tensor([[0, 0, aper_z]]).repeat(16, 1)
-
-        # Sample phi ranges from [-0.5rad, 0.5rad]
-        phi = torch.linspace(-0.1, 0.1, 16)/180.0*torch.pi
-        d = torch.stack(
-            (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
-        )
-
-        ray = Ray(ray_o, d, device=self.device)
-
-        # Ray tracing from aperture edge to first surface
-        lens_range = range(0, self.aper_idx)
-        ray, _ = self.trace(ray, lens_range=lens_range)
-
-        # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
-        ray_o = torch.stack(
-            [ray.o[ray.ra != 0][:, 0], ray.o[ray.ra != 0][:, 2]], dim=-1
-        )
-        ray_d = torch.stack(
-            [ray.d[ray.ra != 0][:, 0], ray.d[ray.ra != 0][:, 2]], dim=-1
-        )
-        intersection_points = self.compute_intersection_points_2d(ray_o, ray_d)
-
-        # Handle the case where no intersection points are found
-        if len(intersection_points) == 0:
-            print("No intersection points found, use the first surface as pupil.")
-            pupilr = self.surfaces[0].r
-            avg_pupilz = self.surfaces[0].d.item()
-        else:
-            pupilr = enpd/2.0
-            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-        return avg_pupilz, pupilr
 
     @staticmethod
     def compute_intersection_points_2d(origins, directions):
@@ -1827,24 +1825,24 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
     # Lens operation
     # ====================================================================================
     @torch.no_grad()
-    def refocus(self, depth=float("inf")):
+    def refocus(self, foc_dist=float("inf")):
         """Refocus the lens to a depth distance by changing sensor position.
 
         Args:
-            depth (float): depth distance.
+            foc_dist (float): focal distance.
 
         Note:
             In DSLR, phase detection autofocus (PDAF) is a popular and efficient method. But here we simplify the problem by calculating the in-focus position of green light.
         """
         # Calculate in-focus sensor position
-        d_sensor_new = self.calc_foc_plane(depth=depth)
+        d_sensor_new = self.calc_foc_plane(depth=foc_dist)
 
         # Update sensor position
         assert d_sensor_new > 0, "sensor position is negative."
         self.d_sensor = d_sensor_new
 
         # FoV will be slightly changed
-        self.post_computation()
+        self.update_float_setting()
 
     @torch.no_grad()
     def set_aperture(self, fnum=None, foclen=None, aper_r=None):
@@ -1876,7 +1874,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         for _ in range(8):
             self.surfaces[self.aper_idx].r = optim_aper_r
-            _, pupilr = self.calc_entrance_pupil()
+            _, pupilr = self.get_entrance_pupil()
 
             if abs(pupilr - target_pupil_r) < 0.1:  # Close enough
                 break
@@ -1897,13 +1895,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         """Set FoV, ImgH and F number, only use this function to assign design targets.
 
         Args:
-            hfov (float): half diagonal-FoV in degree.
+            hfov (float): half diagonal-FoV in radian.
             fnum (float): F number.
             foclen (float): focal length in [mm].
         """
         self.hfov = hfov
         self.fnum = fnum
-        self.foclen = foclen
+        # ======>
+        # self.foclen = foclen
+        # ======>
+        self.foclen = self.r_sensor / math.tan(hfov)
+        # ======>
 
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].r = float(aper_r)
@@ -1939,7 +1941,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
             self.pixel_size = sensor_size[0] / sensor_res[0]
 
-            self.post_computation()
+            self.update_float_setting()
 
         elif r_sensor is not None:
             assert sensor_size is None, (
@@ -1961,7 +1963,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             ]
             self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
 
-            self.post_computation()
+            self.update_float_setting()
 
         else:
             raise ValueError(
@@ -2122,7 +2124,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             render_unwarp (bool): whether unwarp the rendered image.
             lens_title (str): lens title
         """
-
         # Draw lens layout and ray path
         self.draw_layout(
             filename=f"{save_name}.png",
@@ -2174,9 +2175,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         Returns:
             list: optimizer parameters
         """
+        self.init_constraints()
+
+        # Find the surface indices to be optimized
         if optim_surf_range is None:
             optim_surf_range = self.find_diff_surf()
 
+        # Optimize lens surface parameters
         params = []
         for i in optim_surf_range:
             surf = self.surfaces[i]
@@ -2189,8 +2194,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                     lr=lr, decay=decay, optim_mat=optim_mat
                 )
 
-            elif isinstance(surf, Diffractive_GEO):
-                params += surf.get_optimizer_params(lr=lr[3])
+            elif isinstance(surf, Phase):
+                if len(lr) > 4:
+                    params += surf.get_optimizer_params(lr=lr[4])
+                else:
+                    params += surf.get_optimizer_params(lr=lr[3])
 
             # elif isinstance(surf, GaussianRBF):
             #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
@@ -2199,6 +2207,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
             #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
 
             elif isinstance(surf, Plane):
+                print(f"Plane {i} can not be optimized.")
                 pass
 
             # elif isinstance(surf, PolyEven):
@@ -2215,20 +2224,25 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
                     f"Surface type {surf.__class__.__name__} is not supported for optimization yet."
                 )
 
+        # Optimize sensor place
         self.d_sensor.requires_grad = True
         params += [{"params": self.d_sensor, "lr": lr[1]}]
 
         return params
 
-    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.02, optim_mat=False):
+    def get_optimizer(self, lr=[1e-4, 1e-4, 0, 1e-4], decay=0.01, optim_surf_range=None, optim_mat=False):
         """Get optimizers and schedulers for different lens parameters.
 
         Args:
-            lrs (_type_): _description_
-            epochs (int, optional): _description_. Defaults to 100.
-            ai_decay (float, optional): _description_. Defaults to 0.2.
+            lr (list): learning rate for different parameters [c, d, k, a]. Defaults to [1e-4, 1e-4, 0, 1e-4].
+            decay (float): decay rate for higher order a. Defaults to 0.2.
+            optim_surf_range (list): surface indices to be optimized. Defaults to None.
+            optim_mat (bool): whether to optimize material. Defaults to False.
+
+        Returns:
+            list: optimizer parameters
         """
-        params = self.get_optimizer_params(lr, decay, optim_mat=optim_mat)
+        params = self.get_optimizer_params(lr, decay, optim_surf_range, optim_mat)
         optimizer = torch.optim.Adam(params)
         return optimizer
 
@@ -2253,16 +2267,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
                 elif surf_dict["type"] == "Cubic":
                     s = Cubic.init_from_dict(surf_dict)
-
-                elif surf_dict["type"] == "Diffractive_GEO":
-                    s = Diffractive_GEO.init_from_dict(surf_dict)
-
+                
                 # elif surf_dict["type"] == "GaussianRBF":
                 #     s = GaussianRBF.init_from_dict(surf_dict)
 
                 # elif surf_dict["type"] == "NURBS":
                 #     s = NURBS.init_from_dict(surf_dict)
 
+                elif surf_dict["type"] == "Phase":
+                    s = Phase.init_from_dict(surf_dict)
+                
                 elif surf_dict["type"] == "Plane":
                     s = Plane.init_from_dict(surf_dict)
 
@@ -2288,9 +2302,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         self.d_sensor = torch.tensor(d)
         self.lens_info = data.get("info", "None")
+        self.enpd = data.get('enpd', None)
+        self.float_enpd = True if self.enpd is None else False
+        self.float_foclen = False
+        self.float_hfov = False
 
         sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]
+        
+        self.to(self.device)
         self.set_sensor(sensor_res=sensor_res, r_sensor=self.r_sensor)
 
     def write_lens_json(self, filename="./test.json"):
@@ -2299,6 +2319,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
         data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
         data["foclen"] = round(self.foclen, 4)
         data["fnum"] = round(self.fnum, 4)
+        if self.float_enpd is False:
+            data["enpd"] = round(self.enpd, 4)
         data["r_sensor"] = self.r_sensor
         data["(d_sensor)"] = round(self.d_sensor.item(), 4)
         data["(sensor_size)"] = [round(i, 4) for i in self.sensor_size]
@@ -2320,23 +2342,3 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis):
 
         with open(filename, "w") as f:
             json.dump(data, f, indent=4)
-
-    def read_lens_zmx(self, filename="./test.zmx"):
-        """Read the lens from .zmx file."""
-        from .geolens_utils import read_zmx
-
-        loaded_lens = read_zmx(filename)
-
-        # Copy all attributes from loaded_lens to self
-        for attr_name, attr_value in loaded_lens.__dict__.items():
-            setattr(self, attr_name, attr_value)
-
-        # Set sensor size and resolution
-        self.set_sensor(sensor_res=self.sensor_res, r_sensor=self.r_sensor)
-        return self
-
-    def write_lens_zmx(self, filename="./test.zmx"):
-        """Write the lens into .zmx file."""
-        from .geolens_utils import write_zmx
-
-        write_zmx(self, filename)

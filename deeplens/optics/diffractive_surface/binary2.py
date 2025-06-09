@@ -1,10 +1,10 @@
 """Binary2 DOE parameterization."""
 
 import torch
-from .base import DOE
+from .diffractive import DiffractiveSurface
 
 
-class Binary2(DOE):
+class Binary2(DiffractiveSurface):
     def __init__(
         self,
         d,

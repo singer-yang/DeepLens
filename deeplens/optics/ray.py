@@ -18,33 +18,29 @@ from .basics import DEFAULT_WAVE, EPSILON, DeepObj
 
 class Ray(DeepObj):
     def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
-        """Optical ray class. 
+        """Optical ray class."""
+        assert wvln > 0.1 and wvln < 1, "Ray wavelength unit should be [um]"
+
+        # Ray parameters
+        self.o = o.to(device) if torch.is_tensor(o) else torch.tensor(o, device=device)
+        self.d = d.to(device) if torch.is_tensor(d) else torch.tensor(d, device=device)
+        self.d = F.normalize(self.d, p=2, dim=-1)
+        if isinstance(wvln, float):
+            self.wvln = torch.full_like(self.o[..., 0].unsqueeze(-1), wvln, device=device)
+        else:
+            self.wvln = wvln.to(device)
         
-        Now we only support the same wvln for all rays, but it is possible to extend to different wvln for each ray.
-        """
-        assert wvln > 0.1 and wvln < 1, "wvln should be in [um]"
-        self.wvln = wvln
-
-        self.o = o if torch.is_tensor(o) else torch.tensor(o)
-        self.d = d if torch.is_tensor(d) else torch.tensor(d)
-        self.ra = torch.ones(o.shape[:-1])
-        self.valid = self.ra.clone()
-
-        # Intensity tracing
-        self.en = torch.ones(o.shape[:-1])
+        # Auxiliary parameters
+        self.valid = torch.ones(o.shape[:-1], device=device)
+        self.en = torch.ones_like(self.valid).unsqueeze(-1)
+        self.obliq = torch.ones_like(self.en)
+        self.is_forward = self.d[..., 2].unsqueeze(-1) > 0
 
         # Coherent ray tracing (initialize coherent light)
         self.coherent = coherent  # bool
-        self.opl = torch.zeros(o.shape[:-1])
+        self.opl = torch.zeros_like(self.en)
 
-        # Used in lens design with no direct physical meaning
-        self.obliq = torch.ones(o.shape[:-1])
-
-        self.to(device)
-
-        # Post computation
-        self.d = F.normalize(self.d, p=2, dim=-1)
-        self.is_forward = bool((self.d[..., 2] > 0).any())
+        self.device = device
 
     def prop_to(self, z, n=1):
         """Ray propagates to a given depth plane.
@@ -54,14 +50,14 @@ class Ray(DeepObj):
             n (float, optional): refractive index. Defaults to 1.
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
-        new_o = self.o + self.d * t[..., None]
+        new_o = self.o + self.d * t.unsqueeze(-1)
 
-        is_valid = (self.ra > 0) & (torch.abs(t) >= 0)
+        is_valid = (self.valid > 0) & (torch.abs(t) >= 0)
         new_o[~is_valid] = self.o[~is_valid]
         self.o = new_o
 
         if self.coherent:
-            if t.min() > 100 and torch.get_default_dtype() == torch.float32:
+            if t.min().abs() > 100 and torch.get_default_dtype() == torch.float32:
                 raise Warning(
                     "Should use float64 in coherent ray tracing for precision."
                 )
@@ -76,7 +72,7 @@ class Ray(DeepObj):
         Returns:
             torch.Tensor: Centroid of the ray, shape (..., 3)
         """
-        return (self.o * self.ra.unsqueeze(-1)).sum(-2) / self.ra.sum(-1).add(
+        return (self.o * self.valid.unsqueeze(-1)).sum(-2) / self.valid.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
     
@@ -97,7 +93,7 @@ class Ray(DeepObj):
         
         # Calculate RMS error for each region
         rms_error = ((self.o[..., :2] - center_ref[..., :2])**2).sum(-1)
-        rms_error = (rms_error * self.ra).sum(-1) / (self.ra.sum(-1) + EPSILON)
+        rms_error = (rms_error * self.valid).sum(-1) / (self.valid.sum(-1) + EPSILON)
         rms_error = rms_error.sqrt()
         
         # Average RMS error
@@ -121,9 +117,10 @@ class Ray(DeepObj):
         """
         self.o = self.o.squeeze(dim)
         self.d = self.d.squeeze(dim)
-        self.ra = self.ra.squeeze(dim)
+        self.wvln = self.wvln.squeeze(dim)
         self.valid = self.valid.squeeze(dim)
         self.en = self.en.squeeze(dim)
         self.opl = self.opl.squeeze(dim)
         self.obliq = self.obliq.squeeze(dim)
+        self.is_forward = self.is_forward.squeeze(dim)
         return self

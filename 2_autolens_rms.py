@@ -111,41 +111,42 @@ def curriculum_design(
         # Evaluate the lens
         # =======================================
         if i % test_per_iter == 0:
-            # Curriculum learning: gradually change aperture size
-            aper_r = min(
-                (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
-                aper_final,
-            )
-            # aper_r = aper_scheduler(i, iterations, self.surfaces[self.aper_idx].r)
-            self.surfaces[self.aper_idx].r = aper_r
-            self.fnum = self.foclen / aper_r / 2
-
-            # Correct lens shape and evaluate current design
-            if i > 0:
-                if shape_control:
-                    self.correct_shape()
-
-                if optim_mat and match_mat:
-                    self.match_materials()
-
-            # Save lens
-            self.write_lens_json(f"{result_dir}/iter{i}.json")
-            self.analysis(f"{result_dir}/iter{i}")
-
-            # Sample new rays and calculate target centers
-            rays_backup = []
-            for wv in WAVE_RGB:
-                ray = self.sample_grid_rays(
-                    num_grid=num_grid,
-                    depth=depth,
-                    num_rays=spp,
-                    wvln=wv,
-                    sample_more_off_axis=sample_more_off_axis,
+            with torch.no_grad():
+                # Curriculum learning: gradually change aperture size
+                aper_r = min(
+                    (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
+                    aper_final,
                 )
-                rays_backup.append(ray)
+                # aper_r = aper_scheduler(i, iterations, self.surfaces[self.aper_idx].r)
+                self.surfaces[self.aper_idx].r = aper_r
+                self.update_float_setting()
 
-            center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
-            center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
+                # Correct lens shape and evaluate current design
+                if i > 0:
+                    if shape_control:
+                        self.correct_shape()
+
+                    if optim_mat and match_mat:
+                        self.match_materials()
+
+                # Save lens
+                self.write_lens_json(f"{result_dir}/iter{i}.json")
+                self.analysis(f"{result_dir}/iter{i}")
+
+                # Sample new rays and calculate target centers
+                rays_backup = []
+                for wv in WAVE_RGB:
+                    ray = self.sample_grid_rays(
+                        num_grid=num_grid,
+                        depth=depth,
+                        num_rays=spp,
+                        wvln=wv,
+                        sample_more_off_axis=sample_more_off_axis,
+                    )
+                    rays_backup.append(ray)
+
+                center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+                center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =======================================
         # Optimize lens by minimizing rms
@@ -158,7 +159,7 @@ def curriculum_design(
 
             # Ray error to center and valid mask
             ray_xy = ray.o[..., :2]
-            ray_ra = ray.ra
+            ray_valid = ray.valid
             ray_err = ray_xy - center_ref
 
             # # Use only quater of rays
@@ -168,14 +169,14 @@ def curriculum_design(
             # Weight mask (non-differentiable), shape of [num_grid, num_grid]
             if wv_idx == 0:
                 with torch.no_grad():
-                    weight_mask = ((ray_err**2).sum(-1) * ray_ra).sum(-1)
-                    weight_mask /= ray_ra.sum(-1) + EPSILON
+                    weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
+                    weight_mask /= ray_valid.sum(-1) + EPSILON
                     weight_mask = weight_mask.sqrt()
                     weight_mask /= weight_mask.mean()
 
             # Loss on rms error, shape of [num_grid, num_grid]
-            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_ra).sum(-1)
-            l_rms /= ray_ra.sum(-1) + EPSILON
+            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+            l_rms /= ray_valid.sum(-1) + EPSILON
 
             # Weighted loss
             l_rms_weighted = (l_rms * weight_mask).sum()
@@ -252,7 +253,7 @@ if __name__ == "__main__":
         match_mat=False,
         shape_control=True,
         sample_more_off_axis=True,
-        result_dir=args["result_dir"],
+        result_dir=f"{args['result_dir']}/fine-tune",
     )
 
     # =====> 3. Analyze final result
