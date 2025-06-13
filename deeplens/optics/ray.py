@@ -57,7 +57,7 @@ class Ray(DeepObj):
         self.o = new_o
 
         if self.coherent:
-            if t.min().abs() > 100 and torch.get_default_dtype() == torch.float32:
+            if t.min().abs() > 100 and t.dtype == torch.float32:
                 raise Warning(
                     "Should use float64 in coherent ray tracing for precision."
                 )
