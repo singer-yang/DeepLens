@@ -187,7 +187,7 @@ def curriculum_design(
         loss_rms = sum(loss_rms) / len(loss_rms)
 
         # Add lens design constraint
-        loss_reg = self.loss_reg()
+        loss_reg, loss_dict = self.loss_reg()
         w_reg = 0.05
         L_total = loss_rms + w_reg * loss_reg
 
@@ -197,7 +197,7 @@ def curriculum_design(
         optimizer.step()
         scheduler.step()
 
-        pbar.set_postfix(loss_rms=loss_rms.item(), loss_reg=loss_reg.item())
+        pbar.set_postfix(loss_rms=loss_rms.item(), **loss_dict)
         pbar.update(1)
 
     pbar.close()

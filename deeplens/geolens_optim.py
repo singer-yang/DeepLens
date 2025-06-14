@@ -38,8 +38,8 @@ from deeplens.utils import set_logger
 
 
 class GeoLensOptim:
-    """This class contains the optimization functions for the geometric lens design.
-    """
+    """This class contains the optimization functions for the geometric lens design."""
+
     # ================================================================
     # Lens design constraints
     # ================================================================
@@ -48,6 +48,7 @@ class GeoLensOptim:
         if self.r_sensor < 12.0:
             self.is_cellphone = True
 
+            # Self intersection constraints
             self.dist_min = 0.05
             self.dist_max = 0.6
             self.thickness_min = 0.25
@@ -55,54 +56,60 @@ class GeoLensOptim:
             self.flange_min = 0.25
             self.flange_max = 3.0
 
+            # Surface curvature constraints
             self.sag_max = 2.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
+
+            # Chief ray angle constraints
+            self.chief_ray_angle_max = 20.0
         else:
             self.is_cellphone = False
 
+            # Self intersection constraints
             self.dist_min = 0.1
-            self.dist_max = 50.0 #float("inf")
+            self.dist_max = 50.0  # float("inf")
             self.thickness_min = 0.3
-            self.thickness_max = 50.0 #float("inf")
+            self.thickness_max = 50.0  # float("inf")
             self.flange_min = 0.5
-            self.flange_max = 50.0 #float("inf")
+            self.flange_max = 50.0  # float("inf")
 
+            # Surface curvature constraints
             self.sag_max = 10.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
 
+            # Chief ray angle constraints
+            self.chief_ray_angle_max = 20.0
+
     # ================================================================
     # Lens design loss functions
     # ================================================================
-    def loss_reg(self, w_focus=None):
-        """An empirical regularization loss for lens design. By default we should use weight 0.1 * self.loss_reg() in the total loss."""
+    def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=1.0):
+        """An empirical regularization loss for lens design. 
+        
+        By default we should use weight 0.1 * self.loss_reg() in the total loss.
+        """
+        # Loss functions for regularization
         loss_focus = self.loss_infocus()
+        loss_intersec = self.loss_self_intersec()
+        loss_surf = self.loss_surface()
+        loss_chief_ray_angle = self.loss_chief_ray_angle()
+        loss_reg = (
+            w_focus * loss_focus
+            + w_intersec * loss_intersec
+            + w_surf * loss_surf
+            + w_chief_ray_angle * loss_chief_ray_angle
+        )
 
-        if self.is_cellphone:
-            loss_intersec = self.loss_self_intersec()
-            loss_surf = self.loss_surface()
-            # loss_angle = self.loss_ray_angle()
-
-            w_focus = 2.0 if w_focus is None else w_focus
-            loss_reg = (
-                w_focus * loss_focus + 1.0 * loss_intersec 
-                + 1.0 * loss_surf 
-                # + 0.1 * loss_angle
-            )
-        else:
-            loss_intersec = self.loss_self_intersec()
-            loss_surf = self.loss_surface()
-            # loss_angle = self.loss_ray_angle()
-
-            w_focus = 5.0 if w_focus is None else w_focus
-            loss_reg = (
-                w_focus * loss_focus + 1.0 * loss_intersec 
-                + 1.0 * loss_surf 
-                # + 0.05 * loss_angle
-            )
-
-        return loss_reg
+        # Return loss and loss dictionary
+        loss_dict = {
+            'loss_focus': loss_focus.item(),
+            'loss_intersec': loss_intersec.item(),
+            'loss_surf': loss_surf.item(),
+            'loss_chief_ray_angle': loss_chief_ray_angle.item(),
+        }
+        return loss_reg, loss_dict
 
     def loss_infocus(self, target=0.005):
         """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
@@ -111,17 +118,17 @@ class GeoLensOptim:
             target (float, optional): target of RMS loss. Defaults to 0.005 [mm].
         """
         loss = torch.tensor(0.0, device=self.device)
-        for wv in WAVE_RGB:
-            # Ray tracing and calculate RMS error
-            ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, wvln=wv)
-            ray = self.trace2sensor(ray)
-            rms_error = ray.rms_error()
+        # for wv in WAVE_RGB:
+        # Ray tracing and calculate RMS error
+        ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, wvln=WAVE_RGB[1])
+        ray = self.trace2sensor(ray)
+        rms_error = ray.rms_error()
 
-            # If RMS error is larger than target, add it to loss
-            if rms_error > target:
-                loss += rms_error
+        # If RMS error is larger than target, add it to loss
+        if rms_error > target:
+            loss += rms_error
 
-        return loss / len(WAVE_RGB)
+        return loss #/ len(WAVE_RGB)
 
     def loss_rms(
         self,
@@ -156,7 +163,7 @@ class GeoLensOptim:
             # Calculate reference center, shape of (..., 2)
             if i == 0:
                 with torch.no_grad():
-                    ray_center_green = - self.psf_center(
+                    ray_center_green = -self.psf_center(
                         point=ray.o[:, :, 0, :], method="pinhole"
                     )
 
@@ -218,7 +225,8 @@ class GeoLensOptim:
             # error
             rms_error = torch.mean(
                 (
-                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1) / (ray.valid.sum(-1) + EPSILON)
+                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1)
+                    / (ray.valid.sum(-1) + EPSILON)
                 ).sqrt()
             )
 
@@ -312,7 +320,7 @@ class GeoLensOptim:
             if not self.surfaces[i].mat2.name == "air":
                 surf2 = self.surfaces[i + 1]
                 surf1 = self.surfaces[i]
-                
+
                 # Penalize diameter to thickness ratio
                 d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
                 if d_to_t > d_to_t_max:
@@ -323,13 +331,13 @@ class GeoLensOptim:
                 thick_center = surf2.d - surf1.d
                 thick_edge = surf2.surface_with_offset(r_edge, 0.0) - surf1.surface_with_offset(r_edge, 0.0)
                 if thick_center > thick_edge:
-                    tmax_to_tmin = thick_center / thick_edge    
+                    tmax_to_tmin = thick_center / thick_edge
                 else:
                     tmax_to_tmin = thick_edge / thick_center
 
                 if tmax_to_tmin > tmax_to_tmin_max:
                     loss_tmax_to_tmin += tmax_to_tmin
-            
+
         return loss + loss_d_to_t + loss_tmax_to_tmin
 
     def loss_self_intersec(self):
@@ -357,17 +365,24 @@ class GeoLensOptim:
             z_front = current_surf.surface_with_offset(r, 0.0)
             z_next = next_surf.surface_with_offset(r, 0.0)
 
-            # Minimum and maximum distance between surfaces
-            dist_min = torch.min(z_next - z_front)
-            dist_max = torch.max(z_next - z_front)
             if self.surfaces[i].mat2.name == "air":
+                # Constrain minimum distance between surfaces
+                dist_min = torch.min(z_next - z_front)
                 if dist_min < space_min_allowed:
                     loss_min += dist_min
+
+                # Constrain maximum center distance between surfaces
+                dist_max = z_next[0] - z_front[0]
                 if dist_max > space_max_allowed:
                     loss_max += dist_max
             else:
+                # Constrain minimum distance of elements
+                dist_min = torch.min(z_next - z_front)
                 if dist_min < thickness_min_allowed:
                     loss_min += dist_min
+
+                # Constrain maximum distance of elements
+                dist_max = torch.max(z_next - z_front)
                 if dist_max > thickness_max_allowed:
                     loss_max += dist_max
 
@@ -409,6 +424,30 @@ class GeoLensOptim:
         # We want to maximize ray angle term
         return -loss
 
+    def loss_chief_ray_angle(self):
+        """Chief ray angle loss function."""
+        max_angle_deg = self.chief_ray_angle_max
+
+        # Ray tracing
+        ray = self.sample_grid_rays(
+            num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25
+        )
+        ray = self.trace2sensor(ray)
+
+        # Calculate chief ray angle
+        cos_cra = ray.d[..., 2]
+        cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
+        cos_cra = torch.where(
+            cos_cra < cos_cra_ref,
+            cos_cra,
+            torch.tensor(cos_cra_ref, device=self.device),
+        )
+
+        # Loss
+        loss = -cos_cra.mean()
+
+        return loss
+
     # ================================================================
     # Example optimization function
     # ================================================================
@@ -416,7 +455,7 @@ class GeoLensOptim:
         self,
         lrs=[1e-3, 1e-4, 1e-1, 1e-4],
         decay=0.001,
-        iterations=2000,
+        iterations=5000,
         test_per_iter=100,
         centroid=False,
         optim_mat=False,
@@ -437,14 +476,16 @@ class GeoLensOptim:
         """
         # Preparation
         depth = DEPTH
-        num_grid = 41
-        spp = 512
+        num_grid = 21
+        spp = 1024
 
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
         if result_dir is None:
-            result_dir = f"./results/{datetime.now().strftime('%m%d-%H%M%S')}-DesignLens"   
-        
+            result_dir = (
+                f"./results/{datetime.now().strftime('%m%d-%H%M%S')}-DesignLens"
+            )
+
         os.makedirs(result_dir, exist_ok=True)
         if not logging.getLogger().hasHandlers():
             set_logger(result_dir)
@@ -459,7 +500,9 @@ class GeoLensOptim:
 
         # Training loop
         pbar = tqdm(
-            total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0}
+            total=iterations + 1,
+            desc="Progress",
+            postfix={"loss_rms": 0},
         )
         for i in range(iterations + 1):
             # ===> Evaluate the lens
@@ -527,7 +570,7 @@ class GeoLensOptim:
                     with torch.no_grad():
                         weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                         weight_mask /= ray_valid.sum(-1) + EPSILON
-                        weight_mask = weight_mask.sqrt()
+                        weight_mask = weight_mask
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
@@ -542,7 +585,7 @@ class GeoLensOptim:
             loss_rms = sum(loss_rms_ls) / len(loss_rms_ls)
 
             # Total loss
-            loss_reg = self.loss_reg()
+            loss_reg, loss_dict = self.loss_reg()
             w_reg = 0.05
             L_total = loss_rms + w_reg * loss_reg
 
@@ -552,7 +595,7 @@ class GeoLensOptim:
             optimizer.step()
             scheduler.step()
 
-            pbar.set_postfix(loss_rms=loss_rms.item(), loss_reg=loss_reg.item())
+            pbar.set_postfix(loss_rms=loss_rms.item(), **loss_dict)
             pbar.update(1)
 
         pbar.close()
