@@ -82,9 +82,6 @@ class GeoLensOptim:
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
 
-    # ================================================================
-    # Lens design loss functions
-    # ================================================================
     def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=1.0):
         """An empirical regularization loss for lens design. 
         
@@ -129,167 +126,18 @@ class GeoLensOptim:
             loss += rms_error
 
         return loss #/ len(WAVE_RGB)
-
-    def loss_rms(
-        self,
-        num_grid=GEO_GRID,
-        depth=DEPTH,
-        num_rays=SPP_PSF,
-        sample_more_off_axis=False,
-    ):
-        """Compute average RMS errors. Baseline RMS loss function.
-
-        Compared to the loss function developed in the paper, this loss function doesnot have a weight mask.
-
-        Args:
-            num_grid (int, optional): Number of grid points. Defaults to GEO_GRID.
-            depth (float, optional): Depth of the lens. Defaults to DEPTH.
-            num_rays (int, optional): Number of rays. Defaults to SPP_CALC.
-            sample_more_off_axis (bool, optional): Whether to sample more off-axis rays. Defaults to False.
-
-        Returns:
-            avg_rms_error (torch.Tensor): RMS error averaged over wavelengths and grid points.
-        """
-        all_rms_errors = []
-        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-            ray = self.sample_grid_rays(
-                num_grid=num_grid,
-                depth=depth,
-                num_rays=num_rays,
-                wvln=wvln,
-                sample_more_off_axis=sample_more_off_axis,
-            )
-
-            # Calculate reference center, shape of (..., 2)
-            if i == 0:
-                with torch.no_grad():
-                    ray_center_green = -self.psf_center(
-                        point=ray.o[:, :, 0, :], method="pinhole"
-                    )
-
-            ray = self.trace2sensor(ray)
-
-            # # Green light point center for reference
-            # if i == 0:
-            #     with torch.no_grad():
-            #         ray_center_green = ray.centroid()
-
-            # Calculate RMS error with reference center
-            rms_error = ray.rms_error(center_ref=ray_center_green)
-            all_rms_errors.append(rms_error)
-
-        # Calculate average RMS error
-        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-        return avg_rms_error
-
-    def loss_rms_infinite(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC):
-        """Compute RGB RMS error per pixel using Zernike polynomials.
-
-        Args:
-            num_fields: Number of fields. Defaults to 3.
-            depth: object space depth. Defaults to DEPTH.
-        """
-        # calculate fov_x and fov_y
-        [H, W] = self.sensor_res
-        tan_fov_y = np.sqrt(np.tan(self.hfov) ** 2 / (1 + W**2 / H**2))
-        tan_fov_x = np.sqrt(np.tan(self.hfov) ** 2 - tan_fov_y**2)
-        fov_y = np.rad2deg(np.arctan(tan_fov_y))
-        fov_x = np.rad2deg(np.arctan(tan_fov_x))
-        fov_y = torch.linspace(0.0, fov_y, num_grid).tolist()
-        fov_x = torch.linspace(0.0, fov_x, num_grid).tolist()
-
-        # calculate RMS error
-        all_rms_errors = []
-        all_rms_radii = []
-        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-            # Ray tracing
-            ray = self.sample_parallel(
-                fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth
-            )
-            ray = self.trace2sensor(ray)
-
-            # Green light point center for reference
-            if i == 0:
-                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(
-                    -2
-                ) / ray.valid.sum(-1).add(EPSILON).unsqueeze(
-                    -1
-                )  # shape [1, num_fields, 2]
-                pointc_green = pointc_green.unsqueeze(-2).repeat(
-                    1, 1, SPP_PSF, 1
-                )  # shape [num_fields, num_fields, num_rays, 2]
-
-            # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.valid.unsqueeze(-1)
-
-            # error
-            rms_error = torch.mean(
-                (
-                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1)
-                    / (ray.valid.sum(-1) + EPSILON)
-                ).sqrt()
-            )
-
-            # radius
-            rms_radius = torch.mean(
-                ((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values
-            )
-            all_rms_errors.append(rms_error)
-            all_rms_radii.append(rms_radius)
-
-        # Calculate and print average across wavelengths
-        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-        avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-
-        return avg_rms_error
-
-    # def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
-    #     """Loss function designed on the MTF. We want to maximize MTF values."""
-    #     loss = 0.0
-    #     for fov in relative_fov:
-    #         # ==> Calculate PSF
-    #         point = torch.tensor([fov, fov, depth])
-    #         psf = self.psf(points=point, wvln=wvln, ks=256)
-
-    #         # ==> Calculate MTF
-    #         x = torch.linspace(-1, 1, psf.shape[1]) * self.pixel_size * psf.shape[1] / 2
-    #         y = torch.linspace(-1, 1, psf.shape[0]) * self.pixel_size * psf.shape[0] / 2
-
-    #         # Extract 1D PSFs along the sagittal and tangential directions
-    #         center_x = psf.shape[1] // 2
-    #         center_y = psf.shape[0] // 2
-    #         sagittal_psf = psf[center_y, :]
-    #         tangential_psf = psf[:, center_x]
-
-    #         # Fourier Transform to get the MTFs
-    #         sagittal_mtf = torch.abs(torch.fft.fft(sagittal_psf))
-    #         tangential_mtf = torch.abs(torch.fft.fft(tangential_psf))
-
-    #         # Normalize the MTFs
-    #         sagittal_mtf /= sagittal_mtf.max().detach()
-    #         tangential_mtf /= tangential_mtf.max().detach()
-    #         delta_x = self.pixel_size
-
-    #         # Create frequency axis in cycles/mm
-    #         freq = np.fft.fftfreq(psf.shape[0], delta_x)
-
-    #         # Only keep the positive frequencies
-    #         positive_freq_idx = freq > 0
-
-    #         loss += torch.sum(
-    #             sagittal_mtf[positive_freq_idx] + tangential_mtf[positive_freq_idx]
-    #         ) / len(positive_freq_idx)
-
-    #     return -loss
-
+    
     def loss_surface(self, d_to_t_max=10.0, tmax_to_tmin_max=5.0):
-        """Penalize surface to prevent surface from being too curved.
-
-        Loss is designed by the maximum sag, first-order derivative, and second-order derivative.
+        """Penalize surface shape:
+            1. Penalize maximum sag
+            2. Penalize diameter to thickness ratio
+            3. Penalize thick_max to thick_min ratio
+            4. Penalize diameter to thickness ratio
+            5. Penalize maximum to minimum thickness ratio
         """
         sag_max_allowed = self.sag_max
-        grad_max_allowed = self.grad_max
-        grad2_max_allowed = self.grad2_max
+        # grad_max_allowed = self.grad_max
+        # grad2_max_allowed = self.grad2_max
 
         loss = torch.tensor(0.0, device=self.device)
         loss_d_to_t = torch.tensor(0.0, device=self.device)
@@ -447,6 +295,161 @@ class GeoLensOptim:
         loss = -cos_cra.mean()
 
         return loss
+    
+    # ================================================================
+    # Loss functions for image quality
+    # ================================================================
+    def loss_rms(
+        self,
+        num_grid=GEO_GRID,
+        depth=DEPTH,
+        num_rays=SPP_PSF,
+        sample_more_off_axis=False,
+    ):
+        """Compute average RMS errors. Baseline RMS loss function.
+
+        Compared to the loss function developed in the paper, this loss function doesnot have a weight mask.
+
+        Args:
+            num_grid (int, optional): Number of grid points. Defaults to GEO_GRID.
+            depth (float, optional): Depth of the lens. Defaults to DEPTH.
+            num_rays (int, optional): Number of rays. Defaults to SPP_CALC.
+            sample_more_off_axis (bool, optional): Whether to sample more off-axis rays. Defaults to False.
+
+        Returns:
+            avg_rms_error (torch.Tensor): RMS error averaged over wavelengths and grid points.
+        """
+        all_rms_errors = []
+        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
+            ray = self.sample_grid_rays(
+                num_grid=num_grid,
+                depth=depth,
+                num_rays=num_rays,
+                wvln=wvln,
+                sample_more_off_axis=sample_more_off_axis,
+            )
+
+            # Calculate reference center, shape of (..., 2)
+            if i == 0:
+                with torch.no_grad():
+                    ray_center_green = -self.psf_center(
+                        point=ray.o[:, :, 0, :], method="pinhole"
+                    )
+
+            ray = self.trace2sensor(ray)
+
+            # # Green light point center for reference
+            # if i == 0:
+            #     with torch.no_grad():
+            #         ray_center_green = ray.centroid()
+
+            # Calculate RMS error with reference center
+            rms_error = ray.rms_error(center_ref=ray_center_green)
+            all_rms_errors.append(rms_error)
+
+        # Calculate average RMS error
+        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
+        return avg_rms_error
+
+    def loss_rms_infinite(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC):
+        """Compute RGB RMS error per pixel using Zernike polynomials.
+
+        Args:
+            num_fields: Number of fields. Defaults to 3.
+            depth: object space depth. Defaults to DEPTH.
+        """
+        # calculate fov_x and fov_y
+        [H, W] = self.sensor_res
+        tan_fov_y = np.sqrt(np.tan(self.hfov) ** 2 / (1 + W**2 / H**2))
+        tan_fov_x = np.sqrt(np.tan(self.hfov) ** 2 - tan_fov_y**2)
+        fov_y = np.rad2deg(np.arctan(tan_fov_y))
+        fov_x = np.rad2deg(np.arctan(tan_fov_x))
+        fov_y = torch.linspace(0.0, fov_y, num_grid).tolist()
+        fov_x = torch.linspace(0.0, fov_x, num_grid).tolist()
+
+        # calculate RMS error
+        all_rms_errors = []
+        all_rms_radii = []
+        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
+            # Ray tracing
+            ray = self.sample_parallel(
+                fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth
+            )
+            ray = self.trace2sensor(ray)
+
+            # Green light point center for reference
+            if i == 0:
+                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(
+                    -2
+                ) / ray.valid.sum(-1).add(EPSILON).unsqueeze(
+                    -1
+                )  # shape [1, num_fields, 2]
+                pointc_green = pointc_green.unsqueeze(-2).repeat(
+                    1, 1, SPP_PSF, 1
+                )  # shape [num_fields, num_fields, num_rays, 2]
+
+            # Calculate RMS error for different FoVs
+            o2_norm = (ray.o[..., :2] - pointc_green) * ray.valid.unsqueeze(-1)
+
+            # error
+            rms_error = torch.mean(
+                (
+                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1)
+                    / (ray.valid.sum(-1) + EPSILON)
+                ).sqrt()
+            )
+
+            # radius
+            rms_radius = torch.mean(
+                ((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values
+            )
+            all_rms_errors.append(rms_error)
+            all_rms_radii.append(rms_radius)
+
+        # Calculate and print average across wavelengths
+        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
+        avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
+
+        return avg_rms_error
+
+    # def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
+    #     """Loss function designed on the MTF. We want to maximize MTF values."""
+    #     loss = 0.0
+    #     for fov in relative_fov:
+    #         # ==> Calculate PSF
+    #         point = torch.tensor([fov, fov, depth])
+    #         psf = self.psf(points=point, wvln=wvln, ks=256)
+
+    #         # ==> Calculate MTF
+    #         x = torch.linspace(-1, 1, psf.shape[1]) * self.pixel_size * psf.shape[1] / 2
+    #         y = torch.linspace(-1, 1, psf.shape[0]) * self.pixel_size * psf.shape[0] / 2
+
+    #         # Extract 1D PSFs along the sagittal and tangential directions
+    #         center_x = psf.shape[1] // 2
+    #         center_y = psf.shape[0] // 2
+    #         sagittal_psf = psf[center_y, :]
+    #         tangential_psf = psf[:, center_x]
+
+    #         # Fourier Transform to get the MTFs
+    #         sagittal_mtf = torch.abs(torch.fft.fft(sagittal_psf))
+    #         tangential_mtf = torch.abs(torch.fft.fft(tangential_psf))
+
+    #         # Normalize the MTFs
+    #         sagittal_mtf /= sagittal_mtf.max().detach()
+    #         tangential_mtf /= tangential_mtf.max().detach()
+    #         delta_x = self.pixel_size
+
+    #         # Create frequency axis in cycles/mm
+    #         freq = np.fft.fftfreq(psf.shape[0], delta_x)
+
+    #         # Only keep the positive frequencies
+    #         positive_freq_idx = freq > 0
+
+    #         loss += torch.sum(
+    #             sagittal_mtf[positive_freq_idx] + tangential_mtf[positive_freq_idx]
+    #         ) / len(positive_freq_idx)
+
+    #     return -loss
 
     # ================================================================
     # Example optimization function
