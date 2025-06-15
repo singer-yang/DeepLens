@@ -2210,7 +2210,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             surf = self.surfaces[i]
 
             if isinstance(surf, Aperture):
-                params += surf.get_optimizer_params(lr=lr, decay=decay)
+                params += surf.get_optimizer_params(lr=lr[1], decay=decay)
 
             elif isinstance(surf, Aspheric):
                 params += surf.get_optimizer_params(
@@ -2230,8 +2230,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
 
             elif isinstance(surf, Plane):
-                print(f"Plane {i} can not be optimized.")
-                pass
+                params += surf.get_optimizer_params(lr=lr[1])
 
             # elif isinstance(surf, PolyEven):
             #     params += surf.get_optimizer_params(lr=lr, optim_mat=optim_mat)

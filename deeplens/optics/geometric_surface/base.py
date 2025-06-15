@@ -74,7 +74,6 @@ class Surface(DeepObj):
 
         # Update rays
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-        # new_o[~valid] = ray.o[~valid]
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
         ray.valid = ray.valid * valid
 
@@ -103,14 +102,13 @@ class Surface(DeepObj):
         else:
             d_surf = self.d
 
-        # 1. Inital guess of t
-        # Note: Sometimes the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error
-        t0 = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
-
-        # 2. Non-differentiable Newton's method to update t and find the intersection points
+        # 1. Non-differentiable Newton's method to update t and find the intersection points
         with torch.no_grad():
+            # Initial guess of t
+            # Note: Sometimes the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error
+            t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
+
             it = 0
-            t = t0  # initial guess of t
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
             while (torch.abs(ft) > NEWTONS_TOLERANCE).any() and (
                 it < NEWTONS_MAXITER
@@ -126,16 +124,12 @@ class Surface(DeepObj):
                 dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
-                    ft / (dfdt + 1e-12),
+                    ft / (dfdt + EPSILON),
                     -NEWTONS_STEP_BOUND,
                     NEWTONS_STEP_BOUND,
                 )
 
-            t1 = t - t0
-
-        # 3. One more Newton iteration (differentiable) to gain gradients
-        t = t0 + t1
-
+        # 2. One more Newton iteration (differentiable) to gain gradients
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_x, new_y = new_o[..., 0], new_o[..., 1]
         valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
@@ -144,7 +138,7 @@ class Surface(DeepObj):
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
         dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
-        t = t - torch.clamp(ft / (dfdt + 1e-9), -NEWTONS_STEP_BOUND, NEWTONS_STEP_BOUND)
+        t = t - torch.clamp(ft / (dfdt + EPSILON), -NEWTONS_STEP_BOUND, NEWTONS_STEP_BOUND)
 
         # 4. Determine valid solutions
         with torch.no_grad():
@@ -216,13 +210,14 @@ class Surface(DeepObj):
         normal_vec = self.normal_vec(ray)
 
         # Reflect
-        ray.is_forward = not ray.is_forward
+        ray.is_forward = ~ray.is_forward
         cos_alpha = -(normal_vec * ray.d).sum(-1).unsqueeze(-1)
         new_d = ray.d + 2 * cos_alpha * normal_vec
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
-        ray.d = torch.where(ray.valid.unsqueeze(-1), new_d, ray.d)
+        valid_mask = ray.valid > 0
+        ray.d = torch.where(valid_mask.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
