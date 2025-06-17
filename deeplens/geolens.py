@@ -971,11 +971,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
-            # ======>
-            # # Pinhole camera perspective projection.
-            # scale = self.calc_scale_pinhole(point[..., 2])
-            # psf_center = point[..., :2] / scale.unsqueeze(-1)
-            # ======>
+            # Pinhole camera perspective projection
             # Calculate the FoV of incident ray, then map to sensor plane
             tan_point_fov_x = -point[..., 0] / point[..., 2]
             tan_point_fov_y = -point[..., 1] / point[..., 2]
@@ -984,14 +980,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             psf_center_x = tan_point_fov_x / tan_hfov_x * self.sensor_size[1] / 2
             psf_center_y = tan_point_fov_y / tan_hfov_y * self.sensor_size[0] / 2
             psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1)
-            # ======>
 
         else:
             raise ValueError(f"Unsupported method: {method}.")
 
         return psf_center
 
-    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=True):
+    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=False):
         """Single wvln incoherent PSF calculation.
 
         Args:
