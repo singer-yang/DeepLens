@@ -60,6 +60,8 @@ class GeoLensOptim:
             self.sag_max = 2.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
+            self.d_to_t_max = 10.0
+            self.tmax_to_tmin_max = 5.0
 
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
@@ -78,6 +80,8 @@ class GeoLensOptim:
             self.sag_max = 10.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
+            self.d_to_t_max = 10.0
+            self.tmax_to_tmin_max = 5.0
 
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
@@ -127,7 +131,7 @@ class GeoLensOptim:
 
         return loss #/ len(WAVE_RGB)
     
-    def loss_surface(self, d_to_t_max=10.0, tmax_to_tmin_max=5.0):
+    def loss_surface(self):
         """Penalize surface shape:
             1. Penalize maximum sag
             2. Penalize diameter to thickness ratio
@@ -136,8 +140,10 @@ class GeoLensOptim:
             5. Penalize maximum to minimum thickness ratio
         """
         sag_max_allowed = self.sag_max
-        # grad_max_allowed = self.grad_max
-        # grad2_max_allowed = self.grad2_max
+        grad_max_allowed = self.grad_max
+        grad2_max_allowed = self.grad2_max
+        d_to_t_max = self.d_to_t_max
+        tmax_to_tmin_max = self.tmax_to_tmin_max
 
         loss = torch.tensor(0.0, device=self.device)
         loss_d_to_t = torch.tensor(0.0, device=self.device)
@@ -153,17 +159,17 @@ class GeoLensOptim:
             if sag_max > sag_max_allowed:
                 loss += sag_max
 
-            # # 1st-order derivative
-            # grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
-            # grad_max = grad_ls.abs().max()
-            # if grad_max > grad_max_allowed:
-            #     loss += 10 * grad_max
+            # 1st-order derivative
+            grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
+            grad_max = grad_ls.abs().max()
+            if grad_max > grad_max_allowed:
+                loss += 10 * grad_max
 
-            # # 2nd-order derivative
-            # grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
-            # grad2_max = grad2_ls.abs().max()
-            # if grad2_max > grad2_max_allowed:
-            #     loss += 10 * grad2_max
+            # 2nd-order derivative
+            grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
+            grad2_max = grad2_ls.abs().max()
+            if grad2_max > grad2_max_allowed:
+                loss += 10 * grad2_max
 
             if not self.surfaces[i].mat2.name == "air":
                 surf2 = self.surfaces[i + 1]
@@ -564,9 +570,9 @@ class GeoLensOptim:
                 ray_valid = ray.valid
                 ray_err = ray_xy - center_ref
 
-                # # Use only quater of the sensor
-                # ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-                # ray_valid = ray_valid[num_grid // 2 :, num_grid // 2 :, :]
+                # Use only quater of the sensor
+                ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
+                ray_valid = ray_valid[num_grid // 2 :, num_grid // 2 :, :]
 
                 # Weight mask, shape of [num_grid, num_grid]
                 if wv_idx == 0:
