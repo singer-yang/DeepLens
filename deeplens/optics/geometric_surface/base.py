@@ -353,9 +353,9 @@ class Surface(DeepObj):
         return d2f_dx2, d2f_dxdy, d2f_dy2, d2f_dxdz, d2f_dydz, d2f_dz2
 
     def _d2fdxy(self, x, y):
-        """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdxdy, d2gdy2) =  (g''xx, g''xy, g''yy).
+        """Compute second-order derivatives of sag to x and y. (d2fdx2, d2fdxdy, d2fdy2) =  (f''xx, f''xy, f''yy).
 
-        As the second-order derivatives are not commonly used in the lens design, we just return zeros.
+        Currently, we use finite difference method to compute the second-order derivatives. And the second-order derivatives are only used for surface constraints.
 
         Args:
             x (tensor): x coordinate
@@ -366,7 +366,12 @@ class Surface(DeepObj):
             d2fdxdy (tensor): d2f / dxdy
             d2fdy2 (tensor): d2f / dy2
         """
-        return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+        delta_x = 1e-6
+        delta_y = 1e-6
+        d2fdx2 = (self._dfdxy(x + delta_x, y)[0] - self._dfdxy(x - delta_x, y)[0]) / (2 * delta_x)
+        d2fdy2 = (self._dfdxy(x, y + delta_y)[1] - self._dfdxy(x, y - delta_y)[1]) / (2 * delta_y)
+        d2fdxy = (self._dfdxy(x + delta_x, y)[1] - self._dfdxy(x - delta_x, y)[1]) / (2 * delta_x)
+        return d2fdx2, d2fdxy, d2fdy2
 
     def is_valid(self, x, y):
         """Valid points within the data range and boundary of the surface."""
