@@ -2,7 +2,7 @@
     <img src="imgs/logo.png"/>
 </div>
 
-**DeepLens** is an open-source differentiable lens simulator. It is designed for automated optical design and end-to-end optics-sensor-network optimization. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
+**DeepLens** is an open-source differentiable optics simulator. It is developed for (1) differentiable optical design and (2) end-to-end computational cameras. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
 
 ## Contact
 
