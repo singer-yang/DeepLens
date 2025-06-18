@@ -8,7 +8,7 @@ from deeplens.optics.geometric_surface.spheric import Spheric
 from deeplens.optics.geometric_surface.aspheric import Aspheric
 
 class GeoLensIO:
-    def read_zmx(self, filename="./test.zmx"):
+    def read_lens_zmx(self, filename="./test.zmx"):
         """Load the lens from .zmx file."""
         # Read .zmx file
         try:
@@ -107,7 +107,7 @@ class GeoLensIO:
         return self
 
 
-    def write_zmx(self, filename="./test.zmx"):
+    def write_lens_zmx(self, filename="./test.zmx"):
         """Write the lens into .zmx file."""
         lens_zmx_str = ""
         if self.float_enpd:
