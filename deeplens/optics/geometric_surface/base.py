@@ -14,9 +14,7 @@ from deeplens.optics.materials import Material
 NEWTONS_MAXITER = 10  # maximum number of Newton iterations
 NEWTONS_TOLERANCE = 50 * 1e-6  # [mm], Newton method solution threshold
 NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in each Newton iteration
-
-EPSILON = 1e-9
-
+EPSILON = 1e-12
 
 class Surface(DeepObj):
     def __init__(self, r, d, mat2, is_square=False, device="cpu"):
@@ -76,7 +74,6 @@ class Surface(DeepObj):
 
         # Update rays
         new_o = ray.o + ray.d * t.unsqueeze(-1)
-        # new_o[~valid] = ray.o[~valid]
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
         ray.valid = ray.valid * valid
 
@@ -105,14 +102,13 @@ class Surface(DeepObj):
         else:
             d_surf = self.d
 
-        # 1. Inital guess of t
-        # Note: Sometimes the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error
-        t0 = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
-
-        # 2. Non-differentiable Newton's method to update t and find the intersection points
+        # 1. Non-differentiable Newton's method to update t and find the intersection points
         with torch.no_grad():
+            # Initial guess of t
+            # Note: Sometimes the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error
+            t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
+
             it = 0
-            t = t0  # initial guess of t
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
             while (torch.abs(ft) > NEWTONS_TOLERANCE).any() and (
                 it < NEWTONS_MAXITER
@@ -128,16 +124,12 @@ class Surface(DeepObj):
                 dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
-                    ft / (dfdt + 1e-12),
+                    ft / (dfdt + EPSILON),
                     -NEWTONS_STEP_BOUND,
                     NEWTONS_STEP_BOUND,
                 )
 
-            t1 = t - t0
-
-        # 3. One more Newton iteration (differentiable) to gain gradients
-        t = t0 + t1
-
+        # 2. One more Newton iteration (differentiable) to gain gradients
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_x, new_y = new_o[..., 0], new_o[..., 1]
         valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
@@ -146,7 +138,7 @@ class Surface(DeepObj):
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
         dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
-        t = t - torch.clamp(ft / (dfdt + 1e-9), -NEWTONS_STEP_BOUND, NEWTONS_STEP_BOUND)
+        t = t - torch.clamp(ft / (dfdt + EPSILON), -NEWTONS_STEP_BOUND, NEWTONS_STEP_BOUND)
 
         # 4. Determine valid solutions
         with torch.no_grad():
@@ -218,13 +210,14 @@ class Surface(DeepObj):
         normal_vec = self.normal_vec(ray)
 
         # Reflect
-        ray.is_forward = not ray.is_forward
+        ray.is_forward = ~ray.is_forward
         cos_alpha = -(normal_vec * ray.d).sum(-1).unsqueeze(-1)
         new_d = ray.d + 2 * cos_alpha * normal_vec
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
-        ray.d = torch.where(ray.valid.unsqueeze(-1), new_d, ray.d)
+        valid_mask = ray.valid > 0
+        ray.d = torch.where(valid_mask.unsqueeze(-1), new_d, ray.d)
 
         return ray
 
@@ -353,9 +346,9 @@ class Surface(DeepObj):
         return d2f_dx2, d2f_dxdy, d2f_dy2, d2f_dxdz, d2f_dydz, d2f_dz2
 
     def _d2fdxy(self, x, y):
-        """Compute second-order derivatives of sag to x and y. (d2gdx2, d2gdxdy, d2gdy2) =  (g''xx, g''xy, g''yy).
+        """Compute second-order derivatives of sag to x and y. (d2fdx2, d2fdxdy, d2fdy2) =  (f''xx, f''xy, f''yy).
 
-        As the second-order derivatives are not commonly used in the lens design, we just return zeros.
+        Currently, we use finite difference method to compute the second-order derivatives. And the second-order derivatives are only used for surface constraints.
 
         Args:
             x (tensor): x coordinate
@@ -366,7 +359,12 @@ class Surface(DeepObj):
             d2fdxdy (tensor): d2f / dxdy
             d2fdy2 (tensor): d2f / dy2
         """
-        return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+        delta_x = 1e-6
+        delta_y = 1e-6
+        d2fdx2 = (self._dfdxy(x + delta_x, y)[0] - self._dfdxy(x - delta_x, y)[0]) / (2 * delta_x)
+        d2fdy2 = (self._dfdxy(x, y + delta_y)[1] - self._dfdxy(x, y - delta_y)[1]) / (2 * delta_y)
+        d2fdxy = (self._dfdxy(x + delta_x, y)[1] - self._dfdxy(x - delta_x, y)[1]) / (2 * delta_x)
+        return d2fdx2, d2fdxy, d2fdy2
 
     def is_valid(self, x, y):
         """Valid points within the data range and boundary of the surface."""
