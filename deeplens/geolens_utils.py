@@ -8,7 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-from .optics.geometric_surface import Aperture, Aspheric, Spheric, ThinLens
+from .optics.geometric_surface import Aperture, Aspheric, Spheric, ThinLens, Plane
 from .optics.materials import MATERIAL_data
 from .optics.basics import WAVE_RGB
 from deeplens.geolens import GeoLens
@@ -131,6 +131,8 @@ def create_surface(surface_type, d_total, aper_r, imgh, mat):
         ai = np.random.randn(7).astype(np.float32) * 1e-30
         k = float(np.random.rand()) * 0.001
         return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
+    elif surface_type == "Plane":
+        return Plane(r=r, d=d_total, mat2=mat)
     else:
         raise Exception("Surface type not supported yet.")
 

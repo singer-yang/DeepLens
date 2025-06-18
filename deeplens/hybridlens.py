@@ -181,7 +181,7 @@ class HybridLens(Lens):
         point = point.to(self.device)
 
         # Calculate ray origin in the object space
-        scale = geolens.calc_scale_ray(point[:, 2].item())
+        scale = geolens.calc_scale_pinhole(point[:, 2].item())
         point_obj = point.clone()
         point_obj[:, 0] = point[:, 0] * scale * geolens.sensor_size[1] / 2
         point_obj[:, 1] = point[:, 1] * scale * geolens.sensor_size[0] / 2

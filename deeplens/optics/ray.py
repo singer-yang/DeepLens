@@ -52,17 +52,16 @@ class Ray(DeepObj):
         t = (z - self.o[..., 2]) / self.d[..., 2]
         new_o = self.o + self.d * t.unsqueeze(-1)
 
-        is_valid = (self.valid > 0) & (torch.abs(t) >= 0)
-        new_o[~is_valid] = self.o[~is_valid]
-        self.o = new_o
+        valid_mask = (self.valid > 0) & (torch.abs(t) >= 0)
+        self.o = torch.where(valid_mask.unsqueeze(-1), new_o, self.o)
 
         if self.coherent:
-            if t.min().abs() > 100 and torch.get_default_dtype() == torch.float32:
+            if t.min().abs() > 100 and t.dtype == torch.float32:
                 raise Warning(
                     "Should use float64 in coherent ray tracing for precision."
                 )
             else:
-                self.opl = self.opl + n * t
+                self.opl = torch.where(valid_mask.unsqueeze(-1), self.opl + n * t.unsqueeze(-1), self.opl)
 
         return self
 
