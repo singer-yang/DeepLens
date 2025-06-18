@@ -64,6 +64,18 @@ class Plane(Surface):
 
     def _d2fdxy(self, x, y):
         return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+    
+    # =========================================
+    # Optimization
+    # =========================================
+    def get_optimizer_params(self, lr=0.001, optim_mat=False):
+        """Activate gradient computation for d and return optimizer parameters."""
+        self.d.requires_grad_(True)
+
+        params = []
+        params.append({"params": [self.d], "lr": lr})
+
+        return params
 
     # =========================================
     # IO
