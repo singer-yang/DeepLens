@@ -61,7 +61,7 @@ class Ray(DeepObj):
                     "Should use float64 in coherent ray tracing for precision."
                 )
             else:
-                self.opl = torch.where(valid_mask.unsqueeze(-1), self.opl + n * t, self.opl)
+                self.opl = torch.where(valid_mask.unsqueeze(-1), self.opl + n * t.unsqueeze(-1), self.opl)
 
         return self
 
