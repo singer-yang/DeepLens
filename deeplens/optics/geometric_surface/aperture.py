@@ -31,15 +31,12 @@ class Aperture(Surface):
         )
 
         # Update position
-        new_o[~valid] = ray.o[~valid]
-        ray.o = new_o
+        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
         ray.valid = ray.valid * valid
 
         # Update phase
         if ray.coherent:
-            new_opl = ray.opl + t
-            new_opl[~valid] = ray.opl[~valid]
-            ray.opl = new_opl
+            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
 
         # Diffraction
         if self.diffraction:
