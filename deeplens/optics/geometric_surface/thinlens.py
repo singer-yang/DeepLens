@@ -48,9 +48,7 @@ class ThinLens(Surface):
         ray.valid = ray.valid * valid
 
         if ray.coherent:
-            new_opl = ray.opl + t
-            new_opl[~valid] = ray.opl[~valid]
-            ray.opl = new_opl
+            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
 
         return ray
 
@@ -85,22 +83,13 @@ class ThinLens(Surface):
 
         # Optical path length change
         if ray.coherent:
+            valid = ray.valid > 0
             if forward:
-                ray.opl = (
-                    ray.opl
-                    - (ray.o[..., 0] ** 2 + ray.o[..., 1] ** 2)
-                    / self.f
-                    / 2
-                    / ray.d[..., 2]
-                )
+                new_opl = ray.opl - (ray.o[..., 0] ** 2 + ray.o[..., 1] ** 2) / self.f / 2 / ray.d[..., 2]
+                ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
             else:
-                ray.opl = (
-                    ray.opl
-                    + (ray.o[..., 0] ** 2 + ray.o[..., 1] ** 2)
-                    / self.f
-                    / 2
-                    / ray.d[..., 2]
-                )
+                new_opl = ray.opl + (ray.o[..., 0] ** 2 + ray.o[..., 1] ** 2) / self.f / 2 / ray.d[..., 2]
+                ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
         return ray
 
