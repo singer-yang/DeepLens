@@ -73,10 +73,9 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
             points_shift0 = points_shift[i]  # [spp, 2]
             valid0 = valid[i]  # [spp]
             amp = ray.d[i, :, 2]  # [spp]
-            opl = ray.opl[i]  # [spp]
-            phase = torch.fmod((opl - opl.min()) / (ray.wvln * 1e-3), 1) * (
-                2 * torch.pi
-            )  # [spp]
+            opl = ray.opl[i].squeeze(-1)  # [spp]
+            wvln_mm = ray.wvln[i].squeeze(-1) * 1e-3  # [spp]
+            phase = torch.fmod((opl - opl.min()) / wvln_mm, 1) * (2 * torch.pi)  # [spp]
 
             field_u = assign_points_to_pixels(
                 points=points_shift0,

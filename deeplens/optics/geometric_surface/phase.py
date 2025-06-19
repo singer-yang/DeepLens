@@ -126,8 +126,7 @@ class Phase(Surface):
 
         # OPL change
         if ray.coherent:
-            new_opl = ray.opl + t
-            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
+            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
 
         return ray
 
@@ -146,7 +145,7 @@ class Phase(Surface):
         # Diffraction 1: DOE phase modulation
         if ray.coherent:
             phi = self.phi(ray.o[..., 0], ray.o[..., 1])
-            new_opl = ray.opl + phi * (ray.wvln * 1e-3) / (2 * torch.pi)
+            new_opl = ray.opl + phi.unsqueeze(-1) * (ray.wvln * 1e-3) / (2 * torch.pi)
             ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
         # Diffraction 2: bend rays

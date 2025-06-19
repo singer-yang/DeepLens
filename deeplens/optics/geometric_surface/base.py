@@ -78,11 +78,9 @@ class Surface(DeepObj):
         ray.valid = ray.valid * valid
 
         if ray.coherent:
-            assert t.min() < 100, (
-                "Precision problem caused by long propagation distance."
-            )
-            new_opl = ray.opl + n * t
-            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
+            if t.min() > 100 and torch.get_default_dtype() == torch.float32:
+                raise Exception("Using float32 may cause precision problem at long propagation distance.")
+            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl)
 
         return ray
 
