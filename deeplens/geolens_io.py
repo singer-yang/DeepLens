@@ -65,7 +65,6 @@ class GeoLensIO:
                 surf_d_next = (
                     float(surf_dict["DISZ"].split()[0]) if "DISZ" in surf_dict else 0.0
                 )
-                breakpoint()
                 surf_conic = surf_dict.get("CONI", 0.0)
                 surf_param2 = surf_dict.get("PARM2", 0.0)
                 surf_param3 = surf_dict.get("PARM3", 0.0)
@@ -103,7 +102,6 @@ class GeoLensIO:
                 pass
         
         self.d_sensor = torch.tensor(d)
-        breakpoint()
         return self
 
 

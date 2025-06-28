@@ -98,14 +98,14 @@ class Spheric(Surface):
     # =========================================
     # Optimization
     # =========================================
-    def get_optimizer_params(self, lr=[0.001, 0.001], optim_mat=False):
+    def get_optimizer_params(self, lrs=[1e-4, 1e-4], optim_mat=False):
         """Activate gradient computation for c and d and return optimizer parameters."""
         self.c.requires_grad_(True)
         self.d.requires_grad_(True)
 
         params = []
-        params.append({"params": [self.c], "lr": lr[0]})
-        params.append({"params": [self.d], "lr": lr[1]})
+        params.append({"params": [self.c], "lr": lrs[0]})
+        params.append({"params": [self.d], "lr": lrs[1]})
 
         if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
