@@ -64,12 +64,17 @@ class Plane(Surface):
     # =========================================
     # Optimization
     # =========================================
-    def get_optimizer_params(self, lr=0.001, optim_mat=False):
+    def get_optimizer_params(self, lrs=[1e-4], optim_mat=False):
         """Activate gradient computation for d and return optimizer parameters."""
-        self.d.requires_grad_(True)
-
         params = []
-        params.append({"params": [self.d], "lr": lr})
+
+        # Optimize d
+        self.d.requires_grad_(True)
+        params.append({"params": [self.d], "lr": lrs[0]})
+
+        # Optimize material parameters
+        if optim_mat and self.mat2.get_name() != "air":
+            params += self.mat2.get_optimizer_params()
 
         return params
 

@@ -33,7 +33,8 @@ class Surface(DeepObj):
         # Next aterial
         self.mat2 = Material(mat2)
 
-        self.to(device)
+        self.device = device if device is not None else torch.device("cpu")
+        self.to(self.device)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
@@ -428,6 +429,10 @@ class Surface(DeepObj):
     # =========================================
     # Optimization
     # =========================================
+    def get_optim_param_count(self, optim_mat=False):
+        """Get number of optimizable parameters."""
+        return 0
+
     def get_optimizer_params(self, lr, optim_mat=False):
         raise NotImplementedError(
             "get_optimizer_params() is not implemented for {}".format(
@@ -438,6 +443,12 @@ class Surface(DeepObj):
     def get_optimizer(self, lr, optim_mat=False):
         params = self.get_optimizer_params(lr, optim_mat=optim_mat)
         return torch.optim.Adam(params)
+
+    def to(self, device):
+        self.device = device
+        for attr_name in self.__dict__:
+            if isinstance(getattr(self, attr_name), torch.Tensor):
+                setattr(self, attr_name, getattr(self, attr_name).to(device))
 
     # =========================================
     # Manufacturing

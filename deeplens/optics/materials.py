@@ -240,7 +240,11 @@ class Material(DeepObj):
 
         self.load_dispersion()
 
-    def get_optimizer_params(self, lr=[1e-5, 1e-3]):
+    def get_optim_param_count(self, optim_mat=False):
+        """Get number of optimizable parameters."""
+        return 2
+
+    def get_optimizer_params(self, lrs=[1e-5, 1e-3]):
         """Optimize the material parameters (n, V)."""
         if isinstance(self.n, float):
             self.n = torch.tensor(self.n).to(self.device)
@@ -250,5 +254,5 @@ class Material(DeepObj):
         self.V.requires_grad = True
         self.dispersion = "optimizable"
 
-        params = [{"params": [self.n], "lr": lr[0]}, {"params": [self.V], "lr": lr[1]}]
+        params = [{"params": [self.n], "lr": lrs[0]}, {"params": [self.V], "lr": lrs[1]}]
         return params
