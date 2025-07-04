@@ -429,26 +429,27 @@ class Surface(DeepObj):
     # =========================================
     # Optimization
     # =========================================
-    def get_optim_param_count(self, optim_mat=False):
-        """Get number of optimizable parameters."""
-        return 0
+    def get_optimizer_params(self, lrs=[1e-4], optim_mat=False):
+        """Get optimizer parameters for different parameters.
 
-    def get_optimizer_params(self, lr, optim_mat=False):
+        Args:
+            lrs (list): learning rates for different parameters.
+            optim_mat (bool): whether to optimize material. Defaults to False.
+        """
         raise NotImplementedError(
             "get_optimizer_params() is not implemented for {}".format(
                 self.__class__.__name__
             )
         )
 
-    def get_optimizer(self, lr, optim_mat=False):
-        params = self.get_optimizer_params(lr, optim_mat=optim_mat)
+    def get_optimizer(self, lrs=[1e-4], optim_mat=False):
+        """Get optimizer for the surface."""
+        params = self.get_optimizer_params(lrs, optim_mat=optim_mat)
         return torch.optim.Adam(params)
 
-    def to(self, device):
-        self.device = device
-        for attr_name in self.__dict__:
-            if isinstance(getattr(self, attr_name), torch.Tensor):
-                setattr(self, attr_name, getattr(self, attr_name).to(device))
+    def update_r(self, r):
+        """Update surface radius."""
+        self.r = r
 
     # =========================================
     # Manufacturing

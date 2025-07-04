@@ -295,12 +295,6 @@ class Phase(Surface):
     # ==============================
     def get_optimizer_params(self, lrs=[1e-4, 1e-2], optim_mat=False):
         """Generate optimizer parameters."""
-        # Broadcast learning rates to all parameters
-        if isinstance(lrs[0], float):
-            lrs = [lrs[0]] + [lrs[1]] * self.get_optim_param_count()
-        elif isinstance(lrs[0], list):
-            assert len(lrs) == self.get_optim_param_count(), "Number of learning rates does not match the number of parameters"
-        
         # Optimize parameters
         params = []
         if self.param_model == "fresnel":
