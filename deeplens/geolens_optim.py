@@ -68,7 +68,7 @@ class GeoLensOptim:
         else:
             self.is_cellphone = False
 
-            # Self intersection constraints
+            # Self-intersection constraints
             self.dist_min = 0.1
             self.dist_max = 50.0  # float("inf")
             self.thickness_min = 0.3
@@ -463,7 +463,7 @@ class GeoLensOptim:
         """
         # Create points on rings and arms
         max_fov_rad = self.hfov
-        ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(1 / num_ring, 1.0, num_ring, device=self.device))
+        ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
         arm_angles = torch.linspace(0.0, 2 * np.pi, num_arm + 1, device=self.device)[:-1]
         ring_grid, arm_grid = torch.meshgrid(ring_fovs, arm_angles, indexing="ij")
         fov_x_rad = ring_grid * torch.cos(arm_grid)
@@ -589,6 +589,7 @@ class GeoLensOptim:
             # Back-propagation
             optimizer.zero_grad()
             L_total.backward()
+
             optimizer.step()
             scheduler.step()
 
