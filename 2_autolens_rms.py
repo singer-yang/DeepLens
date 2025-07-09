@@ -72,21 +72,20 @@ def config():
 
 def curriculum_design(
     self: GeoLens,
-    lrs=[5e-4, 1e-4, 0.1, 1e-4],
-    decay=0.02,
+    lrs=[1e-4, 1e-4, 0.1, 1e-4],
     iterations=5000,
     test_per_iter=100,
     optim_mat=False,
     match_mat=False,
     shape_control=True,
-    sample_more_off_axis=True,
     result_dir="./results",
 ):
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
-    num_grid = 21
-    spp = 512
+    num_ring = 5
+    num_arm = 5
+    spp = 1024
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
     aper_final = self.surfaces[self.aper_idx].r
@@ -95,11 +94,11 @@ def curriculum_design(
     if not logging.getLogger().hasHandlers():
         set_logger(result_dir)
     logging.info(
-        f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
+        f"lr:{lrs}, iterations:{iterations}, spp:{spp}, num_ring:{num_ring}, num_arm:{num_arm}."
     )
 
     # Optimizer
-    optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
+    optimizer = self.get_optimizer(lrs, optim_mat=optim_mat)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
 
     # Training loop
@@ -136,12 +135,12 @@ def curriculum_design(
                 # Sample new rays and calculate target centers
                 rays_backup = []
                 for wv in WAVE_RGB:
-                    ray = self.sample_grid_rays(
-                        num_grid=num_grid,
+                    ray = self.sample_ring_arm_rays(
+                        num_ring=num_ring,
+                        num_arm=num_arm,
                         depth=depth,
-                        num_rays=spp,
+                        spp=spp,
                         wvln=wv,
-                        sample_more_off_axis=sample_more_off_axis,
                     )
                     rays_backup.append(ray)
 
@@ -162,16 +161,11 @@ def curriculum_design(
             ray_valid = ray.valid
             ray_err = ray_xy - center_ref
 
-            # # Use only quater of rays
-            # ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-            # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
-
             # Weight mask (non-differentiable), shape of [num_grid, num_grid]
             if wv_idx == 0:
                 with torch.no_grad():
                     weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                     weight_mask /= ray_valid.sum(-1) + EPSILON
-                    weight_mask = weight_mask.sqrt()
                     weight_mask /= weight_mask.mean()
 
             # Loss on rms error, shape of [num_grid, num_grid]
@@ -233,26 +227,21 @@ if __name__ == "__main__":
     # =====> 2. Curriculum learning with RMS errors
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
-        decay=float(args["decay"]),
         iterations=3000,
         test_per_iter=50,
         optim_mat=False,
         match_mat=False,
         shape_control=True,
-        sample_more_off_axis=True,
         result_dir=args["result_dir"],
     )
 
     # Need to train more for the best optical performance
     lens.optimize(
         lrs=[float(lr) for lr in args["lrs"]],
-        decay=float(args["decay"]),
         iterations=3000,
         centroid=False,
         optim_mat=False,
-        match_mat=False,
         shape_control=True,
-        sample_more_off_axis=True,
         result_dir=f"{args['result_dir']}/fine-tune",
     )
 

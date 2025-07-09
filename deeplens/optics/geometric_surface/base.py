@@ -11,9 +11,9 @@ from deeplens.optics.basics import DeepObj
 from deeplens.optics.materials import Material
 
 # Newton's method parameters
-NEWTONS_MAXITER = 10  # maximum number of Newton iterations
-NEWTONS_TOLERANCE = 50 * 1e-6  # [mm], Newton method solution threshold
-NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in each Newton iteration
+NEWTONS_MAXITER = 10.0  # maximum number of Newton iterations
+NEWTONS_TOLERANCE = 50.0 * 1e-6  # [mm], Newton method solution threshold
+NEWTONS_STEP_BOUND = 5.0  # [mm], maximum step size in each Newton iteration
 EPSILON = 1e-12
 
 class Surface(DeepObj):
