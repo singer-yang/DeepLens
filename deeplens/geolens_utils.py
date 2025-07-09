@@ -108,6 +108,7 @@ def create_lens(
     lens.float_hfov = False
     lens.set_sensor(sensor_res=lens.sensor_res, r_sensor=imgh / 2)
     lens.post_computation()
+    lens.init_constraints()
 
     # Save lens
     filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}"
@@ -115,7 +116,6 @@ def create_lens(
     lens.analysis(os.path.join(save_dir, f"{filename}"))
 
     return lens
-
 
 def create_surface(surface_type, d_total, aper_r, imgh, mat):
     """Create a surface object based on the surface type."""
@@ -127,13 +127,15 @@ def create_surface(surface_type, d_total, aper_r, imgh, mat):
 
     if surface_type == "Spheric":
         return Spheric(r=r, d=d_total, c=c, mat2=mat)
+    
     elif surface_type == "Aspheric":
         ai = np.random.randn(7).astype(np.float32) * 1e-30
         k = float(np.random.rand()) * 0.001
-        # return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
-        return AsphericNorm(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
+        return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
+
     elif surface_type == "Plane":
         return Plane(r=r, d=d_total, mat2=mat)
+    
     else:
         raise Exception("Surface type not supported yet.")
 
