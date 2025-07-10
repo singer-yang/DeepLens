@@ -222,7 +222,7 @@ if __name__ == "__main__":
     logging.info(f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}")
 
     # =====> 2. Curriculum learning with RMS errors
-    # Curriculum learning is used to find an optimization path when starting from scratch, where the optimization difficulty is high and the gradients are unstable. 3000 iterations is a good starting value, while increasing the number of iterations will improve the optical performance.
+    # Curriculum learning is used to find an optimization path when starting from scratch, where the optimization difficulty is high and the gradients are unstable. 3000 iterations is a good starting value, while increasing the number of iterations will improve the optical performance. Also, we can choose to optimize materials in this stage.
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
@@ -236,7 +236,8 @@ if __name__ == "__main__":
 
     # To obtain optimal optical performance, we typically need additional training iterations. This code uses strong lens design constraints with small learning rates, making optimization slow but steadily improving optical performance. For demonstration purposes, here we only train for 3000 steps.
     lens.optimize(
-        lrs=[float(lr) for lr in args["lrs"]],
+        lrs=[float(lr) * 0.1 for lr in args["lrs"]],
+        decay=float(args["decay"]),
         iterations=3000,
         test_per_iter=100,
         centroid=False,

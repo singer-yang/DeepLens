@@ -1991,7 +1991,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # Settings
         surface_range = self.find_diff_surf()
 
-        if self.is_cellphone:
+        if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
 
             # # Reset lens to maximum height(sensor radius)
@@ -1999,7 +1999,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             #     # self.surfaces[i].r = self.r_sensor
             #     self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
         else:
-            expand_factor = 0.2 if expand_factor is None else expand_factor
+            expand_factor = 0.4 if expand_factor is None else expand_factor
 
         # Sample maximum fov rays to cut valid surface height
         if self.hfov is not None:
