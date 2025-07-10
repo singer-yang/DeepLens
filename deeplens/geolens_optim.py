@@ -480,6 +480,7 @@ class GeoLensOptim:
     def optimize(
         self,
         lrs=[1e-4, 1e-4, 1e-1, 1e-4],
+        decay=0.01,
         iterations=5000,
         test_per_iter=100,
         centroid=False,
@@ -514,7 +515,7 @@ class GeoLensOptim:
         logging.info(f"lr:{lrs}, iterations:{iterations}, num_ring:{num_ring}, num_arm:{num_arm}, rays_per_fov:{spp}.")
 
         # Optimizer and scheduler
-        optimizer = self.get_optimizer(lrs, optim_mat=optim_mat)
+        optimizer = self.get_optimizer(lrs, decay=decay, optim_mat=optim_mat)
         scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=100, num_training_steps=iterations)
 
         # Training loop
