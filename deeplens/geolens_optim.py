@@ -50,7 +50,7 @@ class GeoLensOptim:
 
             # Self intersection constraints
             self.dist_min = 0.05
-            self.dist_max = 0.6
+            self.dist_max = 1.0
             self.thickness_min = 0.25
             self.thickness_max = 2.0
             self.flange_min = 0.25
@@ -86,7 +86,7 @@ class GeoLensOptim:
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
 
-    def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=1.0):
+    def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=5.0):
         """An empirical regularization loss for lens design.
 
         By default we should use weight 0.1 * self.loss_reg() in the total loss.
@@ -525,7 +525,7 @@ class GeoLensOptim:
         )
         for i in range(iterations + 1):
             # ===> Evaluate the lens
-            if i % test_per_iter == 0 and i > 0:
+            if i % test_per_iter == 0:
                 with torch.no_grad():
                     if shape_control:
                         self.correct_shape()
@@ -589,7 +589,6 @@ class GeoLensOptim:
             # Back-propagation
             optimizer.zero_grad()
             L_total.backward()
-
             optimizer.step()
             scheduler.step()
 

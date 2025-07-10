@@ -1916,7 +1916,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # ======>
 
         aper_r = self.foclen / fnum / 2
-        self.surfaces[self.aper_idx].r = float(aper_r)
+        self.surfaces[self.aper_idx].update_r(float(aper_r))
 
     @torch.no_grad()
     def set_fov(self, hfov):
