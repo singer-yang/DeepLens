@@ -2,6 +2,8 @@
 
 Reference:
     [1] https://en.wikipedia.org/wiki/Aspheric_lens.
+
+Note: one problem for normalized aspheric coefficients is that when norm_r is smaller than 1, the gradient can be very large.
 """
 
 import numpy as np
@@ -24,6 +26,7 @@ class AsphericNorm(Surface):
             device (torch.device): device to store the tensor
         """
         Surface.__init__(self, r, d, mat2, is_square=False, device=device)
+        self.norm_r = r if r > 2.0 else 2.0
         self.c = torch.tensor(c)
         self.k = torch.tensor(k)
         if ai is not None:
@@ -32,8 +35,8 @@ class AsphericNorm(Surface):
             # Create normalized coefficients for optimization and sag calculation
             for i, a in enumerate(ai):
                 p_name = f"norm_ai{2 * (i + 1)}"
-                # norm_ai = ai * r^(2(i+1))
-                norm_coeff = torch.tensor(a * self.r ** (2 * (i + 1)))
+                # abs_ai = norm_ai / norm_r^(2(i+1))
+                norm_coeff = torch.tensor(a * self.norm_r ** (2 * (i + 1)))
                 setattr(self, p_name, norm_coeff)
         else:
             self.ai = None
@@ -64,11 +67,11 @@ class AsphericNorm(Surface):
             r2 * self.c / (1 + torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON))
         )
         
-        # rho2 = r2 / self.r**2
-        # sag_aspheric = sum(norm_ai_{2i} * rho2**i) = sum(norm_ai_{2i} * (r2/self.r**2)**i)
-        # = sum (ai_{2i} * self.r**(2i)) * (r2**i / self.r**(2i)) = sum(ai_{2i} * r2**i)
+        # rho2 = r2 / self.norm_r**2
+        # sag_aspheric = sum(norm_ai_{2i} * rho2**i) = sum(norm_ai_{2i} * (r2/self.norm_r**2)**i)
+        # = sum (ai_{2i} * self.norm_r**(2i)) * (r2**i / self.norm_r**(2i)) = sum(ai_{2i} * r2**i)
 
-        rho2 = r2 / (self.r**2)
+        rho2 = r2 / (self.norm_r**2)
         for i in range(1, self.ai_degree + 1):
             norm_ai = getattr(self, f"norm_ai{2 * i}")
             total_surface += norm_ai * rho2 ** i
@@ -84,12 +87,12 @@ class AsphericNorm(Surface):
         )
 
         if self.ai_degree > 0:
-            # d(sag_aspheric)/dr2 = d/dr2(sum(norm_ai_{2i} * (r2/self.r**2)**i))
-            # = sum(norm_ai_{2i} * i * (r2/self.r**2)**(i-1) * (1/self.r**2))
-            # = sum(norm_ai_{2i} * i * r2**(i-1) / self.r**(2i))
+            # d(sag_aspheric)/dr2 = d/dr2(sum(norm_ai_{2i} * (r2/self.norm_r**2)**i))
+            # = sum(norm_ai_{2i} * i * (r2/self.norm_r**2)**(i-1) * (1/self.norm_r**2))
+            # = sum(norm_ai_{2i} * i * r2**(i-1) / self.norm_r**(2i))
             for i in range(1, self.ai_degree + 1):
                 norm_ai = getattr(self, f"norm_ai{2 * i}")
-                dsdr2 += i * norm_ai * r2 ** (i - 1) / (self.r ** (2 * i))
+                dsdr2 += i * norm_ai * r2 ** (i - 1) / (self.norm_r ** (2 * i))
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
 
@@ -100,26 +103,35 @@ class AsphericNorm(Surface):
         k = self.k
         sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
 
-        # Compute dsdr2
+        # 1. Compute the full first derivative dsdr2
+        # Conic part
         dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / (2 * sf)) * c / (1 + sf) ** 2
+        
+        # Aspheric part
+        if self.ai_degree > 0:
+            # d(sag_aspheric)/dr2 = d/dr2(sum(norm_ai_{2i} * (r2/self.norm_r**2)**i))
+            # = sum(norm_ai_{2i} * i * r2**(i-1) / self.norm_r**(2i))
+            for i in range(1, self.ai_degree + 1):
+                norm_ai = getattr(self, f"norm_ai{2 * i}")
+                dsdr2 += i * norm_ai * r2 ** (i - 1) / (self.norm_r ** (2 * i))
 
-        # Compute derivative of dsdr2 with respect to r2 (ddsdr2_dr2)
-        # This is for the conic part
+        # 2. Compute the full second derivative ddsdr2_dr2
+        # This is the derivative of dsdr2 with respect to r2.
+        # Conic part's contribution to the second derivative.
+        # This formula correctly depends on the *full* dsdr2 value computed above.
         ddsdr2_dr2 = (
             (((1 + k) * c**2) / (2 * sf) + ((1 + k)**2 * r2 * c**4) / (4 * sf**3)) * c / (1 + sf)**2
             - (2 * dsdr2 * ((1 + k) * c**2 / (2 * sf))) / (1 + sf)
         )
-
-        if self.ai_degree > 0:
-            # Aspheric part of dsdr2: sum(i * norm_ai_{2i} * r2**(i-1) / self.r**(2i))
-            # d/dr2 of aspheric part: sum(i * (i-1) * norm_ai_{2i} * r2**(i-2) / self.r**(2i))
-            for i in range(1, self.ai_degree + 1):
+        
+        # Aspheric part's contribution to the second derivative
+        if self.ai_degree > 1:
+            # d/dr2 of aspheric part of dsdr2: sum(i * (i-1) * norm_ai_{2i} * r2**(i-2) / self.norm_r**(2i))
+            for i in range(2, self.ai_degree + 1):
                 norm_ai = getattr(self, f"norm_ai{2 * i}")
-                dsdr2 += i * norm_ai * r2 ** (i - 1) / (self.r ** (2 * i))
-                if i > 1:
-                    ddsdr2_dr2 += i * (i - 1) * norm_ai * r2 ** (i - 2) / (self.r ** (2 * i))
+                ddsdr2_dr2 += i * (i - 1) * norm_ai * r2 ** (i - 2) / (self.norm_r ** (2 * i))
 
-        # Compute second-order derivatives
+        # 3. Compute final second-order derivatives
         d2f_dx2 = 2 * dsdr2 + 4 * x**2 * ddsdr2_dr2
         d2f_dxdy = 4 * x * y * ddsdr2_dr2
         d2f_dy2 = 2 * dsdr2 + 4 * y**2 * ddsdr2_dr2
@@ -209,15 +221,21 @@ class AsphericNorm(Surface):
 
         return params
 
+    @torch.no_grad()
     def update_r(self, r):
         """Update the radius of the surface."""
+        r_new = r
+        norm_r_old = self.norm_r
+        norm_r_new = r_new if r_new > 2.0 else 2.0
+        
         # Update normalized ai
         for i in range(1, self.ai_degree + 1):
             norm_ai = getattr(self, f"norm_ai{2 * i}")
-            norm_ai *= r ** (2 * i) / self.r ** (2 * i)
+            norm_ai.data = norm_ai.data * (norm_r_new / norm_r_old) ** (2 * i)
 
         # Update radius
-        self.r = r
+        self.r = r_new
+        self.norm_r = norm_r_new
 
     # =======================================
     # Perturbation
@@ -254,8 +272,8 @@ class AsphericNorm(Surface):
             for i in range(1, self.ai_degree + 1):
                 p_name = f"norm_ai{2 * i}"
                 norm_ai = getattr(self, p_name)
-                # ai = norm_ai / r^(2i)
-                abs_ai = norm_ai.item() / (self.r ** (2 * i))
+                # abs_ai = norm_ai / norm_r^(2i)
+                abs_ai = norm_ai.item() / (self.norm_r ** (2 * i))
                 surf_dict[f'(ai{2 * i})'] = float(format(abs_ai, '.6e'))
                 surf_dict["ai"].append(float(format(abs_ai, ".6e")))
 
@@ -275,7 +293,7 @@ class AsphericNorm(Surface):
         if self.ai_degree > 0:
             for i in range(1, self.ai_degree + 1):
                 norm_ai = getattr(self, f"norm_ai{2 * i}")
-                abs_ai.append(norm_ai.item() / (self.r ** (2 * i)))
+                abs_ai.append(norm_ai.item() / (self.norm_r ** (2 * i)))
         
         # Pad with zeros if necessary for Zemax PARM format
         while len(abs_ai) < 6:
