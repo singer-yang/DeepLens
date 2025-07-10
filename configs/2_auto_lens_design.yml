@@ -21,5 +21,5 @@ decay: 0.001
 # flange: 1.0
 # thickness: 9.0
 # lens_type: [["Aperture"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"]]
-# lrs: [1e-4, 1e-4, 1e-2, 1e-3]
+# lrs: [1e-4, 1e-4, 1e-2, 1e-4]
 # decay: 0.01
