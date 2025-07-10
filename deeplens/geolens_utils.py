@@ -131,7 +131,7 @@ def create_surface(surface_type, d_total, aper_r, imgh, mat):
         return Spheric(r=r, d=d_total, c=c, mat2=mat)
     
     elif surface_type == "Aspheric":
-        ai = np.random.randn(7).astype(np.float32) * 1e-20
+        ai = np.random.randn(7).astype(np.float32) * 1e-24
         k = float(np.random.rand()) * 1e-6
         return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
 
