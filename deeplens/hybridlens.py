@@ -21,19 +21,19 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .geolens import GeoLens
-from .lens import Lens
-from .optics.basics import (
+from deeplens.geolens import GeoLens
+from deeplens.lens import Lens
+from deeplens.optics.basics import (
     SPP_COHERENT,
     PSF_KS,
     DEFAULT_WAVE,
     WAVE_RGB,
 )
-from .optics.monte_carlo import forward_integral
-from .optics.geometric_surface import Phase
-from .optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
-from .optics.wave import AngularSpectrumMethod
-from .optics.utils import diff_float
+from deeplens.optics.monte_carlo import forward_integral
+from deeplens.optics.geometric_surface import Phase, Plane
+from deeplens.optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
+from deeplens.optics.wave import AngularSpectrumMethod
+from deeplens.optics.utils import diff_float
 
 
 class HybridLens(Lens):
@@ -71,10 +71,10 @@ class HybridLens(Lens):
         # Load geolens
         geolens = GeoLens(filename=filename)
 
+        # Load DOE (diffractive surface)
         with open(filename, "r") as f:
             data = json.load(f)
 
-            # Load DOE
             doe_dict = data["DOE"]
             if doe_dict["param_model"] == "binary2":
                 doe = Binary2.init_from_dict(doe_dict)
@@ -90,10 +90,12 @@ class HybridLens(Lens):
                 )
             self.doe = doe
 
-            # Add a geometric DOE surface to GeoLens
-            r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
-            geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
-            self.geolens = geolens
+        # Add a Plane/Phase surface to GeoLens (DOE placeholder)
+        r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
+        geolens.surfaces.append(Plane(d=doe.d, r=r_doe, mat2="air"))
+        # r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
+        # geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
+        self.geolens = geolens
 
         # Update hybrid lens sensor resolution and pixel size
         self.set_sensor(sensor_size=geolens.sensor_size, sensor_res=geolens.sensor_res)
@@ -150,6 +152,10 @@ class HybridLens(Lens):
         """Refocus the DoeLens to a given depth. Donot move DOE because DOE is installed with geolens in the Siggraph Asia 2024 paper."""
         self.geolens.refocus(foc_dist)
 
+    def calc_scale(self, depth):
+        """Calculate the scale factor for the point source."""
+        return self.geolens.calc_scale(depth)
+
     # =====================================================================
     # PSF-related functions
     # =====================================================================
@@ -181,7 +187,7 @@ class HybridLens(Lens):
         point = point.to(self.device)
 
         # Calculate ray origin in the object space
-        scale = geolens.calc_scale_pinhole(point[:, 2].item())
+        scale = geolens.calc_scale(point[:, 2].item())
         point_obj = point.clone()
         point_obj[:, 0] = point[:, 0] * scale * geolens.sensor_size[1] / 2
         point_obj[:, 1] = point[:, 1] * scale * geolens.sensor_size[0] / 2
@@ -189,7 +195,7 @@ class HybridLens(Lens):
         # Determine ray center via chief ray
         pointc_chief_ray = geolens.psf_center(point_obj)[0]  # shape [2]
 
-        # Ray tracing
+        # Ray tracing to the DOE plane
         ray = geolens.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
         ray.coherent = True
         ray, _ = geolens.trace(ray)
@@ -241,9 +247,9 @@ class HybridLens(Lens):
             )
 
         # Check lens last surface
-        assert isinstance(self.geolens.surfaces[-1], Phase), (
-            "The last lens surface should be a DOE."
-        )
+        assert isinstance(self.geolens.surfaces[-1], Phase) or isinstance(
+            self.geolens.surfaces[-1], Plane
+        ), "The last lens surface should be a DOE."
         geolens, doe = self.geolens, self.doe
 
         # Compute pupil field by coherent ray tracing
@@ -394,7 +400,7 @@ class HybridLens(Lens):
         self, doe_lr=1e-4, lens_lr=[1e-4, 1e-4, 1e-2, 1e-5], lr_decay=0.01
     ):
         params = []
-        params += self.geolens.get_optimizer_params(lr=lens_lr, decay=lr_decay)
+        params += self.geolens.get_optimizer_params(lrs=lens_lr, decay=lr_decay)
         params += self.doe.get_optimizer_params(lr=doe_lr)
 
         optimizer = torch.optim.Adam(params)
