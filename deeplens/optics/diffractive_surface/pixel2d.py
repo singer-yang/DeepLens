@@ -1,7 +1,7 @@
 """Pixel2D DOE parameterization. Each pixel is an independent parameter."""
 
 import torch
-from .diffractive import DiffractiveSurface
+from deeplens.optics.diffractive_surface.diffractive import DiffractiveSurface
 
 
 class Pixel2D(DiffractiveSurface):
