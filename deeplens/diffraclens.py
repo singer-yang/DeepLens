@@ -1,14 +1,15 @@
-"""Paraxial diffractive lens model consisting of a diffractive optical element (DOE) and a sensor.
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
 
+"""Paraxial diffractive lens model consisting of a diffractive optical element (DOE) and a sensor.
 
 Reference papers:
     [1] Vincent Sitzmann*, Steven Diamond*, Yifan Peng*, Xiong Dun, Stephen Boyd, Wolfgang Heidrich, Felix Heide, Gordon Wetzstein, "End-to-end optimization of optics and image processing for achromatic extended depth of field and super-resolution imaging," Siggraph 2018.
     [2] Qilin Sun, Ethan Tseng, Qiang Fu, Wolfgang Heidrich, Felix Heide. "Learning Rank-1 Diffractive Optics for Single-shot High Dynamic Range Imaging," CVPR 2020.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import json
@@ -18,14 +19,12 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from .lens import Lens
-from .optics.basics import DEPTH, EPSILON, DEFAULT_WAVE
-from .optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
-from .optics.materials import Material
-from .optics.waveoptics_utils import point_source_field, plane_wave_field
-from .optics.render_psf import render_psf
-from .optics.utils import diff_float
-
+from deeplens.lens import Lens
+from deeplens.optics.basics import DEPTH, DEFAULT_WAVE
+from deeplens.optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
+from deeplens.optics.waveoptics_utils import point_source_field, plane_wave_field
+from deeplens.optics.render_psf import render_psf
+from deeplens.optics.utils import diff_float
 
 class DiffractiveLens(Lens):
     def __init__(
