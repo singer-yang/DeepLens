@@ -85,9 +85,22 @@ We recommend cloning this repository and writing your code directly within it:
 ```
 git clone deeplens
 cd deeplens
+```
 
+Create a conda environment:
+```
 conda env create -f environment.yml -n deeplens
+```
+or
+```
+conda create --name deeplens_env python=3.9
+conda activate deeplens_env
 
+pip install -r requirements.txt
+```
+
+Run the demo code:
+```
 python 0_hello_deeplens.py
 python your_optical_design_pipeline.py
 ```
