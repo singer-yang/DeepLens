@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 
-from .base import EPSILON, Surface
+from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class Spheric(Surface):
