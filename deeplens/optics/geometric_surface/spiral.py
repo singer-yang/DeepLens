@@ -93,21 +93,24 @@ class Spiral(Surface):
     # =========================================
     # Optimization
     # =========================================
-    def get_optimizer_params(self, lr, optim_mat=False):
+    def get_optimizer_params(self, lrs=[1e-4, 1e-4, 1e-4], optim_mat=False):
         """Return parameters for optimizer."""
         params = []
 
+        # Optimize distance
         self.d.requires_grad_(True)
-        params.append({"params": [self.d], "lr": lr})
+        params.append({"params": [self.d], "lr": lrs[0]})
 
+        # Optimize c1
         self.c1.requires_grad_(True)
-        params.append({"params": [self.c1], "lr": lr})
+        params.append({"params": [self.c1], "lr": lrs[1]})
 
+        # Optimize c2
         self.c2.requires_grad_(True)
-        params.append({"params": [self.c2], "lr": lr})
+        params.append({"params": [self.c2], "lr": lrs[2]})
 
-        if optim_mat and self.mat2.get_name() != "air":
-            params += self.mat2.get_optimizer_params()
+        # We do not optimize material parameters for spiral surface.
+        assert optim_mat, "Material parameters are not optimized for spiral surface."
 
         return params
 

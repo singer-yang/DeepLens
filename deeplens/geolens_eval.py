@@ -481,8 +481,10 @@ class GeoLensEval:
         tangential_mtf = np.abs(np.fft.fft(tangential_psf))
 
         # Normalize the MTFs
-        sagittal_mtf /= sagittal_mtf.max()
-        tangential_mtf /= tangential_mtf.max()
+        if sagittal_mtf.max() > 0:
+            sagittal_mtf /= sagittal_mtf.max()
+        if tangential_mtf.max() > 0:
+            tangential_mtf /= tangential_mtf.max()
 
         # Create frequency axis in cycles/mm
         freq = np.fft.fftfreq(psf.shape[0], pixel_size)
