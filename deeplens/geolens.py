@@ -24,10 +24,10 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from deeplens.geolens_eval import GeoLensEval
-from deeplens.geolens_optim import GeoLensOptim
-from deeplens.geolens_io import GeoLensIO
-from deeplens.geolens_vis import GeoLensVis
+from deeplens.geolens_pkg.eval import GeoLensEval
+from deeplens.geolens_pkg.io import GeoLensIO
+from deeplens.geolens_pkg.optim import GeoLensOptim
+from deeplens.geolens_pkg.vis import GeoLensVis
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
@@ -1118,7 +1118,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             raise Exception("Unsupported point type.")
 
         # Ray origin in the object space
-        scale = self.calc_scale_ray(point[:, 2].item())
+        scale = self.calc_scale(point[:, 2].item())
         point_obj = point.clone()
         point_obj[:, 0] = point[:, 0] * scale * self.sensor_size[1] / 2  # x coordinate
         point_obj[:, 1] = point[:, 1] * scale * self.sensor_size[0] / 2  # y coordinate

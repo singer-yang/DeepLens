@@ -12,7 +12,7 @@ from deeplens.optics.basics import (
 from deeplens.optics import (
     Ray,
 )
-from .optics.geometric_surface import (
+from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
     Cubic,
@@ -22,7 +22,7 @@ from .optics.geometric_surface import (
     ThinLens,
 )
 
-from .optics.geometric_surface.base import EPSILON
+from deeplens.optics.geometric_surface.base import EPSILON
 
 import torch
 
