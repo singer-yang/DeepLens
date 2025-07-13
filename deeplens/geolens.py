@@ -46,6 +46,7 @@ from deeplens.optics.basics import (
 from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
+    AsphericNorm,
     Cubic,
     Phase,
     Plane,
@@ -96,7 +97,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             self.to(self.device)
 
         # Initialize lens design constraints (edge thickness, etc.)
-        # TODO: we should consider to move this to geolens.get_optimizer_params()
         self.init_constraints()
 
     def read_lens(self, filename):
@@ -743,7 +743,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             img_mono (tensor): Rendered monochrome image tensor. Shape of [N, 1, H, W] or [N, H, W].
         """
         img = torch.flip(img, [-2, -1])
-        scale = self.calc_scale(depth=depth, method="pinhole")
+        scale = self.calc_scale(depth=depth)
         ray = self.sample_sensor(spp=spp, wvln=wvln)
         ray = self.trace2obj(ray, depth=depth)
         img_mono = self.render_compute_image(
@@ -1019,7 +1019,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
         # Ray position in the object space by perspective projection, because points are normalized
         depth = points[:, 2]
-        scale = self.calc_scale_pinhole(depth)
+        scale = self.calc_scale(depth)
         point_obj_x = points[..., 0] * scale * self.sensor_size[1] / 2
         point_obj_y = points[..., 1] * scale * self.sensor_size[0] / 2
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
@@ -1045,7 +1045,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             pointc_ideal[:, 0] *= self.sensor_size[1] / 2
             pointc_ideal[:, 1] *= self.sensor_size[0] / 2
             psf = forward_integral(
-                ray, ps=self.pixel_size, ks=ks, pointc=pointc_ideal, coherent=False
+                ray, ps=self.pixel_size, ks=ks, pointc=pointc_ideal.to(self.device), coherent=False
             )
 
         # Normalize to 1
@@ -1470,33 +1470,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         return hfov
 
     @torch.no_grad()
-    def calc_scale(self, depth, method="pinhole"):
-        """Calculate the scale factor."""
-        if method == "pinhole":
-            scale = self.calc_scale_pinhole(depth)
-        elif method == "raytracing":
-            raise NotImplementedError(
-                "Ray tracing for scale factor has been deprecated."
-            )
-            # scale = self.calc_scale_ray(depth)
-        else:
-            raise ValueError(f"Invalid method: {method}.")
-
-        return scale
-
-    @torch.no_grad()
-    def calc_scale_pinhole(self, depth):
-        """Scale factor computed by pinhole camera model.
-
-        This function assumes the first principal point is at (0, 0, 0) and the second principal point is at (0, 0, d_sensor - focal_length).
-
-        Args:
-            depth (float): depth of the object.
-
-        Returns:
-            scale (float): scale factor. phy_size_obj / phy_size_img
-        """
+    def calc_scale(self, depth):
+        """Calculate the scale factor (obj_height / img_height) with pinhole camera model."""
         return -depth / self.foclen
+
+    # @torch.no_grad()
+    # def calc_scale_pinhole(self, depth):
+    #     """Scale factor computed by pinhole camera model.
+
+    #     This function assumes the first principal point is at (0, 0, 0) and the second principal point is at (0, 0, d_sensor - focal_length).
+
+    #     Args:
+    #         depth (float): depth of the object.
+
+    #     Returns:
+    #         scale (float): scale factor. phy_size_obj / phy_size_img
+    #     """
+    #     return -depth / self.foclen
 
     # @torch.no_grad()
     # def calc_scale_ray(self, depth):
@@ -1582,7 +1572,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         return inc_ray.o[center_idx, :], inc_ray.d[center_idx, :]
 
     @torch.no_grad()
-    def calc_pupil(self, paraxial=True):
+    def calc_pupil(self, paraxial=False):
         """
         Compute entrance and exit pupil positions and radii.
         The entrance and exit pupils must be recalculated whenever:
@@ -1632,7 +1622,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         return exit_pupilz, exit_pupilr
 
     @torch.no_grad()
-    def calc_exit_pupil(self, paraxial=True):
+    def calc_exit_pupil(self, paraxial=False):
         """
         Paraxial mode:
             Rays are emitted from near the center of the aperture stop and are close to the optical axis.
@@ -1713,7 +1703,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         return avg_pupilz, avg_pupilr
 
     @torch.no_grad()
-    def calc_entrance_pupil(self, paraxial=True):
+    def calc_entrance_pupil(self, paraxial=False):
         """Calculate entrance pupil of the lens.
 
         The entrance pupil is the optical image of the physical aperture stop, as seen through the optical elements in front of the stop. We sample backward rays from the aperture stop and trace them to the first surface, then find the intersection points of the reverse extension of the rays. The average of the intersection points defines the entrance pupil position and radius.
@@ -1926,7 +1916,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # ======>
 
         aper_r = self.foclen / fnum / 2
-        self.surfaces[self.aper_idx].r = float(aper_r)
+        self.surfaces[self.aper_idx].update_r(float(aper_r))
 
     @torch.no_grad()
     def set_fov(self, hfov):
@@ -2001,15 +1991,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # Settings
         surface_range = self.find_diff_surf()
 
-        if self.is_cellphone:
+        if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
 
-            # Reset lens to maximum height(sensor radius)
-            for i in surface_range:
-                # self.surfaces[i].r = self.r_sensor
-                self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
+            # # Reset lens to maximum height(sensor radius)
+            # for i in surface_range:
+            #     # self.surfaces[i].r = self.r_sensor
+            #     self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
         else:
-            expand_factor = 0.2 if expand_factor is None else expand_factor
+            expand_factor = 0.4 if expand_factor is None else expand_factor
 
         # Sample maximum fov rays to cut valid surface height
         if self.hfov is not None:
@@ -2036,12 +2026,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             if surf_r_max[i] > 0:
                 max_height_expand = surf_r_max[i].item() * (1 + expand_factor)
                 max_height_allowed = self.surfaces[i].max_height()
-                self.surfaces[i].r = min(max_height_expand, max_height_allowed)
+                self.surfaces[i].update_r(min(max_height_expand, max_height_allowed))
             else:
                 print(f"No valid rays for Surf {i}, do not prune.")
                 max_height_expand = self.surfaces[i].r * (1 + expand_factor)
                 max_height_value_range = self.surfaces[i].max_height()
-                self.surfaces[i].r = min(max_height_expand, max_height_value_range)
+                self.surfaces[i].update_r(min(max_height_expand, max_height_value_range))
 
     @torch.no_grad()
     def correct_shape(self, expand_factor=None):
@@ -2061,11 +2051,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             d_aper = 0.05 if self.is_cellphone else 1.0
 
             # If the first surface is concave, use the maximum negative sag.
-            # Convert float to tensor to avoid error
             aper_r = torch.tensor(self.surfaces[aper_idx].r, device=self.device)
-            y = torch.tensor(0.0, device=self.device)
-
-            # sag1 = -self.surfaces[aper_idx + 1].surface(aper_r, 0).item()
             sag1 = -self.surfaces[aper_idx + 1].sag(aper_r, 0).item()
 
             if sag1 > 0:
@@ -2075,12 +2061,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             delta_aper = self.surfaces[1].d.item() - d_aper
             for i in optim_surf_range:
                 self.surfaces[i].d -= delta_aper
-
-        # # Rule 3: If two surfaces overlap (at center), seperate them by a small distance
-        # for i in range(0, len(self.surfaces) - 1):
-        #     if self.surfaces[i].d > self.surfaces[i + 1].d:
-        #         self.surfaces[i + 1].d += 0.1
-        #         shape_changed = True
 
         # Rule 4: Prune all surfaces
         self.prune_surf(expand_factor=expand_factor)
@@ -2123,8 +2103,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def analysis(
         self,
         save_name="./lens",
-        multi_plot=False,
-        zmx_format=True,
         depth=float("inf"),
         render=False,
         render_unwarp=False,
@@ -2134,9 +2112,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
         Args:
             save_name (str): save name.
-            multi_plot (bool): plot RGB seperately.
-            plot_invalid (bool): plot invalid rays.
-            zmx_format (bool): plot in Zemax format.
             depth (float): object depth distance.
             render (bool): whether render an image.
             render_unwarp (bool): whether unwarp the rendered image.
@@ -2149,8 +2124,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             depth=depth,
         )
 
-        # Draw spot diagram and PSF map
-        # self.draw_psf_map(save_name=save_name, ks=101, depth=depth)
+        # Draw spot diagram
+        self.draw_spot_radial(depth=depth, save_name=f"{save_name}_spot.png")
+
+        # Draw MTF
+        if depth == float("inf"):
+            # This is a hack to draw MTF for infinite depth
+            self.draw_mtf(depth_list=[DEPTH], save_name=f"{save_name}_mtf.png")
+        else:
+            self.draw_mtf(depth_list=[depth], save_name=f"{save_name}_mtf.png")
 
         # Calculate RMS error
         self.analysis_rms(depth=depth)
@@ -2173,68 +2155,68 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     # ====================================================================================
     def get_optimizer_params(
         self,
-        lr=[1e-4, 1e-4, 1e-1, 1e-3],
+        lrs=[1e-4, 1e-4, 1e-2, 1e-4],
         decay=0.01,
-        optim_surf_range=None,
         optim_mat=False,
+        optim_surf_range=None,
     ):
         """Get optimizer parameters for different lens surface.
 
         Recommendation:
-            For cellphone lens: [c, d, k, a], [1e-4, 1e-4, 1e-1, 1e-4]
-            For camera lens: [c, d, 0, 0], [1e-3, 1e-4, 0, 0]
+            For cellphone lens: [d, c, k, a], [1e-4, 1e-4, 1e-1, 1e-4]
+            For camera lens: [d, c, 0, 0], [1e-3, 1e-4, 0, 0]
 
         Args:
-            lr (list): learning rate for different parameters [c, d, k, a]. Defaults to [1e-4, 1e-4, 0, 1e-4].
-            decay (float): decay rate for higher order a. Defaults to 0.2.
-            optim_surf_range (list): surface indices to be optimized. Defaults to None.
+            lrs (list): learning rate for different parameters.
+            decay (float): decay rate for higher order a. Defaults to 0.01.
             optim_mat (bool): whether to optimize material. Defaults to False.
+            optim_surf_range (list): surface indices to be optimized. Defaults to None.
 
         Returns:
             list: optimizer parameters
         """
-        self.init_constraints()
-
-        # Find the surface indices to be optimized
+        # Find surfaces to be optimized
         if optim_surf_range is None:
             optim_surf_range = self.find_diff_surf()
+        
+        # If lr for each surface is a list is given
+        if isinstance(lrs[0], list):
+            return self.get_optimizer_params_manual(lrs=lrs, optim_mat=optim_mat, optim_surf_range=optim_surf_range)
 
         # Optimize lens surface parameters
         params = []
-        for i in optim_surf_range:
-            surf = self.surfaces[i]
+        for surf_idx in optim_surf_range:
+            surf = self.surfaces[surf_idx]
 
             if isinstance(surf, Aperture):
-                params += surf.get_optimizer_params(lr=lr[1], decay=decay)
+                params += surf.get_optimizer_params(lrs=[lrs[0]])
 
             elif isinstance(surf, Aspheric):
-                params += surf.get_optimizer_params(
-                    lr=lr, decay=decay, optim_mat=optim_mat
-                )
+                params += surf.get_optimizer_params(lrs=lrs[:4], decay=decay, optim_mat=optim_mat)
+
+            elif isinstance(surf, AsphericNorm):
+                params += surf.get_optimizer_params(lrs=lrs[:4], decay=decay, optim_mat=optim_mat)
 
             elif isinstance(surf, Phase):
-                if len(lr) > 4:
-                    params += surf.get_optimizer_params(lr=lr[4])
-                else:
-                    params += surf.get_optimizer_params(lr=lr[3])
+                params += surf.get_optimizer_params(lrs=[lrs[0], lrs[4]])
 
             # elif isinstance(surf, GaussianRBF):
-            #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
+            #     params += surf.get_optimizer_params(lrs=lr, optim_mat=optim_mat)
 
             # elif isinstance(surf, NURBS):
-            #     params += surf.get_optimizer_params(lr=lr[3], optim_mat=optim_mat)
+            #     params += surf.get_optimizer_params(lrs=lr, optim_mat=optim_mat)
 
             elif isinstance(surf, Plane):
-                params += surf.get_optimizer_params(lr=lr[1])
+                params += surf.get_optimizer_params(lrs=[lrs[0]], optim_mat=optim_mat)
 
             # elif isinstance(surf, PolyEven):
-            #     params += surf.get_optimizer_params(lr=lr, optim_mat=optim_mat)
+            #     params += surf.get_optimizer_params(lrs=lr, optim_mat=optim_mat)
 
             elif isinstance(surf, Spheric):
-                params += surf.get_optimizer_params(lr=lr[:2], optim_mat=optim_mat)
+                params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
 
             elif isinstance(surf, ThinLens):
-                params += surf.get_optimizer_params(lr=lr)
+                params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
 
             else:
                 raise Exception(
@@ -2243,13 +2225,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
         # Optimize sensor place
         self.d_sensor.requires_grad = True
-        params += [{"params": self.d_sensor, "lr": lr[1]}]
+        params += [{"params": self.d_sensor, "lr": lrs[0]}]
 
         return params
 
     def get_optimizer(
         self,
-        lr=[1e-4, 1e-4, 1e-1, 1e-4],
+        lrs=[1e-4, 1e-4, 1e-1, 1e-4],
         decay=0.01,
         optim_surf_range=None,
         optim_mat=False,
@@ -2257,7 +2239,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         """Get optimizers and schedulers for different lens parameters.
 
         Args:
-            lr (list): learning rate for different parameters [c, d, k, a]. Defaults to [1e-4, 1e-4, 0, 1e-4].
+            lrs (list): learning rate for different parameters [c, d, k, a]. Defaults to [1e-4, 1e-4, 0, 1e-4].
             decay (float): decay rate for higher order a. Defaults to 0.2.
             optim_surf_range (list): surface indices to be optimized. Defaults to None.
             optim_mat (bool): whether to optimize material. Defaults to False.
@@ -2265,7 +2247,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         Returns:
             list: optimizer parameters
         """
-        params = self.get_optimizer_params(lr, decay, optim_surf_range, optim_mat)
+        params = self.get_optimizer_params(lrs=lrs, decay=decay, optim_surf_range=optim_surf_range, optim_mat=optim_mat)
         optimizer = torch.optim.Adam(params)
         # optimizer = torch.optim.SGD(params)
         return optimizer
@@ -2287,7 +2269,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
                     s = Aperture.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Aspheric":
-                    s = Aspheric.init_from_dict(surf_dict)
+                    # s = Aspheric.init_from_dict(surf_dict)
+                    s = AsphericNorm.init_from_dict(surf_dict)
 
                 elif surf_dict["type"] == "Cubic":
                     s = Cubic.init_from_dict(surf_dict)

@@ -11,7 +11,7 @@ fnum: 4.0
 flange: 18.0
 thickness: 120.0
 lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric"], ["Spheric", "Aspheric"], ["Spheric", "Aspheric"]]
-lrs: [5e-4, 1e-3, 1e-1, 1e-3]
+lrs: [1e-3, 1e-3, 1e-2, 1e-4]
 decay: 0.001
 
 # # lens target example 2 (mobile lens)
@@ -21,5 +21,5 @@ decay: 0.001
 # flange: 1.0
 # thickness: 9.0
 # lens_type: [["Aperture"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"]]
-# lrs: [3e-4, 1e-4, 1e-1, 1e-3]
+# lrs: [1e-4, 1e-4, 1e-2, 1e-4]
 # decay: 0.01

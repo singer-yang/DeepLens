@@ -103,31 +103,38 @@ class Cubic(Surface):
 
         return sx, sy
 
-    def get_optimizer_params(self, lr, optim_mat=False):
+    def get_optimizer_params(self, lrs=[1e-4], decay=0.1, optim_mat=False):
         """Return parameters for optimizer."""
+        # Broadcast learning rates to all cubic coefficients
+        if len(lrs) == 1:
+            lrs = lrs + [lrs[0] * decay ** (b_degree + 1) for b_degree in range(self.b_degree - 1)]
+        
         params = []
 
+        # Optimize distance
         self.d.requires_grad_(True)
-        params.append({"params": [self.d], "lr": lr})
+        params.append({"params": [self.d], "lr": lrs[0]})
 
+        # Optimize cubic coefficients
         if self.b_degree == 1:
             self.b3.requires_grad_(True)
-            params.append({"params": [self.b3], "lr": lr})
+            params.append({"params": [self.b3], "lr": lrs[1]})
         elif self.b_degree == 2:
             self.b3.requires_grad_(True)
             self.b5.requires_grad_(True)
-            params.append({"params": [self.b3], "lr": lr})
-            params.append({"params": [self.b5], "lr": lr * 0.1})
+            params.append({"params": [self.b3], "lr": lrs[1]})
+            params.append({"params": [self.b5], "lr": lrs[2]})
         elif self.b_degree == 3:
             self.b3.requires_grad_(True)
             self.b5.requires_grad_(True)
             self.b7.requires_grad_(True)
-            params.append({"params": [self.b3], "lr": lr})
-            params.append({"params": [self.b5], "lr": lr * 0.1})
-            params.append({"params": [self.b7], "lr": lr * 0.01})
+            params.append({"params": [self.b3], "lr": lrs[1]})
+            params.append({"params": [self.b5], "lr": lrs[2]})
+            params.append({"params": [self.b7], "lr": lrs[3]})
         else:
             raise ValueError("Unsupported cubic degree!")
 
+        # Optimize material parameters
         if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
 
