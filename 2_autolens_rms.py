@@ -12,6 +12,7 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
 
 import logging
 import os
+import math
 import random
 import string
 from datetime import datetime
@@ -72,20 +73,20 @@ def config():
 
 def curriculum_design(
     self: GeoLens,
-    lrs=[5e-4, 1e-4, 0.1, 1e-4],
-    decay=0.02,
+    lrs=[1e-4, 1e-4, 1e-2, 1e-4],
+    decay=0.01,
     iterations=5000,
     test_per_iter=100,
     optim_mat=False,
     match_mat=False,
     shape_control=True,
-    sample_more_off_axis=True,
     result_dir="./results",
 ):
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
-    num_grid = 21
+    num_ring = 8
+    num_arm = 8
     spp = 512
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
@@ -94,32 +95,27 @@ def curriculum_design(
     # Log
     if not logging.getLogger().hasHandlers():
         set_logger(result_dir)
-    logging.info(
-        f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
-    )
+    logging.info(f"lr:{lrs}, iterations:{iterations}, spp:{spp}, num_ring:{num_ring}, num_arm:{num_arm}.")
 
     # Optimizer
-    optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
+    optimizer = self.get_optimizer(lrs, decay=decay, optim_mat=optim_mat)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
 
     # Training loop
-    pbar = tqdm(
-        total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0}
-    )
+    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0})
     for i in range(iterations + 1):
         # =======================================
         # Evaluate the lens
         # =======================================
         if i % test_per_iter == 0:
             with torch.no_grad():
-                # Curriculum learning: gradually change aperture size
+                # Curriculum learning: gradually increase aperture size
+                progress = 0.5 * (1 + math.cos(math.pi * (1 - i / iterations)))
                 aper_r = min(
-                    (aper_final - aper_start) * (i / iterations * 1.1) + aper_start,
+                    aper_start + (aper_final - aper_start) * progress,
                     aper_final,
                 )
-                # aper_r = aper_scheduler(i, iterations, self.surfaces[self.aper_idx].r)
-                self.surfaces[self.aper_idx].r = aper_r
-                self.update_float_setting()
+                self.surfaces[self.aper_idx].update_r(aper_r)
 
                 # Correct lens shape and evaluate current design
                 if i > 0:
@@ -134,14 +130,16 @@ def curriculum_design(
                 self.analysis(f"{result_dir}/iter{i}")
 
                 # Sample new rays and calculate target centers
+                self.update_float_setting()
+
                 rays_backup = []
                 for wv in WAVE_RGB:
-                    ray = self.sample_grid_rays(
-                        num_grid=num_grid,
+                    ray = self.sample_ring_arm_rays(
+                        num_ring=num_ring,
+                        num_arm=num_arm,
                         depth=depth,
-                        num_rays=spp,
+                        spp=spp,
                         wvln=wv,
-                        sample_more_off_axis=sample_more_off_axis,
                     )
                     rays_backup.append(ray)
 
@@ -162,16 +160,11 @@ def curriculum_design(
             ray_valid = ray.valid
             ray_err = ray_xy - center_ref
 
-            # # Use only quater of rays
-            # ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-            # ray_ra = ray_ra[num_grid // 2 :, num_grid // 2 :, :]
-
             # Weight mask (non-differentiable), shape of [num_grid, num_grid]
             if wv_idx == 0:
                 with torch.no_grad():
                     weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                     weight_mask /= ray_valid.sum(-1) + EPSILON
-                    weight_mask = weight_mask.sqrt()
                     weight_mask /= weight_mask.mean()
 
             # Loss on rms error, shape of [num_grid, num_grid]
@@ -226,33 +219,30 @@ if __name__ == "__main__":
         fnum=args["fnum"],
         foclen=args["foclen"],
     )
-    logging.info(
-        f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}"
-    )
+    logging.info(f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}")
 
     # =====> 2. Curriculum learning with RMS errors
+    # Curriculum learning is used to find an optimization path when starting from scratch, where the optimization difficulty is high and the gradients are unstable. 3000 iterations is a good starting value, while increasing the number of iterations will improve the optical performance. Also, we can choose to optimize materials in this stage.
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
         iterations=3000,
-        test_per_iter=50,
+        test_per_iter=100,
         optim_mat=False,
         match_mat=False,
         shape_control=True,
-        sample_more_off_axis=True,
         result_dir=args["result_dir"],
     )
 
-    # Need to train more for the best optical performance
+    # To obtain optimal optical performance, we typically need additional training iterations. This code uses strong lens design constraints with small learning rates, making optimization slow but steadily improving optical performance. For demonstration purposes, here we only train for 3000 steps.
     lens.optimize(
-        lrs=[float(lr) for lr in args["lrs"]],
+        lrs=[float(lr) * 0.1 for lr in args["lrs"]],
         decay=float(args["decay"]),
         iterations=3000,
+        test_per_iter=100,
         centroid=False,
         optim_mat=False,
-        match_mat=False,
         shape_control=True,
-        sample_more_off_axis=True,
         result_dir=f"{args['result_dir']}/fine-tune",
     )
 
@@ -260,11 +250,9 @@ if __name__ == "__main__":
     lens.prune_surf(expand_factor=0.02)
     lens.post_computation()
 
-    logging.info(
-        f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
-    )
+    logging.info(f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}.")
     lens.write_lens_json(f"{result_dir}/final_lens.json")
-    lens.analysis(save_name=f"{result_dir}/final_lens", zmx_format=True)
+    lens.analysis(save_name=f"{result_dir}/final_lens")
 
     # =====> 4. Create video
     create_video_from_images(f"{result_dir}", f"{result_dir}/autolens.mp4", fps=10)

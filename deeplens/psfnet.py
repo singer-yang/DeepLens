@@ -511,7 +511,6 @@ class PSFNet(DeepObj):
 
             o = torch.stack((x, y, z, foc_z), -1).float()
             psf = self.pred(o)
-            # breakpoint()
             if high_res:
                 render = local_psf_render_high_res(
                     img, psf, kernel_size=self.kernel_size

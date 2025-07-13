@@ -293,56 +293,64 @@ class Phase(Surface):
     # ==============================
     # Optimization
     # ==============================
-    def get_optimizer_params(self, lr=None):
+    def get_optimizer_params(self, lrs=[1e-4, 1e-2], optim_mat=False):
         """Generate optimizer parameters."""
+        # Optimize parameters
         params = []
         if self.param_model == "fresnel":
-            lr = 0.1 if lr is None else lr
             self.f0.requires_grad = True
-            params.append({"params": [self.f0], "lr": lr})
+            params.append({"params": [self.f0], "lr": lrs[0]})
 
         elif self.param_model == "binary2":
-            lr = 0.1 if lr is None else lr
+            self.d.requires_grad = True
+            params.append({"params": [self.d], "lr": lrs[0]})
+            
             self.order2.requires_grad = True
+            params.append({"params": [self.order2], "lr": lrs[1]})
+            
             self.order4.requires_grad = True
+            params.append({"params": [self.order4], "lr": lrs[1]})
+            
             self.order6.requires_grad = True
+            params.append({"params": [self.order6], "lr": lrs[1]})
+            
             self.order8.requires_grad = True
+            params.append({"params": [self.order8], "lr": lrs[1]})
+            
             self.order10.requires_grad = True
+            params.append({"params": [self.order10], "lr": lrs[1]})
+            
             self.order12.requires_grad = True
-            params.append({"params": [self.order2], "lr": lr})
-            params.append({"params": [self.order4], "lr": lr})
-            params.append({"params": [self.order6], "lr": lr})
-            params.append({"params": [self.order8], "lr": lr})
-            params.append({"params": [self.order10], "lr": lr})
-            params.append({"params": [self.order12], "lr": lr})
+            params.append({"params": [self.order12], "lr": lrs[1]})
 
         elif self.param_model == "poly1d":
-            lr = 0.001 if lr is None else lr
             self.order2.requires_grad = True
             self.order3.requires_grad = True
             self.order4.requires_grad = True
             self.order5.requires_grad = True
             self.order6.requires_grad = True
             self.order7.requires_grad = True
-            params.append({"params": [self.order2], "lr": lr})
-            params.append({"params": [self.order3], "lr": lr})
-            params.append({"params": [self.order4], "lr": lr})
-            params.append({"params": [self.order5], "lr": lr})
-            params.append({"params": [self.order6], "lr": lr})
-            params.append({"params": [self.order7], "lr": lr})
+            params.append({"params": [self.order2], "lr": lrs[0]})
+            params.append({"params": [self.order3], "lr": lrs[1]})
+            params.append({"params": [self.order4], "lr": lrs[2]})
+            params.append({"params": [self.order5], "lr": lrs[3]})
+            params.append({"params": [self.order6], "lr": lrs[4]})
+            params.append({"params": [self.order7], "lr": lrs[5]})
 
         elif self.param_model == "grating":
-            lr = 0.1 if lr is None else lr
             self.theta.requires_grad = True
             self.alpha.requires_grad = True
-            params.append({"params": [self.theta], "lr": lr})
-            params.append({"params": [self.alpha], "lr": lr})
+            params.append({"params": [self.theta], "lr": lrs[0]})
+            params.append({"params": [self.alpha], "lr": lrs[1]})
 
         else:
             raise NotImplementedError(
                 f"get_optimizer_params() is not implemented for {self.param_model}"
             )
 
+        # We do not optimize material parameters for phase surface.
+        assert optim_mat is False, "Material parameters are not optimized for phase surface."
+        
         return params
 
     def get_optimizer(self, lr=None):

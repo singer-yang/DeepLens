@@ -259,85 +259,54 @@ class Aspheric(Surface):
     # =======================================
     # Optimization
     # =======================================
-    def get_optimizer_params(
-        self, lr=[1e-3, 1e-4, 1e-1, 1e-4], decay=0.001, optim_mat=False
-    ):
+    def get_optimizer_params(self, lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.001, optim_mat=False):
         """Get optimizer parameters for different parameters.
 
         Args:
-            lr (list, optional): learning rates for c, d, k, ai. Defaults to [1e-3, 1e-4, 1e-1, 1e-4].
-            decay (float, optional): decay rate for ai. Defaults to 0.01.
+            lrs (list, optional): learning rates for d, c, k, ai2, (ai4, ai6, ai8, ai10, ai12).
+            optim_mat (bool, optional): whether to optimize material. Defaults to False.
         """
+        # Broadcast learning rates to all aspheric coefficients
+        if len(lrs) == 4:
+            lrs = lrs + [lrs[-1] * decay ** (ai_degree + 1) for ai_degree in range(self.ai_degree - 1)]
+
         params = []
-        if lr[0] > 0 and self.c != 0:
-            self.c.requires_grad_(True)
-            params.append({"params": [self.c], "lr": lr[0]})
+        param_idx = 0
 
-        if lr[1] > 0:
-            self.d.requires_grad_(True)
-            params.append({"params": [self.d], "lr": lr[1]})
+        # Optimize distance
+        self.d.requires_grad_(True)
+        params.append({"params": [self.d], "lr": lrs[param_idx]})
+        param_idx += 1
 
-        if lr[2] > 0 and self.k != 0:
-            self.k.requires_grad_(True)
-            params.append({"params": [self.k], "lr": lr[2]})
+        # Optimize curvature
+        self.c.requires_grad_(True)
+        params.append({"params": [self.c], "lr": lrs[param_idx]})
+        param_idx += 1
 
-        if lr[3] > 0:
-            if self.ai_degree == 4:
-                self.ai2.requires_grad_(True)
-                self.ai4.requires_grad_(True)
-                self.ai6.requires_grad_(True)
-                self.ai8.requires_grad_(True)
-                params.append({"params": [self.ai2], "lr": lr[3]})
-                params.append({"params": [self.ai4], "lr": lr[3] * decay})
-                params.append({"params": [self.ai6], "lr": lr[3] * decay**2})
-                params.append({"params": [self.ai8], "lr": lr[3] * decay**3})
-            elif self.ai_degree == 5:
-                self.ai2.requires_grad_(True)
-                self.ai4.requires_grad_(True)
-                self.ai6.requires_grad_(True)
-                self.ai8.requires_grad_(True)
-                self.ai10.requires_grad_(True)
-                params.append({"params": [self.ai2], "lr": lr[3]})
-                params.append({"params": [self.ai4], "lr": lr[3] * decay})
-                params.append({"params": [self.ai6], "lr": lr[3] * decay**2})
-                params.append({"params": [self.ai8], "lr": lr[3] * decay**3})
-                params.append({"params": [self.ai10], "lr": lr[3] * decay**4})
-            elif self.ai_degree == 6:
-                self.ai2.requires_grad_(True)
-                self.ai4.requires_grad_(True)
-                self.ai6.requires_grad_(True)
-                self.ai8.requires_grad_(True)
-                self.ai10.requires_grad_(True)
-                self.ai12.requires_grad_(True)
-                params.append({"params": [self.ai2], "lr": lr[3]})
-                params.append({"params": [self.ai4], "lr": lr[3] * decay})
-                params.append({"params": [self.ai6], "lr": lr[3] * decay**2})
-                params.append({"params": [self.ai8], "lr": lr[3] * decay**3})
-                params.append({"params": [self.ai10], "lr": lr[3] * decay**4})
-                params.append({"params": [self.ai12], "lr": lr[3] * decay**5})
-            else:
+        # Optimize conic constant
+        self.k.requires_grad_(True)
+        params.append({"params": [self.k], "lr": lrs[param_idx]})
+        param_idx += 1
+
+        # Optimize aspheric coefficients
+        if self.ai is not None:
+            if self.ai_degree > 0:
                 for i in range(1, self.ai_degree + 1):
-                    exec(f"self.ai{2 * i}.requires_grad_(True)")
-                    exec(
-                        f"params.append({{'params': [self.ai{2 * i}], 'lr': lr[3] * decay**{i - 1}}})"
-                    )
+                    p_name = f"ai{2*i}"
+                    p = getattr(self, p_name)
+                    p.requires_grad_(True)
+                    params.append({"params": [p], "lr": lrs[param_idx]})
+                    param_idx += 1
 
+        # Optimize material parameters
         if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
 
         return params
-    
 
-    # =======================================
-    # Manufacturing
-    # =======================================
     @torch.no_grad()
     def perturb(self, tolerance):
-        """Randomly perturb surface parameters to simulate manufacturing errors.
-
-        Args:
-            tolerance (dict): Tolerance for surface parameters.
-        """
+        """Perturb the surface with some tolerance."""
         self.r_offset = float(self.r * np.random.randn() * tolerance.get("r", 0.001))
         self.c_offset = float(self.c * np.random.randn() * tolerance.get("c", 0.001))
         self.d_offset = float(np.random.randn() * tolerance.get("d", 0.001))
