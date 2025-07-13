@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pyvista as pv
 import pyvistaqt as pvqt
 
-from deeplens.view_3d import *
+from deeplens.geolens_pkg.view_3d import draw_lens_3D
 
 R = np.array([255,0,0])
 G = np.array([0,255,0])
