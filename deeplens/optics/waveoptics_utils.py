@@ -13,8 +13,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .basics import DEFAULT_WAVE
-from .wave import ComplexWave
+from deeplens.optics.basics import DEFAULT_WAVE
+from deeplens.optics.wave import ComplexWave
 
 
 # ==================================

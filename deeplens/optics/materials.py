@@ -11,7 +11,7 @@ import json
 import os
 import torch
 import re
-from .basics import DeepObj
+from deeplens.optics.basics import DeepObj
 
 # Load materials data from AGF file
 def read_agf(file_path):
