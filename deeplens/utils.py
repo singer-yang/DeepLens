@@ -10,7 +10,6 @@ import torch
 from skimage.metrics import peak_signal_noise_ratio
 from skimage.metrics import structural_similarity
 from tqdm import tqdm
-import torch.nn.functional as F
 
 
 # ==================================
