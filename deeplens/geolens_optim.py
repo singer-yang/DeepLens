@@ -50,7 +50,7 @@ class GeoLensOptim:
 
             # Self intersection constraints
             self.dist_min = 0.05
-            self.dist_max = 0.6
+            self.dist_max = 1.0
             self.thickness_min = 0.25
             self.thickness_max = 2.0
             self.flange_min = 0.25
@@ -68,7 +68,7 @@ class GeoLensOptim:
         else:
             self.is_cellphone = False
 
-            # Self intersection constraints
+            # Self-intersection constraints
             self.dist_min = 0.1
             self.dist_max = 50.0  # float("inf")
             self.thickness_min = 0.3
@@ -86,9 +86,9 @@ class GeoLensOptim:
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
 
-    def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=1.0):
-        """An empirical regularization loss for lens design. 
-        
+    def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=5.0):
+        """An empirical regularization loss for lens design.
+
         By default we should use weight 0.1 * self.loss_reg() in the total loss.
         """
         # Loss functions for regularization
@@ -105,21 +105,21 @@ class GeoLensOptim:
 
         # Return loss and loss dictionary
         loss_dict = {
-            'loss_focus': loss_focus.item(),
-            'loss_intersec': loss_intersec.item(),
-            'loss_surf': loss_surf.item(),
+            "loss_focus": loss_focus.item(),
+            "loss_intersec": loss_intersec.item(),
+            "loss_surf": loss_surf.item(),
             'loss_chief_ray_angle': loss_chief_ray_angle.item(),
         }
         return loss_reg, loss_dict
 
-    def loss_infocus(self, target=0.005):
+    def loss_infocus(self, target=0.01):
         """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
 
         Args:
             target (float, optional): target of RMS loss. Defaults to 0.005 [mm].
         """
         loss = torch.tensor(0.0, device=self.device)
-        # for wv in WAVE_RGB:
+
         # Ray tracing and calculate RMS error
         ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, wvln=WAVE_RGB[1])
         ray = self.trace2sensor(ray)
@@ -129,15 +129,15 @@ class GeoLensOptim:
         if rms_error > target:
             loss += rms_error
 
-        return loss #/ len(WAVE_RGB)
-    
+        return loss
+
     def loss_surface(self):
         """Penalize surface shape:
-            1. Penalize maximum sag
-            2. Penalize diameter to thickness ratio
-            3. Penalize thick_max to thick_min ratio
-            4. Penalize diameter to thickness ratio
-            5. Penalize maximum to minimum thickness ratio
+        1. Penalize maximum sag
+        2. Penalize diameter to thickness ratio
+        3. Penalize thick_max to thick_min ratio
+        4. Penalize diameter to thickness ratio
+        5. Penalize maximum to minimum thickness ratio
         """
         sag_max_allowed = self.sag_max
         grad_max_allowed = self.grad_max
@@ -171,6 +171,7 @@ class GeoLensOptim:
             if grad2_max > grad2_max_allowed:
                 loss += 10 * grad2_max
 
+            # Diameter to thickness ratio, thick_max to thick_min ratio
             if not self.surfaces[i].mat2.name == "air":
                 surf2 = self.surfaces[i + 1]
                 surf1 = self.surfaces[i]
@@ -210,7 +211,7 @@ class GeoLensOptim:
         loss_min = torch.tensor(0.0, device=self.device)
         loss_max = torch.tensor(0.0, device=self.device)
 
-        # Constraints for distance between surfaces
+        # Distance between surfaces
         for i in range(len(self.surfaces) - 1):
             # Sample points on the two surfaces
             current_surf = self.surfaces[i]
@@ -219,6 +220,7 @@ class GeoLensOptim:
             z_front = current_surf.surface_with_offset(r, 0.0)
             z_next = next_surf.surface_with_offset(r, 0.0)
 
+            # Air gap
             if self.surfaces[i].mat2.name == "air":
                 # Constrain minimum distance between surfaces
                 dist_min = torch.min(z_next - z_front)
@@ -229,6 +231,8 @@ class GeoLensOptim:
                 dist_max = z_next[0] - z_front[0]
                 if dist_max > space_max_allowed:
                     loss_max += dist_max
+
+            # Lens thickness
             else:
                 # Constrain minimum distance of elements
                 dist_min = torch.min(z_next - z_front)
@@ -240,7 +244,7 @@ class GeoLensOptim:
                 if dist_max > thickness_max_allowed:
                     loss_max += dist_max
 
-        # Constraints for distance to sensor (flange distance)
+        # Distance to sensor (flange)
         last_surf = self.surfaces[-1]
         r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
@@ -263,9 +267,7 @@ class GeoLensOptim:
             depth (float, optional): depth of the lens. Defaults to DEPTH.
         """
         # Sample grid rays, shape [num_grid, num_grid, num_rays, 3]
-        ray = self.sample_grid_rays(
-            num_grid=GEO_GRID, depth=depth, sample_more_off_axis=True
-        )
+        ray = self.sample_grid_rays(num_grid=GEO_GRID, depth=depth, sample_more_off_axis=True)
         ray = self.trace2sensor(ray)
 
         # Loss (we want to maximize ray angle term)
@@ -283,9 +285,7 @@ class GeoLensOptim:
         max_angle_deg = self.chief_ray_angle_max
 
         # Ray tracing
-        ray = self.sample_grid_rays(
-            num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25
-        )
+        ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25)
         ray = self.trace2sensor(ray)
 
         # Calculate chief ray angle
@@ -301,7 +301,7 @@ class GeoLensOptim:
         loss = -cos_cra.mean()
 
         return loss
-    
+
     # ================================================================
     # Loss functions for image quality
     # ================================================================
@@ -338,9 +338,7 @@ class GeoLensOptim:
             # Calculate reference center, shape of (..., 2)
             if i == 0:
                 with torch.no_grad():
-                    ray_center_green = -self.psf_center(
-                        point=ray.o[:, :, 0, :], method="pinhole"
-                    )
+                    ray_center_green = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
 
             ray = self.trace2sensor(ray)
 
@@ -378,37 +376,22 @@ class GeoLensOptim:
         all_rms_radii = []
         for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
             # Ray tracing
-            ray = self.sample_parallel(
-                fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth
-            )
+            ray = self.sample_parallel(fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth)
             ray = self.trace2sensor(ray)
 
             # Green light point center for reference
             if i == 0:
-                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(
-                    -2
-                ) / ray.valid.sum(-1).add(EPSILON).unsqueeze(
-                    -1
-                )  # shape [1, num_fields, 2]
-                pointc_green = pointc_green.unsqueeze(-2).repeat(
-                    1, 1, SPP_PSF, 1
-                )  # shape [num_fields, num_fields, num_rays, 2]
+                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(-2) / ray.valid.sum(-1).add(EPSILON).unsqueeze(-1)  # shape [1, num_fields, 2]
+                pointc_green = pointc_green.unsqueeze(-2).repeat(1, 1, SPP_PSF, 1)  # shape [num_fields, num_fields, num_rays, 2]
 
             # Calculate RMS error for different FoVs
             o2_norm = (ray.o[..., :2] - pointc_green) * ray.valid.unsqueeze(-1)
 
             # error
-            rms_error = torch.mean(
-                (
-                    ((o2_norm**2).sum(-1) * ray.valid).sum(-1)
-                    / (ray.valid.sum(-1) + EPSILON)
-                ).sqrt()
-            )
+            rms_error = torch.mean((((o2_norm**2).sum(-1) * ray.valid).sum(-1) / (ray.valid.sum(-1) + EPSILON)).sqrt())
 
             # radius
-            rms_radius = torch.mean(
-                ((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values
-            )
+            rms_radius = torch.mean(((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values)
             all_rms_errors.append(rms_error)
             all_rms_radii.append(rms_radius)
 
@@ -460,17 +443,49 @@ class GeoLensOptim:
     # ================================================================
     # Example optimization function
     # ================================================================
+    def sample_ring_arm_rays(self, num_ring=10, num_arm=10, spp=1000, depth=DEPTH, wvln=DEFAULT_WAVE, scale_pupil=1.0):
+        """Sample rays from object space using a ring-arm pattern.
+
+        This method distributes sampling points (origins of ray bundles) on a polar grid in the object plane,
+        defined by field of view. This is useful for capturing lens performance across the full field.
+        The points include the center and `num_ring` rings with `num_arm` points on each.
+
+        Args:
+            num_ring (int): Number of rings to sample in the field of view.
+            num_arm (int): Number of arms (spokes) to sample for each ring.
+            spp (int): Total number of rays to be sampled, distributed among field points.
+            depth (float): Depth of the object plane.
+            wvln (float): Wavelength of the rays.
+            scale_pupil (float): Scale factor for the pupil size.
+
+        Returns:
+            Ray: A Ray object containing the sampled rays.
+        """
+        # Create points on rings and arms
+        max_fov_rad = self.hfov
+        ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
+        arm_angles = torch.linspace(0.0, 2 * np.pi, num_arm + 1, device=self.device)[:-1]
+        ring_grid, arm_grid = torch.meshgrid(ring_fovs, arm_angles, indexing="ij")
+        fov_x_rad = ring_grid * torch.cos(arm_grid)
+        fov_y_rad = ring_grid * torch.sin(arm_grid)
+        x = depth * torch.tan(fov_x_rad)
+        y = depth * torch.tan(fov_y_rad)
+        z = torch.full_like(x, depth)
+        points = torch.stack([x, y, z], dim=-1)  # shape: [num_ring, num_arm, 3]
+
+        # Sample rays
+        rays = self.sample_from_points(points=points, num_rays=spp, wvln=wvln, scale_pupil=scale_pupil)
+        return rays
+
     def optimize(
         self,
-        lrs=[1e-3, 1e-4, 1e-1, 1e-4],
-        decay=0.001,
+        lrs=[1e-4, 1e-4, 1e-1, 1e-4],
+        decay=0.01,
         iterations=5000,
         test_per_iter=100,
         centroid=False,
         optim_mat=False,
-        match_mat=False,
         shape_control=True,
-        sample_more_off_axis=False,
         result_dir=None,
     ):
         """Optimize the lens by minimizing rms errors.
@@ -483,29 +498,25 @@ class GeoLensOptim:
             4, correct params range
             5. nan can be introduced by torch.sqrt() function in the backward pass.
         """
-        # Preparation
+        # Experiment settings
         depth = DEPTH
-        num_grid = 21
+        num_ring = 10
+        num_arm = 10
         spp = 1024
-
         sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
+        # Result directory and logger
         if result_dir is None:
-            result_dir = (
-                f"./results/{datetime.now().strftime('%m%d-%H%M%S')}-DesignLens"
-            )
+            result_dir = f"./results/{datetime.now().strftime('%m%d-%H%M%S')}-DesignLens"
 
         os.makedirs(result_dir, exist_ok=True)
         if not logging.getLogger().hasHandlers():
             set_logger(result_dir)
-        logging.info(
-            f"lr:{lrs}, decay:{decay}, iterations:{iterations}, spp:{spp}, grid:{num_grid}."
-        )
+        logging.info(f"lr:{lrs}, iterations:{iterations}, num_ring:{num_ring}, num_arm:{num_arm}, rays_per_fov:{spp}.")
 
-        optimizer = self.get_optimizer(lrs, decay, optim_mat=optim_mat)
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_warmup_steps=100, num_training_steps=iterations
-        )
+        # Optimizer and scheduler
+        optimizer = self.get_optimizer(lrs, decay=decay, optim_mat=optim_mat)
+        scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=100, num_training_steps=iterations)
 
         # Training loop
         pbar = tqdm(
@@ -517,18 +528,11 @@ class GeoLensOptim:
             # ===> Evaluate the lens
             if i % test_per_iter == 0:
                 with torch.no_grad():
-                    if i > 0:
-                        if shape_control:
-                            self.correct_shape()
-
-                        if optim_mat and match_mat:
-                            self.match_materials()
+                    if shape_control:
+                        self.correct_shape()
 
                     self.write_lens_json(f"{result_dir}/iter{i}.json")
-                    self.analysis(
-                        f"{result_dir}/iter{i}",
-                        multi_plot=False,
-                    )
+                    self.analysis(f"{result_dir}/iter{i}")
 
             # ===> Sample new rays and calculate center
             if i % sample_rays_per_iter == 0:
@@ -537,25 +541,15 @@ class GeoLensOptim:
                     self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
-                        ray = self.sample_grid_rays(
-                            num_grid=num_grid,
-                            depth=depth,
-                            num_rays=spp,
-                            wvln=wv,
-                            sample_more_off_axis=sample_more_off_axis,
-                        )
+                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.0)
                         rays_backup.append(ray)
 
                     # Calculate ray centers
                     if centroid:
-                        center_ref = -self.psf_center(
-                            point=ray.o[:, :, 0, :], method="chief_ray"
-                        )
+                        center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="chief_ray")
                         center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
                     else:
-                        center_ref = -self.psf_center(
-                            point=ray.o[:, :, 0, :], method="pinhole"
-                        )
+                        center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
                         center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
             # ===> Optimize lens by minimizing RMS
@@ -570,16 +564,11 @@ class GeoLensOptim:
                 ray_valid = ray.valid
                 ray_err = ray_xy - center_ref
 
-                # Use only quater of the sensor
-                ray_err = ray_err[num_grid // 2 :, num_grid // 2 :, :, :]
-                ray_valid = ray_valid[num_grid // 2 :, num_grid // 2 :, :]
-
                 # Weight mask, shape of [num_grid, num_grid]
                 if wv_idx == 0:
                     with torch.no_grad():
                         weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                         weight_mask /= ray_valid.sum(-1) + EPSILON
-                        weight_mask = weight_mask
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error

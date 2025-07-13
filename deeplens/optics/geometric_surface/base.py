@@ -11,9 +11,9 @@ from deeplens.optics.basics import DeepObj
 from deeplens.optics.materials import Material
 
 # Newton's method parameters
-NEWTONS_MAXITER = 10  # maximum number of Newton iterations
-NEWTONS_TOLERANCE = 50 * 1e-6  # [mm], Newton method solution threshold
-NEWTONS_STEP_BOUND = 5  # [mm], maximum step size in each Newton iteration
+NEWTONS_MAXITER = 10.0  # maximum number of Newton iterations
+NEWTONS_TOLERANCE = 50.0 * 1e-6  # [mm], Newton method solution threshold
+NEWTONS_STEP_BOUND = 5.0  # [mm], maximum step size in each Newton iteration
 EPSILON = 1e-12
 
 class Surface(DeepObj):
@@ -33,7 +33,8 @@ class Surface(DeepObj):
         # Next aterial
         self.mat2 = Material(mat2)
 
-        self.to(device)
+        self.device = device if device is not None else torch.device("cpu")
+        self.to(self.device)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
@@ -428,16 +429,27 @@ class Surface(DeepObj):
     # =========================================
     # Optimization
     # =========================================
-    def get_optimizer_params(self, lr, optim_mat=False):
+    def get_optimizer_params(self, lrs=[1e-4], optim_mat=False):
+        """Get optimizer parameters for different parameters.
+
+        Args:
+            lrs (list): learning rates for different parameters.
+            optim_mat (bool): whether to optimize material. Defaults to False.
+        """
         raise NotImplementedError(
             "get_optimizer_params() is not implemented for {}".format(
                 self.__class__.__name__
             )
         )
 
-    def get_optimizer(self, lr, optim_mat=False):
-        params = self.get_optimizer_params(lr, optim_mat=optim_mat)
+    def get_optimizer(self, lrs=[1e-4], optim_mat=False):
+        """Get optimizer for the surface."""
+        params = self.get_optimizer_params(lrs, optim_mat=optim_mat)
         return torch.optim.Adam(params)
+
+    def update_r(self, r):
+        """Update surface radius."""
+        self.r = r
 
     # =========================================
     # Manufacturing
