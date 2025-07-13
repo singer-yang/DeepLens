@@ -1,3 +1,10 @@
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
 """
 An implicit network to represent the PSF of a lens.
 
@@ -5,11 +12,6 @@ For rotationally symmetric lenses, we can represent the PSF along the optical ax
 
 Technical Paper:
     Xinge Yang, Qiang Fu, Mohamed Elhoseiny, and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import numpy as np
@@ -21,10 +23,10 @@ from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
-from .geolens import GeoLens
-from .network.surrogate import MLP, MLPConv
-from .optics.basics import DeepObj, init_device
-from .optics.render_psf import local_psf_render, local_psf_render_high_res
+from deeplens.geolens import GeoLens
+from deeplens.network.surrogate import MLP, MLPConv
+from deeplens.optics.basics import DeepObj, init_device
+from deeplens.optics.render_psf import local_psf_render, local_psf_render_high_res
 
 DMIN = 200  # [mm]
 DMAX = 20000  # [mm]
