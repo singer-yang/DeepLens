@@ -104,8 +104,8 @@ class Spheric(Surface):
         self.d.requires_grad_(True)
 
         params = []
-        params.append({"params": [self.c], "lr": lrs[0]})
-        params.append({"params": [self.d], "lr": lrs[1]})
+        params.append({"params": [self.d], "lr": lrs[0]})
+        params.append({"params": [self.c], "lr": lrs[1]})
 
         if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
