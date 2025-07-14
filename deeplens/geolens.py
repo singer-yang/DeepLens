@@ -48,6 +48,7 @@ from deeplens.optics.geometric_surface import (
     Aspheric,
     AsphericNorm,
     Cubic,
+    Cylindric,
     Phase,
     Plane,
     Spheric,
@@ -504,8 +505,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         theta = torch.rand(*shape, device=device) * 2 * torch.pi
 
         # Generate random radii with square root for uniform distribution
-        r2 = torch.rand(*shape, device=device) * r**2
-        radius = torch.sqrt(r2 + EPSILON)
+        r2 = torch.rand(*shape, device=device) * (r * 1.05)**2
+        radius = torch.clamp(torch.sqrt(r2 + EPSILON), max=r)
 
         # Convert to Cartesian coordinates
         x = radius * torch.cos(theta)
@@ -1999,7 +2000,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             #     # self.surfaces[i].r = self.r_sensor
             #     self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
         else:
-            expand_factor = 0.4 if expand_factor is None else expand_factor
+            expand_factor = 0.25 if expand_factor is None else expand_factor
 
         # Sample maximum fov rays to cut valid surface height
         if self.hfov is not None:
@@ -2215,6 +2216,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             elif isinstance(surf, Spheric):
                 params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
 
+            elif isinstance(surf, Cylindric):
+                params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
+
             elif isinstance(surf, ThinLens):
                 params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
 
@@ -2274,6 +2278,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
                 elif surf_dict["type"] == "Cubic":
                     s = Cubic.init_from_dict(surf_dict)
+
+                elif surf_dict["type"] == "Cylindric":
+                    s = Cylindric.init_from_dict(surf_dict)
 
                 # elif surf_dict["type"] == "GaussianRBF":
                 #     s = GaussianRBF.init_from_dict(surf_dict)
