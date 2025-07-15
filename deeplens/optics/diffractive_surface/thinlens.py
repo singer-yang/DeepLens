@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn.functional as F
-from .diffractive import DiffractiveSurface
+from deeplens.optics.diffractive_surface.diffractive import DiffractiveSurface
 
 
 class ThinLens(DiffractiveSurface):

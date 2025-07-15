@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 
-from .base import Surface
+from deeplens.optics.geometric_surface.base import Surface
 
 
 class Aperture(Surface):

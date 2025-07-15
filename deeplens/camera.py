@@ -1,10 +1,17 @@
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
 """Camera class works as a renderer in an end-to-end pipeline. It contains a lens and a sensor."""
 
 import torch
 
-from .optics.basics import DeepObj
-from .geolens import GeoLens
-from .sensor import RGBSensor
+from deeplens.optics.basics import DeepObj
+from deeplens.geolens import GeoLens
+from deeplens.sensor import RGBSensor
 
 
 class Renderer:

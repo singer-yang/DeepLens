@@ -3,7 +3,7 @@
 import torch
 import torch.nn.functional as F
 
-from .base import Surface
+from deeplens.optics.geometric_surface.base import Surface
 
 
 class ThinLens(Surface):

@@ -1,11 +1,9 @@
-"""Cubic surface.
+"""Cubic surface."""
 
-Typical equation: z(x,y) = b3 * (x^3 + y^3)
-"""
 import numpy as np
 import torch
 
-from .base import Surface
+from deeplens.optics.geometric_surface.base import Surface
 
 
 class Cubic(Surface):

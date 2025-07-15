@@ -1,11 +1,20 @@
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
+"""Wave optics utilities."""
+
 import cv2 as cv
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .basics import DEFAULT_WAVE
-from .wave import ComplexWave
+from deeplens.optics.basics import DEFAULT_WAVE
+from deeplens.optics.wave import ComplexWave
 
 
 # ==================================
