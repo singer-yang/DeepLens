@@ -258,6 +258,11 @@ class DiffractiveSurface(DeepObj):
         pmap = self.get_phase_map0()
         save_image(pmap, save_name, normalize=True)
 
+    def draw_phase_map_nbit(self, bits=16, save_name="./DOE_phase_map.png"):
+        """Draw phase map. Range from [0, 2pi]."""
+        pmap_q = self.pmap_quantize(bits)
+        save_image(pmap_q, save_name, normalize=True)
+
     def draw_phase_map_fab(self, save_name="./DOE_phase_map.png"):
         """Draw phase map. Range from [0, 2pi]."""
         pmap = self.get_phase_map0()
@@ -280,6 +285,29 @@ class DiffractiveSurface(DeepObj):
     def draw_phase_map3d(self, save_name="./DOE_phase_map3d.png"):
         """Draw 3D phase map."""
         pmap = self.get_phase_map0() / 20.0
+        x = np.linspace(-self.w / 2, self.w / 2, self.res[0])
+        y = np.linspace(-self.h / 2, self.h / 2, self.res[1])
+        X, Y = np.meshgrid(x, y)
+
+        fig = plt.figure(figsize=(5, 5))
+        ax = fig.add_subplot(111, projection="3d")
+        ax.scatter(
+            X.flatten(),
+            Y.flatten(),
+            pmap.cpu().numpy().flatten(),
+            marker=".",
+            s=0.01,
+            c=pmap.cpu().numpy().flatten(),
+            cmap="viridis",
+        )
+        ax.set_aspect("equal")
+        ax.axis("off")
+        fig.savefig(save_name, dpi=600, bbox_inches="tight")
+        plt.close(fig)
+
+    def draw_quantized_phase_map3d(self, bits=16, save_name="./DOE_quantized_phase_map3d.png"):
+        """Draw 3D quantized phase map."""
+        pmap = self.pmap_quantize(bits) / 20.0
         x = np.linspace(-self.w / 2, self.w / 2, self.res[0])
         y = np.linspace(-self.h / 2, self.h / 2, self.res[1])
         X, Y = np.meshgrid(x, y)
