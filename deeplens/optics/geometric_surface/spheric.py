@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 
-from .base import EPSILON, Surface
+from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class Spheric(Surface):
@@ -104,8 +104,8 @@ class Spheric(Surface):
         self.d.requires_grad_(True)
 
         params = []
-        params.append({"params": [self.c], "lr": lrs[0]})
-        params.append({"params": [self.d], "lr": lrs[1]})
+        params.append({"params": [self.d], "lr": lrs[0]})
+        params.append({"params": [self.c], "lr": lrs[1]})
 
         if optim_mat and self.mat2.get_name() != "air":
             params += self.mat2.get_optimizer_params()
