@@ -12,7 +12,6 @@
 3. Helper functions
 """
 
-import pickle
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
@@ -101,52 +100,46 @@ class ComplexWave(DeepObj):
         self.res = self.u.shape[-2:]
         return self
 
-    def load(self, data_path):
-        if data_path.endswith(".pkl"):
-            self.load_pkl(data_path)
+    def load(self, filepath):
+        if filepath.endswith(".npz"):
+            self.load_npz(filepath)
         else:
             raise Exception("Unimplemented file format.")
 
-    def load_pkl(self, data_path):
-        """Load data from pickle file."""
-        with open(data_path, "rb") as tf:
-            wave_data = pickle.load(tf)
-            tf.close()
+    def load_npz(self, filepath):
+        """Load data from npz file."""
+        data = np.load(filepath)
+        self.u = torch.from_numpy(data["u"])
+        self.x = torch.from_numpy(data["x"])
+        self.y = torch.from_numpy(data["y"])
+        self.wvln = data["wvln"].item()
+        self.phy_size = data["phy_size"].tolist()
+        self.res = self.u.shape[-2:]
 
-        amp = wave_data["amp"]
-        phi = wave_data["phi"]
-        self.u = amp * torch.exp(1j * phi)
-        self.x = wave_data["x"]
-        self.y = wave_data["y"]
-        self.wvln = wave_data["wvln"]
-        self.phy_size = wave_data["phy_size"]
-        self.res = self.x.shape
+    def save(self, filepath="./wavefield.npz"):
+        """Save the complex wave field to a npz file."""
+        if filepath.endswith(".npz"):
+            self.save_npz(filepath)
+        else:
+            raise Exception("Unimplemented file format.")
 
-    def save(self, save_path="./wavefield.pkl"):
-        """Save the complex wave field to a pickle file."""
-        self.save_data(save_path)
-
-    def save_data(self, save_path="./wavefield.pkl"):
-        """Save the complex wave field to a pickle file."""
+    def save_npz(self, filepath="./wavefield.npz"):
+        """Save the complex wave field to a npz file."""
         # Save data
-        data = {
-            "amp": self.u.cpu().abs(),
-            "phi": torch.angle(self.u.cpu()),
-            "x": self.x.cpu(),
-            "y": self.y.cpu(),
-            "wvln": self.wvln,
-            "phy_size": self.phy_size,
-        }
-
-        with open(save_path, "wb") as tf:
-            pickle.dump(data, tf)
-            tf.close()
+        np.savez_compressed(
+            filepath,
+            u=self.u.cpu().numpy(),
+            x=self.x.cpu().numpy(),
+            y=self.y.cpu().numpy(),
+            wvln=np.array(self.wvln),
+            phy_size=np.array(self.phy_size),
+        )
 
         # Save intensity, amplitude, and phase images
         u = self.u.cpu()
-        save_image(u.abs() ** 2, f"{save_path[:-4]}_intensity.png", normalize=True)
-        save_image(u.abs(), f"{save_path[:-4]}_amp.png", normalize=True)
-        save_image(u.angle(), f"{save_path[:-4]}_phase.png", normalize=True)
+        save_image(u.abs() ** 2, f"{filepath[:-4]}_intensity.png", normalize=True)
+        save_image(u.abs(), f"{filepath[:-4]}_amp.png", normalize=True)
+        save_image(u.angle(), f"{filepath[:-4]}_phase.png", normalize=True)
 
     # =============================================
     # Wave propagation
@@ -168,7 +161,7 @@ class ComplexWave(DeepObj):
             self: propagated complex wave field.
         """
         # Determine propagation method and perform propagation
-        wvln_mm = self.wvln * 1e-3 # [um] to [mm]
+        wvln_mm = self.wvln * 1e-3  # [um] to [mm]
         if prop_dist < DELTA:
             # Zero distance: do nothing
             pass
@@ -204,6 +197,10 @@ class ComplexWave(DeepObj):
         prop_dist = z - self.z[0, 0].item()
         self.prop(prop_dist, n=n)
         return self
+
+    # =============================================
+    # Helper functions
+    # =============================================
 
     def gen_xy_grid(self):
         """Generate the x and y grid."""
@@ -305,7 +302,15 @@ class ComplexWave(DeepObj):
             raise Exception("Unsupported complex field shape.")
 
     def pad(self, Hpad, Wpad):
-        """Pad the input field by (Hpad, Hpad, Wpad, Wpad). This step will also expand physical size of the field."""
+        """Pad the input field by (Hpad, Hpad, Wpad, Wpad). This step will also expand physical size of the field.
+
+        Args:
+            Hpad (int): Number of pixels to pad on the top and bottom.
+            Wpad (int): Number of pixels to pad on the left and right.
+
+        Returns:
+            self: Padded complex wave field.
+        """
         self.u = F.pad(self.u, (Hpad, Hpad, Wpad, Wpad), mode="constant", value=0)
 
         Horg, Worg = self.res
@@ -315,8 +320,7 @@ class ComplexWave(DeepObj):
             self.phy_size[1] * self.res[1] / Worg,
         ]
         self.x, self.y = self.gen_xy_grid()
-        z = self.z[0, 0]
-        self.z = F.pad(self.z, (Hpad, Hpad, Wpad, Wpad), mode="constant", value=z)
+        self.z = F.pad(self.z, (Hpad, Hpad, Wpad, Wpad), mode="replicate")
 
     def flip(self):
         """Flip the field horizontally and vertically."""
@@ -333,10 +337,6 @@ class ComplexWave(DeepObj):
 def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
     """Angular spectrum method.
 
-    Reference:
-        [1] https://github.com/kaanaksit/odak/blob/master/odak/wave/classical.py#L293
-        [2] https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
-
     Args:
         u (tesor): complex field, shape [H, W] or [B, 1, H, W]
         z (float): propagation distance in [mm]
@@ -347,6 +347,10 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
 
     Returns:
         u: complex field, shape [H, W] or [B, 1, H, W]
+
+    Reference:
+        [1] https://github.com/kaanaksit/odak/blob/master/odak/wave/classical.py#L293
+        [2] https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
     """
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
     wvln_mm = wvln / n * 1e-3  # [um] to [mm]
@@ -403,11 +407,6 @@ def ScalableASM(u, z, wvln, ps, n=1.0, padding=True):
 def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
     """Fresnel propagation with FFT.
 
-    Reference:
-        [1] Computational fourier optics : a MATLAB tutorial. Chapter 5, section 5.1
-        [2] https://qiweb.tudelft.nl/aoi/wavefielddiffraction/wavefielddiffraction.html
-        [3] https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
-
     Args:
         u: complex field, shape [H, W] or [B, C, H, W]
         z (float): propagation distance
@@ -416,6 +415,11 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
         n (float): refractive index
         padding (bool): padding or not
         TF (bool): transfer function or impulse response
+
+    Reference:
+        [1] Computational fourier optics : a MATLAB tutorial. Chapter 5, section 5.1
+        [2] https://qiweb.tudelft.nl/aoi/wavefielddiffraction/wavefielddiffraction.html
+        [3] https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
     """
     # Padding
     if padding:
@@ -578,10 +582,6 @@ def RayleighSommerfeldIntegral(
 ):
     """Discrete Rayleigh-Sommerfeld diffraction integration. Rayleigh-Sommerfeld diffraction is a brute force integration approach, it doesnot require any approximation. It usually works as the ground truth.
 
-    Reference:
-        [1] Modeling and propagation of near-field diffraction patterns: A more complete approach. Eq (9).
-        [2] https://www.mathworks.com/matlabcentral/fileexchange/75049-complete-rayleigh-sommerfeld-model-version-2
-
     Args:
         u1: complex amplitude of input field, shape [H1, W1]
         x1: physical coordinate of input field, unit [mm], shape [H1, W1]
@@ -591,10 +591,14 @@ def RayleighSommerfeldIntegral(
         x2: physical coordinate of output field, unit [mm], shape [H2, W2]
         y2: physical coordinate of output field, unit [mm], shape [H2, W2]
         n: refractive index
-        memory_saving: memory saving
+        memory_saving: memory saving or not
 
     Returns:
         u2: complex amplitude of output field, shape [H2, W2]
+
+    Reference:
+        [1] Modeling and propagation of near-field diffraction patterns: A more complete approach. Eq (9).
+        [2] https://www.mathworks.com/matlabcentral/fileexchange/75049-complete-rayleigh-sommerfeld-model-version-2
     """
     # Parameters
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
