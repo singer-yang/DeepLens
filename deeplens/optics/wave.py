@@ -7,12 +7,10 @@
 
 """Complex wave field class for diffraction simulation. Better to use float64 precision.
 
-1. Complex wave field
-2. Propagation functions
-3. Helper functions
+This file contains:
+    1. Complex wave field class
+    2. Wave field propagation functions (ASM, Rayleigh Sommerfeld, Fresnel, Fraunhofer, etc.)
 """
-
-from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,6 +18,7 @@ import torch
 import torch.nn.functional as F
 from torch.fft import fft2, fftshift, ifft2, ifftshift
 from torchvision.utils import save_image
+from tqdm import tqdm
 
 from deeplens.optics.basics import DELTA, DeepObj
 
@@ -33,8 +32,8 @@ class ComplexWave(DeepObj):
         u=None,
         wvln=0.55,
         z=0.0,
-        phy_size=[4.0, 4.0],
-        res=[1000, 1000],
+        phy_size=(4.0, 4.0),
+        res=(2000, 2000),
     ):
         """Complex wave field.
 
@@ -42,8 +41,8 @@ class ComplexWave(DeepObj):
             u (tensor): complex wave field, shape [H, W] or [B, C, H, W].
             wvln (float): wavelength in [um].
             z (float): distance in [mm].
-            phy_size (list): physical size in [mm].
-            res (list): resolution.
+            phy_size (tuple): physical size in [mm].
+            res (tuple): resolution.
         """
         if u is not None:
             if not u.dtype == torch.complex128:
@@ -84,62 +83,118 @@ class ComplexWave(DeepObj):
         self.x, self.y = self.gen_xy_grid()  # x, y grid
         self.z = torch.full_like(self.x, z)  # z grid
 
-    def load_img(self, img):
-        """Load an image and use its pixel values as the amplitude of the complex wave field.
-        The phase is initialized to zero everywhere.
+    @classmethod
+    def point_wave(
+        cls,
+        point=(0, 0, -1000.0),
+        wvln=0.55,
+        z=0.0,
+        phy_size=(4.0, 4.0),
+        res=(2000, 2000),
+        valid_r=None,
+    ):
+        """Create a spherical wave field on x0y plane originating from a point source.
 
         Args:
-            img (torch.Tensor]): Input image with shape [H, W] or [B, C, H, W]. Data range is [0, 1].
+            point (tuple): Point source position in object space. [mm]. Defaults to (0, 0, -1000.0).
+            wvln (float): Wavelength. [um]. Defaults to 0.55.
+            z (float): Field z position. [mm]. Defaults to 0.0.
+            phy_size (tuple): Valid plane on x0y plane. [mm]. Defaults to (2, 2).
+            res (tuple): Valid plane resoltution. Defaults to (1000, 1000).
+            valid_r (float): Valid circle radius. [mm]. Defaults to None.
+
+        Returns:
+            field (ComplexWave): Complex field on x0y plane.
+        """
+        assert wvln > 0.1 and wvln < 1.0, "Wavelength should be in [um]."
+        k = 2 * torch.pi / (wvln * 1e-3)  # [mm^-1], wave number
+
+        # Create meshgrid on target plane
+        x, y = torch.meshgrid(
+            torch.linspace(
+                -0.5 * phy_size[0], 0.5 * phy_size[0], res[0], dtype=torch.float64
+            ),
+            torch.linspace(
+                0.5 * phy_size[1], -0.5 * phy_size[1], res[1], dtype=torch.float64
+            ),
+            indexing="xy",
+        )
+
+        # Calculate distance to point source, and calculate spherical wave phase
+        r = torch.sqrt((x - point[0]) ** 2 + (y - point[1]) ** 2 + (z - point[2]) ** 2)
+        if point[2] < z:
+            phi = k * r
+        else:
+            phi = -k * r
+        u = (r.min() / r) * torch.exp(1j * phi)
+
+        # Apply valid circle if provided, e.g., the aperture of a lens
+        if valid_r is not None:
+            mask = (x - point[0]) ** 2 + (y - point[1]) ** 2 < valid_r**2
+            u = u * mask
+
+        # Create wave field
+        return cls(u=u, wvln=wvln, phy_size=phy_size, res=res, z=z)
+
+    @classmethod
+    def plane_wave(
+        cls,
+        wvln=0.55,
+        z=0.0,
+        phy_size=(4.0, 4.0),
+        res=(2000, 2000),
+        valid_r=None,
+    ):
+        """Create a planar wave field on x0y plane.
+
+        Args:
+            wvln (float): Wavelength. [um].
+            z (float): Field z position. [mm].
+            phy_size (tuple): Physical size of the field. [mm].
+            res (tuple): Resolution.
+            valid_r (float): Valid circle radius. [mm].
+
+        Returns:
+            field (ComplexWave): Complex field.
+        """
+        assert wvln > 0.1 and wvln < 1.0, "Wavelength should be in [um]."
+
+        # Create a plane wave field
+        u = torch.ones(res, dtype=torch.float64) + 0j
+
+        # Apply valid circle if provided
+        if valid_r is not None:
+            x, y = torch.meshgrid(
+                torch.linspace(-0.5 * phy_size[0], 0.5 * phy_size[0], res[0]),
+                torch.linspace(-0.5 * phy_size[1], 0.5 * phy_size[1], res[1]),
+                indexing="xy",
+            )
+            mask = (x**2 + y**2) < valid_r**2
+            u = u * mask
+
+        # Create wave field
+        return cls(u=u, phy_size=phy_size, wvln=wvln, res=res, z=z)
+
+    @classmethod
+    def image_wave(cls, img, wvln=0.55, z=0.0, phy_size=(4.0, 4.0)):
+        """Initialize a complex wave field from an image.
+
+        Args:
+            img (torch.Tensor): Input image with shape [H, W] or [B, C, H, W]. Data range is [0, 1].
+            wvln (float): Wavelength. [um].
+            z (float): Field z position. [mm].
+            phy_size (tuple): Physical size of the field. [mm].
+
+        Returns:
+            field (ComplexWave): Complex field.
         """
         assert img.dtype == torch.float32, "Image must be float32."
 
         amp = torch.sqrt(img)
         phi = torch.zeros_like(amp)
+        u = amp + 1j * phi
 
-        self.u = amp + 1j * phi
-        self.res = self.u.shape[-2:]
-        return self
-
-    def load(self, filepath):
-        if filepath.endswith(".npz"):
-            self.load_npz(filepath)
-        else:
-            raise Exception("Unimplemented file format.")
-
-    def load_npz(self, filepath):
-        """Load data from npz file."""
-        data = np.load(filepath)
-        self.u = torch.from_numpy(data["u"])
-        self.x = torch.from_numpy(data["x"])
-        self.y = torch.from_numpy(data["y"])
-        self.wvln = data["wvln"].item()
-        self.phy_size = data["phy_size"].tolist()
-        self.res = self.u.shape[-2:]
-
-    def save(self, filepath="./wavefield.npz"):
-        """Save the complex wave field to a npz file."""
-        if filepath.endswith(".npz"):
-            self.save_npz(filepath)
-        else:
-            raise Exception("Unimplemented file format.")
-
-    def save_npz(self, filepath="./wavefield.npz"):
-        """Save the complex wave field to a npz file."""
-        # Save data
-        np.savez_compressed(
-            filepath,
-            u=self.u.cpu().numpy(),
-            x=self.x.cpu().numpy(),
-            y=self.y.cpu().numpy(),
-            wvln=np.array(self.wvln),
-            phy_size=np.array(self.phy_size),
-        )
-
-        # Save intensity, amplitude, and phase images
-        u = self.u.cpu()
-        save_image(u.abs() ** 2, f"{filepath[:-4]}_intensity.png", normalize=True)
-        save_image(u.abs(), f"{filepath[:-4]}_amp.png", normalize=True)
-        save_image(u.angle(), f"{filepath[:-4]}_phase.png", normalize=True)
+        return cls(u=u, wvln=wvln, phy_size=phy_size, res=u.shape[-2:], z=z)
 
     # =============================================
     # Wave propagation
@@ -226,6 +281,51 @@ class ComplexWave(DeepObj):
         fx = x / (self.ps * self.phy_size[0])
         fy = y / (self.ps * self.phy_size[1])
         return fx, fy
+
+    # =============================================
+    # Wave field I/O
+    # =============================================
+
+    def load(self, filepath):
+        if filepath.endswith(".npz"):
+            self.load_npz(filepath)
+        else:
+            raise Exception("Unimplemented file format.")
+
+    def load_npz(self, filepath):
+        """Load data from npz file."""
+        data = np.load(filepath)
+        self.u = torch.from_numpy(data["u"])
+        self.x = torch.from_numpy(data["x"])
+        self.y = torch.from_numpy(data["y"])
+        self.wvln = data["wvln"].item()
+        self.phy_size = data["phy_size"].tolist()
+        self.res = self.u.shape[-2:]
+
+    def save(self, filepath="./wavefield.npz"):
+        """Save the complex wave field to a npz file."""
+        if filepath.endswith(".npz"):
+            self.save_npz(filepath)
+        else:
+            raise Exception("Unimplemented file format.")
+
+    def save_npz(self, filepath="./wavefield.npz"):
+        """Save the complex wave field to a npz file."""
+        # Save data
+        np.savez_compressed(
+            filepath,
+            u=self.u.cpu().numpy(),
+            x=self.x.cpu().numpy(),
+            y=self.y.cpu().numpy(),
+            wvln=np.array(self.wvln),
+            phy_size=np.array(self.phy_size),
+        )
+
+        # Save intensity, amplitude, and phase images
+        u = self.u.cpu()
+        save_image(u.abs() ** 2, f"{filepath[:-4]}_intensity.png", normalize=True)
+        save_image(u.abs(), f"{filepath[:-4]}_amp.png", normalize=True)
+        save_image(u.angle(), f"{filepath[:-4]}_phase.png", normalize=True)
 
     def save_image(self, save_name=None, data="irr"):
         return self.show(save_name=save_name, data=data)
