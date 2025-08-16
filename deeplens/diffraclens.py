@@ -23,7 +23,7 @@ from deeplens.lens import Lens
 from deeplens.optics.basics import DEPTH, DEFAULT_WAVE
 from deeplens.optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
 from deeplens.optics.waveoptics_utils import point_source_field, plane_wave_field
-from deeplens.optics.render_psf import render_psf
+from deeplens.optics.psf import render_psf
 from deeplens.optics.utils import diff_float
 
 class DiffractiveLens(Lens):

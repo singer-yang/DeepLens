@@ -29,7 +29,7 @@ from .optics import (
     DeepObj,
     init_device,
 )
-from .optics.render_psf import conv_psf, conv_psf_map
+from deeplens.optics.psf import conv_psf, conv_psf_map
 
 
 class Lens(DeepObj):

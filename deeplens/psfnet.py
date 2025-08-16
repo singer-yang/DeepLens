@@ -26,7 +26,7 @@ from transformers import get_cosine_schedule_with_warmup
 from deeplens.geolens import GeoLens
 from deeplens.network.surrogate import MLP, MLPConv
 from deeplens.optics.basics import DeepObj, init_device
-from deeplens.optics.render_psf import local_psf_render, local_psf_render_high_res
+from deeplens.optics.psf import local_psf_render, local_psf_render_high_res
 
 DMIN = 200  # [mm]
 DMAX = 20000  # [mm]
