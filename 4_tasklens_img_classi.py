@@ -29,7 +29,7 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from deeplens import GeoLens
-from deeplens.optics.render_psf import render_psf
+from deeplens.optics.psf import render_psf
 from deeplens.utils import set_logger, set_seed
 
 
