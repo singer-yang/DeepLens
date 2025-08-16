@@ -36,33 +36,30 @@ class ComplexWave(DeepObj):
         z=0.0,
         phy_size=[4.0, 4.0],
         res=[1000, 1000],
-        valid_phy_size=None,
     ):
-        """Complex wave field class.
+        """Complex wave field.
 
         Args:
             u (tensor): complex wave field, shape [H, W] or [B, C, H, W].
             wvln (float): wavelength in [um].
             z (float): distance in [mm].
             phy_size (list): physical size in [mm].
-            valid_phy_size (list): valid physical size in [mm].
             res (list): resolution.
         """
-        # Create a complex wave field with [N, 1, H, W] shape for batch processing
         if u is not None:
-            # Initialize a complex wave field with given complex amplitude
             if not u.dtype == torch.complex128:
                 print(
-                    "A complex wave field is created with single precision. In the future, we want to always use double precision when creating a complex wave field."
+                    "A complex wave field is created with single precision. In the future, we want to always use double precision."
                 )
 
             self.u = u if torch.is_tensor(u) else torch.from_numpy(u)
             if not self.u.is_complex():
                 self.u = self.u.to(torch.complex64)
 
-            if len(u.shape) == 2:  # [H, W]
+            # [H, W] or [1, H, W] to [1, 1, H, W]
+            if len(u.shape) == 2:
                 self.u = u.unsqueeze(0).unsqueeze(0)
-            elif len(self.u.shape) == 3:  # [1, H, W]
+            elif len(self.u.shape) == 3:
                 self.u = self.u.unsqueeze(0)
 
             self.res = self.u.shape[-2:]
@@ -74,24 +71,19 @@ class ComplexWave(DeepObj):
             self.u = amp + 1j * phi
             self.res = res
 
-        # Other paramters
-        assert wvln > 0.1 and wvln < 1, "wvln unit should be [um]."
-        self.wvln = wvln  # wvln, store in [um]
-        self.k = 2 * torch.pi / (self.wvln * 1e-3)  # distance unit [mm]
-        self.phy_size = phy_size  # physical size with padding, in [mm]
-        self.valid_phy_size = (
-            self.phy_size if valid_phy_size is None else valid_phy_size
-        )  # physical size without padding, in [mm]
-
+        # Wave field parameters
+        assert wvln > 0.1 and wvln < 1, "Wavelength should be in [um]."
+        self.wvln = wvln  # [um], wavelength
+        self.k = 2 * torch.pi / (self.wvln * 1e-3)  # [mm^-1], wave number
+        self.phy_size = phy_size  # [mm], physical size
         assert phy_size[0] / self.res[0] == phy_size[1] / self.res[1], (
-            "Wrong pixel size."
+            "Pixel size is not square."
         )
-        self.ps = phy_size[0] / self.res[0]  # pixel size, float value
+        self.ps = phy_size[0] / self.res[0]  # [mm], pixel size
 
-        self.x, self.y = self.gen_xy_grid()
-        self.z = torch.full_like(
-            self.x, z
-        )  # Maybe keeping z as a float tensor is better
+        # Wave field grid
+        self.x, self.y = self.gen_xy_grid()  # x, y grid
+        self.z = torch.full_like(self.x, z)  # z grid
 
     def load_img(self, img):
         """Load an image and use its pixel values as the amplitude of the complex wave field.
@@ -128,7 +120,6 @@ class ComplexWave(DeepObj):
         self.y = wave_data["y"]
         self.wvln = wave_data["wvln"]
         self.phy_size = wave_data["phy_size"]
-        self.valid_phy_size = wave_data["valid_phy_size"]
         self.res = self.x.shape
 
     def save(self, save_path="./wavefield.pkl"):
@@ -145,7 +136,6 @@ class ComplexWave(DeepObj):
             "y": self.y.cpu(),
             "wvln": self.wvln,
             "phy_size": self.phy_size,
-            "valid_phy_size": self.valid_phy_size,
         }
 
         with open(save_path, "wb") as tf:
@@ -159,7 +149,7 @@ class ComplexWave(DeepObj):
         save_image(u.angle(), f"{save_path[:-4]}_phase.png", normalize=True)
 
     # =============================================
-    # Operation
+    # Wave propagation
     # =============================================
     def prop(self, prop_dist, n=1.0):
         """Propagate the field by distance z. Can only propagate planar wave.
@@ -177,31 +167,31 @@ class ComplexWave(DeepObj):
         Returns:
             self: propagated complex wave field.
         """
-        wvln_mm = self.wvln * 1e-3
-        valid_phy_size = self.valid_phy_size
-
-        # Determine which propagation method to use
+        # Determine propagation method and perform propagation
+        wvln_mm = self.wvln * 1e-3 # [um] to [mm]
         if prop_dist < DELTA:
             # Zero distance: do nothing
             pass
 
         elif prop_dist < wvln_mm:
-            # Sub-wavelength distance: full wave method
-            raise Exception("Full wave method is not implemented.")
+            # Sub-wavelength distance: full wave method (e.g., FDTD)
+            raise Exception(
+                "The propagation distance is too short. We have to use full wave method (e.g., FDTD), which is not implemented yet."
+            )
 
         else:
-            # Other distances: Angular Spectrum Method
+            # Angular Spectrum Method (ASM)
             prop_dist_min = Nyquist_zmin(
                 wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0]
             )
-            if np.abs(prop_dist) < prop_dist_min:
-                print(
-                    f"Minium required propagation distance is {prop_dist_min} mm, but propagation is still performed."
-                )
+            assert np.abs(prop_dist) < prop_dist_min, (
+                f"Minimum required propagation distance is {prop_dist_min} mm, but propagation is still performed."
+            )
             self.u = AngularSpectrumMethod(
                 self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n
             )
 
+        # Update z grid
         self.z += prop_dist
         return self
 
@@ -431,7 +421,7 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
     if padding:
         try:
             _, _, Worg, Horg = u.shape
-        except:
+        except Exception:
             Horg, Worg = u.shape
         Wpad, Hpad = Worg // 2, Horg // 2
         Wimg, Himg = Worg + 2 * Wpad, Horg + 2 * Hpad
