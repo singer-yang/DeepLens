@@ -13,16 +13,17 @@ import torch.nn.functional as F
 
 
 # ================================================
-# PSF convolution
+# PSF convolution for image simulation
 # ================================================
 def conv_psf(img, psf):
     """Convolve an image with a PSF.
-    
+
     Args:
         img (torch.Tensor): [B, C, H, W]
         psf (torch.Tensor): [C, ks, ks]
     """
     return render_psf(img, psf)
+
 
 def render_psf(img, psf):
     """Render rgb image batch with rgb PSF.
@@ -45,14 +46,16 @@ def render_psf(img, psf):
     img_render = F.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
     return img_render
 
+
 def conv_psf_map(img, psf_map):
     """Convolve an image with a PSF map.
-    
+
     Args:
         img (torch.Tensor): [B, 3, H, W]
         psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
     """
     return render_psf_map(img, psf_map)
+
 
 def render_psf_map(img, psf_map):
     """Render a rgb image batch with PSF map using patch convolution.
@@ -92,7 +95,7 @@ def render_psf_map(img, psf_map):
     return render_img
 
 
-def local_psf_render(input, psf,expand=False):
+def local_psf_render(input, psf, expand=False):
     """Render an image with pixel-wise PSF. Use the different PSF kernel for different pixels (folding approach).
 
         Application example: Blurs image with dynamic Gaussian blur.
@@ -111,26 +114,27 @@ def local_psf_render(input, psf,expand=False):
     assert Cimg == Cpsf and Himg == Hpsf and Wimg == Wpsf, (
         "Input and PSF shape mismatch"
     )
-    
 
     # do the scattering
     input = input.unsqueeze(-1).unsqueeze(-1)  # [B, C, H, W, 1, 1]
     kernels = psf.permute(2, 0, 1, 3, 4).unsqueeze(0)  # [1, C, H, W, Ks, Ks]
-    y = input * kernels # [B, C, H, W, Ks, Ks]
+    y = input * kernels  # [B, C, H, W, Ks, Ks]
 
     # permute and fold the result
-    y = y.permute(0, 1, 4, 5, 2,3).reshape(B, Cimg * Ks * Ks, Himg*Wimg) # [B,C*Ks*Ks,H,W]
+    y = y.permute(0, 1, 4, 5, 2, 3).reshape(
+        B, Cimg * Ks * Ks, Himg * Wimg
+    )  # [B,C*Ks*Ks,H,W]
 
     # output processing
     pad = int((Ks - 1) / 2)
     if expand:
-        img = F.fold(y, (Himg+pad*2, Wimg+pad*2), (Ks, Ks),padding=0)
+        img = F.fold(y, (Himg + pad * 2, Wimg + pad * 2), (Ks, Ks), padding=0)
     else:
-        img = F.fold(y, (Himg, Wimg), (Ks, Ks),padding=pad)
+        img = F.fold(y, (Himg, Wimg), (Ks, Ks), padding=pad)
     return img
 
 
-def local_psf_render_high_res(input, psf, patch_num=[4, 4],expand=False):
+def local_psf_render_high_res(input, psf, patch_num=[4, 4], expand=False):
     """Render an image with pixel-wise PSF using patch-wise rendering. Overlapping windows are used to avoid boundary artifacts.
 
     Args:
@@ -155,18 +159,19 @@ def local_psf_render_high_res(input, psf, patch_num=[4, 4],expand=False):
     pad = int((Ks - 1) / 2)
 
     # Initialize output and weight accumulation tensors
-    img_render = torch.zeros_like(input) # [B, C, Himg, Wimg  ]
-    img_render = F.pad(img_render, (pad, pad, pad, pad), mode="reflect") # [B, C, Himg+pad*2, Wimg+pad*2]
-    
+    img_render = torch.zeros_like(input)  # [B, C, Himg, Wimg  ]
+    img_render = F.pad(
+        img_render, (pad, pad, pad, pad), mode="reflect"
+    )  # [B, C, Himg+pad*2, Wimg+pad*2]
 
     # Process each patch with overlap
     for pi in range(patch_h):
         for pj in range(patch_w):
             # Calculate patch boundaries with overlap
-            low_i = pi * base_patch_h 
+            low_i = pi * base_patch_h
             up_i = (pi + 1) * base_patch_h
-            low_j = pj * base_patch_w 
-            up_j = (pj+1) * base_patch_w
+            low_j = pj * base_patch_w
+            up_j = (pj + 1) * base_patch_w
 
             # take care of the residual on last patch
             # for example, if Himg=100, patch_h=3, then the last patch will be [66:100] instead of [66:99]
@@ -180,12 +185,14 @@ def local_psf_render_high_res(input, psf, patch_num=[4, 4],expand=False):
             psf_patch = psf[low_i:up_i, low_j:up_j, :, :, :]
 
             # Process patch, expand boundary to [B, C, Himg+pad*2, Wimg+pad*2]
-            rendered_patch = local_psf_render(img_patch, psf_patch, expand=True) # 
+            rendered_patch = local_psf_render(img_patch, psf_patch, expand=True)  #
 
             # Accumulate weighted result
-            img_render[:, :, low_i:up_i  + pad *2, low_j:up_j  + pad *2] += rendered_patch 
+            img_render[:, :, low_i : up_i + pad * 2, low_j : up_j + pad * 2] += (
+                rendered_patch
+            )
 
-    if expand==False:
+    if not expand:
         # Remove padding
         img_render = img_render[:, :, pad:-pad, pad:-pad]
 
@@ -337,7 +344,7 @@ def read_psf_map(filename, grid=10):
 
 
 # ================================================
-# Inverse PSF calculation
+# Inverse PSF calculation from images
 # ================================================
 def solve_psf(img_org, img_render, ks=51, eps=1e-6):
     """Solve PSF, where img_render = img_org * psf.
