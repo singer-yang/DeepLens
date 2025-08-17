@@ -5,15 +5,12 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Complex wave field class for diffraction simulation. Better to use float64 precision.
+"""Complex wave field class for diffraction simulation.
 
-1. Complex wave field
-2. Propagation functions
-3. Helper functions
+This file contains:
+    1. Complex wave field class
+    2. Wave field propagation functions (ASM, Rayleigh Sommerfeld, Fresnel, Fraunhofer, etc.)
 """
-
-import pickle
-from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,6 +18,7 @@ import torch
 import torch.nn.functional as F
 from torch.fft import fft2, fftshift, ifft2, ifftshift
 from torchvision.utils import save_image
+from tqdm import tqdm
 
 from deeplens.optics.basics import DELTA, DeepObj
 
@@ -34,35 +32,32 @@ class ComplexWave(DeepObj):
         u=None,
         wvln=0.55,
         z=0.0,
-        phy_size=[4.0, 4.0],
-        res=[1000, 1000],
-        valid_phy_size=None,
+        phy_size=(4.0, 4.0),
+        res=(2000, 2000),
     ):
-        """Complex wave field class.
+        """Complex wave field.
 
         Args:
             u (tensor): complex wave field, shape [H, W] or [B, C, H, W].
             wvln (float): wavelength in [um].
             z (float): distance in [mm].
-            phy_size (list): physical size in [mm].
-            valid_phy_size (list): valid physical size in [mm].
-            res (list): resolution.
+            phy_size (tuple): physical size in [mm].
+            res (tuple): resolution.
         """
-        # Create a complex wave field with [N, 1, H, W] shape for batch processing
         if u is not None:
-            # Initialize a complex wave field with given complex amplitude
             if not u.dtype == torch.complex128:
                 print(
-                    "A complex wave field is created with single precision. In the future, we want to always use double precision when creating a complex wave field."
+                    "A complex wave field is created with single precision. In the future, we want to always use double precision."
                 )
 
             self.u = u if torch.is_tensor(u) else torch.from_numpy(u)
             if not self.u.is_complex():
                 self.u = self.u.to(torch.complex64)
 
-            if len(u.shape) == 2:  # [H, W]
+            # [H, W] or [1, H, W] to [1, 1, H, W]
+            if len(u.shape) == 2:
                 self.u = u.unsqueeze(0).unsqueeze(0)
-            elif len(self.u.shape) == 3:  # [1, H, W]
+            elif len(self.u.shape) == 3:
                 self.u = self.u.unsqueeze(0)
 
             self.res = self.u.shape[-2:]
@@ -74,92 +69,135 @@ class ComplexWave(DeepObj):
             self.u = amp + 1j * phi
             self.res = res
 
-        # Other paramters
-        assert wvln > 0.1 and wvln < 1, "wvln unit should be [um]."
-        self.wvln = wvln  # wvln, store in [um]
-        self.k = 2 * torch.pi / (self.wvln * 1e-3)  # distance unit [mm]
-        self.phy_size = phy_size  # physical size with padding, in [mm]
-        self.valid_phy_size = (
-            self.phy_size if valid_phy_size is None else valid_phy_size
-        )  # physical size without padding, in [mm]
-
+        # Wave field parameters
+        assert wvln > 0.1 and wvln < 1, "Wavelength should be in [um]."
+        self.wvln = wvln  # [um], wavelength
+        self.k = 2 * torch.pi / (self.wvln * 1e-3)  # [mm^-1], wave number
+        self.phy_size = phy_size  # [mm], physical size
         assert phy_size[0] / self.res[0] == phy_size[1] / self.res[1], (
-            "Wrong pixel size."
+            "Pixel size is not square."
         )
-        self.ps = phy_size[0] / self.res[0]  # pixel size, float value
+        self.ps = phy_size[0] / self.res[0]  # [mm], pixel size
 
-        self.x, self.y = self.gen_xy_grid()
-        self.z = torch.full_like(
-            self.x, z
-        )  # Maybe keeping z as a float tensor is better
+        # Wave field grid
+        self.x, self.y = self.gen_xy_grid()  # x, y grid
+        self.z = torch.full_like(self.x, z)  # z grid
 
-    def load_img(self, img):
-        """Load an image and use its pixel values as the amplitude of the complex wave field.
-        The phase is initialized to zero everywhere.
+    @classmethod
+    def point_wave(
+        cls,
+        point=(0, 0, -1000.0),
+        wvln=0.55,
+        z=0.0,
+        phy_size=(4.0, 4.0),
+        res=(2000, 2000),
+        valid_r=None,
+    ):
+        """Create a spherical wave field on x0y plane originating from a point source.
 
         Args:
-            img (torch.Tensor]): Input image with shape [H, W] or [B, C, H, W]. Data range is [0, 1].
+            point (tuple): Point source position in object space. [mm]. Defaults to (0, 0, -1000.0).
+            wvln (float): Wavelength. [um]. Defaults to 0.55.
+            z (float): Field z position. [mm]. Defaults to 0.0.
+            phy_size (tuple): Valid plane on x0y plane. [mm]. Defaults to (2, 2).
+            res (tuple): Valid plane resoltution. Defaults to (1000, 1000).
+            valid_r (float): Valid circle radius. [mm]. Defaults to None.
+
+        Returns:
+            field (ComplexWave): Complex field on x0y plane.
+        """
+        assert wvln > 0.1 and wvln < 1.0, "Wavelength should be in [um]."
+        k = 2 * torch.pi / (wvln * 1e-3)  # [mm^-1], wave number
+
+        # Create meshgrid on target plane
+        x, y = torch.meshgrid(
+            torch.linspace(
+                -0.5 * phy_size[0], 0.5 * phy_size[0], res[0], dtype=torch.float64
+            ),
+            torch.linspace(
+                0.5 * phy_size[1], -0.5 * phy_size[1], res[1], dtype=torch.float64
+            ),
+            indexing="xy",
+        )
+
+        # Calculate distance to point source, and calculate spherical wave phase
+        r = torch.sqrt((x - point[0]) ** 2 + (y - point[1]) ** 2 + (z - point[2]) ** 2)
+        if point[2] < z:
+            phi = k * r
+        else:
+            phi = -k * r
+        u = (r.min() / r) * torch.exp(1j * phi)
+
+        # Apply valid circle if provided, e.g., the aperture of a lens
+        if valid_r is not None:
+            mask = (x - point[0]) ** 2 + (y - point[1]) ** 2 < valid_r**2
+            u = u * mask
+
+        # Create wave field
+        return cls(u=u, wvln=wvln, phy_size=phy_size, res=res, z=z)
+
+    @classmethod
+    def plane_wave(
+        cls,
+        wvln=0.55,
+        z=0.0,
+        phy_size=(4.0, 4.0),
+        res=(2000, 2000),
+        valid_r=None,
+    ):
+        """Create a planar wave field on x0y plane.
+
+        Args:
+            wvln (float): Wavelength. [um].
+            z (float): Field z position. [mm].
+            phy_size (tuple): Physical size of the field. [mm].
+            res (tuple): Resolution.
+            valid_r (float): Valid circle radius. [mm].
+
+        Returns:
+            field (ComplexWave): Complex field.
+        """
+        assert wvln > 0.1 and wvln < 1.0, "Wavelength should be in [um]."
+
+        # Create a plane wave field
+        u = torch.ones(res, dtype=torch.float64) + 0j
+
+        # Apply valid circle if provided
+        if valid_r is not None:
+            x, y = torch.meshgrid(
+                torch.linspace(-0.5 * phy_size[0], 0.5 * phy_size[0], res[0]),
+                torch.linspace(-0.5 * phy_size[1], 0.5 * phy_size[1], res[1]),
+                indexing="xy",
+            )
+            mask = (x**2 + y**2) < valid_r**2
+            u = u * mask
+
+        # Create wave field
+        return cls(u=u, phy_size=phy_size, wvln=wvln, res=res, z=z)
+
+    @classmethod
+    def image_wave(cls, img, wvln=0.55, z=0.0, phy_size=(4.0, 4.0)):
+        """Initialize a complex wave field from an image.
+
+        Args:
+            img (torch.Tensor): Input image with shape [H, W] or [B, C, H, W]. Data range is [0, 1].
+            wvln (float): Wavelength. [um].
+            z (float): Field z position. [mm].
+            phy_size (tuple): Physical size of the field. [mm].
+
+        Returns:
+            field (ComplexWave): Complex field.
         """
         assert img.dtype == torch.float32, "Image must be float32."
 
         amp = torch.sqrt(img)
         phi = torch.zeros_like(amp)
+        u = amp + 1j * phi
 
-        self.u = amp + 1j * phi
-        self.res = self.u.shape[-2:]
-        return self
-
-    def load(self, data_path):
-        if data_path.endswith(".pkl"):
-            self.load_pkl(data_path)
-        else:
-            raise Exception("Unimplemented file format.")
-
-    def load_pkl(self, data_path):
-        """Load data from pickle file."""
-        with open(data_path, "rb") as tf:
-            wave_data = pickle.load(tf)
-            tf.close()
-
-        amp = wave_data["amp"]
-        phi = wave_data["phi"]
-        self.u = amp * torch.exp(1j * phi)
-        self.x = wave_data["x"]
-        self.y = wave_data["y"]
-        self.wvln = wave_data["wvln"]
-        self.phy_size = wave_data["phy_size"]
-        self.valid_phy_size = wave_data["valid_phy_size"]
-        self.res = self.x.shape
-
-    def save(self, save_path="./wavefield.pkl"):
-        """Save the complex wave field to a pickle file."""
-        self.save_data(save_path)
-
-    def save_data(self, save_path="./wavefield.pkl"):
-        """Save the complex wave field to a pickle file."""
-        # Save data
-        data = {
-            "amp": self.u.cpu().abs(),
-            "phi": torch.angle(self.u.cpu()),
-            "x": self.x.cpu(),
-            "y": self.y.cpu(),
-            "wvln": self.wvln,
-            "phy_size": self.phy_size,
-            "valid_phy_size": self.valid_phy_size,
-        }
-
-        with open(save_path, "wb") as tf:
-            pickle.dump(data, tf)
-            tf.close()
-
-        # Save intensity, amplitude, and phase images
-        u = self.u.cpu()
-        save_image(u.abs() ** 2, f"{save_path[:-4]}_intensity.png", normalize=True)
-        save_image(u.abs(), f"{save_path[:-4]}_amp.png", normalize=True)
-        save_image(u.angle(), f"{save_path[:-4]}_phase.png", normalize=True)
+        return cls(u=u, wvln=wvln, phy_size=phy_size, res=u.shape[-2:], z=z)
 
     # =============================================
-    # Operation
+    # Wave propagation
     # =============================================
     def prop(self, prop_dist, n=1.0):
         """Propagate the field by distance z. Can only propagate planar wave.
@@ -177,31 +215,31 @@ class ComplexWave(DeepObj):
         Returns:
             self: propagated complex wave field.
         """
-        wvln_mm = self.wvln * 1e-3
-        valid_phy_size = self.valid_phy_size
-
-        # Determine which propagation method to use
+        # Determine propagation method and perform propagation
+        wvln_mm = self.wvln * 1e-3  # [um] to [mm]
         if prop_dist < DELTA:
             # Zero distance: do nothing
             pass
 
         elif prop_dist < wvln_mm:
-            # Sub-wavelength distance: full wave method
-            raise Exception("Full wave method is not implemented.")
+            # Sub-wavelength distance: full wave method (e.g., FDTD)
+            raise Exception(
+                "The propagation distance is too short. We have to use full wave method (e.g., FDTD), which is not implemented yet."
+            )
 
         else:
-            # Other distances: Angular Spectrum Method
+            # Angular Spectrum Method (ASM)
             prop_dist_min = Nyquist_zmin(
                 wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0]
             )
-            if np.abs(prop_dist) < prop_dist_min:
-                print(
-                    f"Minium required propagation distance is {prop_dist_min} mm, but propagation is still performed."
-                )
+            assert np.abs(prop_dist) < prop_dist_min, (
+                f"Minimum required propagation distance is {prop_dist_min} mm, but propagation is still performed."
+            )
             self.u = AngularSpectrumMethod(
                 self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n
             )
 
+        # Update z grid
         self.z += prop_dist
         return self
 
@@ -214,6 +252,10 @@ class ComplexWave(DeepObj):
         prop_dist = z - self.z[0, 0].item()
         self.prop(prop_dist, n=n)
         return self
+
+    # =============================================
+    # Helper functions
+    # =============================================
 
     def gen_xy_grid(self):
         """Generate the x and y grid."""
@@ -240,6 +282,51 @@ class ComplexWave(DeepObj):
         fy = y / (self.ps * self.phy_size[1])
         return fx, fy
 
+    # =============================================
+    # Wave field I/O
+    # =============================================
+
+    def load(self, filepath):
+        if filepath.endswith(".npz"):
+            self.load_npz(filepath)
+        else:
+            raise Exception("Unimplemented file format.")
+
+    def load_npz(self, filepath):
+        """Load data from npz file."""
+        data = np.load(filepath)
+        self.u = torch.from_numpy(data["u"])
+        self.x = torch.from_numpy(data["x"])
+        self.y = torch.from_numpy(data["y"])
+        self.wvln = data["wvln"].item()
+        self.phy_size = data["phy_size"].tolist()
+        self.res = self.u.shape[-2:]
+
+    def save(self, filepath="./wavefield.npz"):
+        """Save the complex wave field to a npz file."""
+        if filepath.endswith(".npz"):
+            self.save_npz(filepath)
+        else:
+            raise Exception("Unimplemented file format.")
+
+    def save_npz(self, filepath="./wavefield.npz"):
+        """Save the complex wave field to a npz file."""
+        # Save data
+        np.savez_compressed(
+            filepath,
+            u=self.u.cpu().numpy(),
+            x=self.x.cpu().numpy(),
+            y=self.y.cpu().numpy(),
+            wvln=np.array(self.wvln),
+            phy_size=np.array(self.phy_size),
+        )
+
+        # Save intensity, amplitude, and phase images
+        u = self.u.cpu()
+        save_image(u.abs() ** 2, f"{filepath[:-4]}_intensity.png", normalize=True)
+        save_image(u.abs(), f"{filepath[:-4]}_amp.png", normalize=True)
+        save_image(u.angle(), f"{filepath[:-4]}_phase.png", normalize=True)
+
     def save_image(self, save_name=None, data="irr"):
         return self.show(save_name=save_name, data=data)
 
@@ -261,6 +348,7 @@ class ComplexWave(DeepObj):
             raise Exception(f"Unimplemented visualization: {data}.")
 
         if len(self.u.shape) == 2:
+            raise Exception("Deprecated.")
             if save_name is not None:
                 save_image(value, save_name, normalize=True)
             else:
@@ -315,7 +403,15 @@ class ComplexWave(DeepObj):
             raise Exception("Unsupported complex field shape.")
 
     def pad(self, Hpad, Wpad):
-        """Pad the input field by (Hpad, Hpad, Wpad, Wpad). This step will also expand physical size of the field."""
+        """Pad the input field by (Hpad, Hpad, Wpad, Wpad). This step will also expand physical size of the field.
+
+        Args:
+            Hpad (int): Number of pixels to pad on the top and bottom.
+            Wpad (int): Number of pixels to pad on the left and right.
+
+        Returns:
+            self: Padded complex wave field.
+        """
         self.u = F.pad(self.u, (Hpad, Hpad, Wpad, Wpad), mode="constant", value=0)
 
         Horg, Worg = self.res
@@ -325,8 +421,7 @@ class ComplexWave(DeepObj):
             self.phy_size[1] * self.res[1] / Worg,
         ]
         self.x, self.y = self.gen_xy_grid()
-        z = self.z[0, 0]
-        self.z = F.pad(self.z, (Hpad, Hpad, Wpad, Wpad), mode="constant", value=z)
+        self.z = F.pad(self.z, (Hpad, Hpad, Wpad, Wpad), mode="replicate")
 
     def flip(self):
         """Flip the field horizontally and vertically."""
@@ -343,10 +438,6 @@ class ComplexWave(DeepObj):
 def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
     """Angular spectrum method.
 
-    Reference:
-        [1] https://github.com/kaanaksit/odak/blob/master/odak/wave/classical.py#L293
-        [2] https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
-
     Args:
         u (tesor): complex field, shape [H, W] or [B, 1, H, W]
         z (float): propagation distance in [mm]
@@ -357,6 +448,10 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
 
     Returns:
         u: complex field, shape [H, W] or [B, 1, H, W]
+
+    Reference:
+        [1] https://github.com/kaanaksit/odak/blob/master/odak/wave/classical.py#L293
+        [2] https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
     """
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
     wvln_mm = wvln / n * 1e-3  # [um] to [mm]
@@ -413,11 +508,6 @@ def ScalableASM(u, z, wvln, ps, n=1.0, padding=True):
 def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
     """Fresnel propagation with FFT.
 
-    Reference:
-        [1] Computational fourier optics : a MATLAB tutorial. Chapter 5, section 5.1
-        [2] https://qiweb.tudelft.nl/aoi/wavefielddiffraction/wavefielddiffraction.html
-        [3] https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
-
     Args:
         u: complex field, shape [H, W] or [B, C, H, W]
         z (float): propagation distance
@@ -426,12 +516,17 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
         n (float): refractive index
         padding (bool): padding or not
         TF (bool): transfer function or impulse response
+
+    Reference:
+        [1] Computational fourier optics : a MATLAB tutorial. Chapter 5, section 5.1
+        [2] https://qiweb.tudelft.nl/aoi/wavefielddiffraction/wavefielddiffraction.html
+        [3] https://github.com/nkotsianas/fourier-propagation/blob/master/FTFP.m
     """
     # Padding
     if padding:
         try:
             _, _, Worg, Horg = u.shape
-        except:
+        except Exception:
             Horg, Worg = u.shape
         Wpad, Hpad = Worg // 2, Horg // 2
         Wimg, Himg = Worg + 2 * Wpad, Horg + 2 * Hpad
@@ -588,10 +683,6 @@ def RayleighSommerfeldIntegral(
 ):
     """Discrete Rayleigh-Sommerfeld diffraction integration. Rayleigh-Sommerfeld diffraction is a brute force integration approach, it doesnot require any approximation. It usually works as the ground truth.
 
-    Reference:
-        [1] Modeling and propagation of near-field diffraction patterns: A more complete approach. Eq (9).
-        [2] https://www.mathworks.com/matlabcentral/fileexchange/75049-complete-rayleigh-sommerfeld-model-version-2
-
     Args:
         u1: complex amplitude of input field, shape [H1, W1]
         x1: physical coordinate of input field, unit [mm], shape [H1, W1]
@@ -601,10 +692,14 @@ def RayleighSommerfeldIntegral(
         x2: physical coordinate of output field, unit [mm], shape [H2, W2]
         y2: physical coordinate of output field, unit [mm], shape [H2, W2]
         n: refractive index
-        memory_saving: memory saving
+        memory_saving: memory saving or not
 
     Returns:
         u2: complex amplitude of output field, shape [H2, W2]
+
+    Reference:
+        [1] Modeling and propagation of near-field diffraction patterns: A more complete approach. Eq (9).
+        [2] https://www.mathworks.com/matlabcentral/fileexchange/75049-complete-rayleigh-sommerfeld-model-version-2
     """
     # Parameters
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."

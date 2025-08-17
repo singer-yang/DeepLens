@@ -22,8 +22,8 @@ from torchvision.utils import save_image
 from deeplens.lens import Lens
 from deeplens.optics.basics import DEPTH, DEFAULT_WAVE
 from deeplens.optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
-from deeplens.optics.waveoptics_utils import point_source_field, plane_wave_field
-from deeplens.optics.render_psf import render_psf
+from deeplens.optics.psf import render_psf
+from deeplens.optics.wave import ComplexWave
 from deeplens.optics.utils import diff_float
 
 class DiffractiveLens(Lens):
@@ -226,14 +226,14 @@ class DiffractiveLens(Lens):
             self.surfaces[0].res[1] * self.surfaces[0].ps,
         ]
         if depth == float("inf"):
-            inp_wave = plane_wave_field(
+            inp_wave = ComplexWave.plane_wave(
                 phy_size=field_size,
                 res=field_res,
                 wvln=wvln,
                 z=0.0,
             ).to(self.device)
         else:
-            inp_wave = point_source_field(
+            inp_wave = ComplexWave.point_wave(
                 point=[0.0, 0.0, depth],
                 phy_size=field_size,
                 res=field_res,

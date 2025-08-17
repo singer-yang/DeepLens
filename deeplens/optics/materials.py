@@ -5,29 +5,35 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Glass and plastic materials."""
+"""Optical materials."""
 
 import json
 import os
-import torch
 import re
+
+import torch
+
 from deeplens.optics.basics import DeepObj
 
-# Load materials data from AGF file
+
+# ===========================================
+# Read AGF file
+# ===========================================
 def read_agf(file_path):
-    encodings = ['utf-8', 'utf-16']
+    """Read the AGF file and return the materials data."""
+    encodings = ["utf-8", "utf-16"]
     for enc in encodings:
         try:
-            with open(file_path, 'r', encoding=enc) as f:
+            with open(file_path, "r", encoding=enc) as f:
                 lines = f.readlines()
                 break
         except UnicodeDecodeError:
             continue
     else:
-        raise ValueError("error!")
+        raise ValueError(f"Error! {file_path} not found.")
 
-    nm_lines = [line for line in lines if re.match(r'^NM\b', line)]
-    cd_lines = [line for line in lines if re.match(r'^CD\b', line)]
+    nm_lines = [line for line in lines if re.match(r"^NM\b", line)]
+    cd_lines = [line for line in lines if re.match(r"^CD\b", line)]
 
     materials = {}
     for i in range(len(nm_lines)):
@@ -43,9 +49,10 @@ def read_agf(file_path):
             "c_coeff": float(cd_parts[3]),
             "d_coeff": float(cd_parts[4]),
             "e_coeff": float(cd_parts[5]),
-            "f_coeff": float(cd_parts[6])
+            "f_coeff": float(cd_parts[6]),
         }
     return materials
+
 
 CDGM_data = read_agf(os.path.dirname(__file__) + "/material/CDGM.AGF")
 SCHOTT_data = read_agf(os.path.dirname(__file__) + "/material/SCHOTT.AGF")
@@ -53,58 +60,33 @@ MISC_data = read_agf(os.path.dirname(__file__) + "/material/MISC.AGF")
 PLASTIC_data = read_agf(os.path.dirname(__file__) + "/material/PLASTIC2022.AGF")
 MATERIAL_data = {**MISC_data, **PLASTIC_data, **CDGM_data, **SCHOTT_data}
 
-# Load materials data from JSON file
-MATERIALS_DATA_PATH = os.path.join(os.path.dirname(__file__), "materials_data.json")
-try:
-    with open(MATERIALS_DATA_PATH, "r") as f:
-        MATERIALS_DATA = json.load(f)
 
-    # Extract tables from the loaded data
-    MATERIAL_TABLE = MATERIALS_DATA.get("MATERIAL_TABLE", {})
-    SELLMEIER_TABLE = MATERIALS_DATA.get("SELLMEIER_TABLE", {})
-    SCHOTT_TABLE = MATERIALS_DATA.get("SCHOTT_TABLE", {})
-    INTERP_TABLE = MATERIALS_DATA.get("INTERP_TABLE", {})
-    GLASS_NAME = MATERIALS_DATA.get("GLASS_NAME", {})
-    CDGM_GLASS = MATERIALS_DATA.get("CDGM_GLASS", {})
-
-except FileNotFoundError:
-    print(f"Warning: Materials data file not found at {MATERIALS_DATA_PATH}")
+# ===========================================
+# Read custom materials from JSON file
+# ===========================================
+def read_custom_mat(file_path):
+    """Read the JSON file and return the materials data."""
+    try:
+        with open(file_path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: Materials data file not found at {file_path}")
+        return {}
 
 
+CUSTOM_data = read_custom_mat(
+    os.path.dirname(__file__) + "/material/materials_data.json"
+)
+
+
+# ===========================================
+# Material class
+# ===========================================
 class Material(DeepObj):
     def __init__(self, name=None, device="cpu"):
         self.name = "vacuum" if name is None else name.lower()
         self.load_dispersion()
         self.device = device
-
-    def set_material_parameter(self, material_data, material_name):
-
-        if material_name in material_data:
-            material = material_data[material_name]
-
-            if material['calculate_mode'] == 1:
-                self.dispersion = "schott"
-                self.a0 = material['a_coeff']
-                self.a1 = material['b_coeff']
-                self.a2 = material['c_coeff']
-                self.a3 = material['d_coeff']
-                self.a4 = material['e_coeff']
-                self.a5 = material['f_coeff']
-            elif material['calculate_mode'] == 2:
-                self.dispersion = "sellmeier"
-                self.k1 = material['a_coeff']
-                self.l1 = material['b_coeff']
-                self.k2 = material['c_coeff']
-                self.l2 = material['d_coeff']
-                self.k3 = material['e_coeff']
-                self.l3 = material['f_coeff']
-            else:
-                raise NotImplementedError(f"error: {material_name} calculate_mode {material['calculate_mode']}")
-
-            self.n = material['nd']
-            self.V = material['vd']
-        else:
-            print(f"error: not {material_name}")
 
     def get_name(self):
         if self.dispersion == "optimizable":
@@ -112,23 +94,23 @@ class Material(DeepObj):
         else:
             return self.name
 
+    # -------------------------------------------
+    # Load dispersion equation
+    # -------------------------------------------
     def load_dispersion(self):
         """Load material dispersion equation."""
-        if self.name == 'air' or self.name == 'vacuum' or self.name == 'occluder':
+        # Air, vacuum, occluder are special cases
+        if self.name == "air" or self.name == "vacuum" or self.name == "occluder":
             self.dispersion = "sellmeier"
-            self.k1,self.l1, self.k2, self.l2, self.k3, self.l3 = 0,0,0,0,0,0
+            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = 0, 0, 0, 0, 0, 0
             self.n, self.V = 1, 1e38
 
+        # Material found in AGF file
         elif self.name in MATERIAL_data:
-            self.set_material_parameter(MATERIAL_data, self.name)
+            self.set_material_param_agf(MATERIAL_data, self.name)
 
-        elif self.name in INTERP_TABLE:
-            self.dispersion = "interp"
-            self.ref_wvlns = INTERP_TABLE["wvlns"]
-            self.ref_n = INTERP_TABLE[self.name]
-            self.n = sum(self.ref_n) / len(self.ref_n)
-
-        else:
+        # Material is given by a (n, V) string, e.g. "1.5168/64.17"
+        elif "/" in self.name:
             self.dispersion = "cauchy"
             self.n, self.V = (
                 float(self.name.split("/")[0]),
@@ -136,6 +118,84 @@ class Material(DeepObj):
             )
             self.A, self.B = self.nV_to_AB(self.n, self.V)
 
+        # Material found in custom JSON file
+        elif self.name in CUSTOM_data["INTERP_TABLE"]:
+            self.dispersion = "interp"
+            self.ref_wvlns = CUSTOM_data["INTERP_TABLE"]["wvlns"]
+            self.ref_n = CUSTOM_data["INTERP_TABLE"][self.name]
+            self.n = sum(self.ref_n) / len(self.ref_n)
+
+        elif self.name in CUSTOM_data["SELLMEIER_TABLE"]:
+            self.dispersion = "sellmeier"
+            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = CUSTOM_data[
+                "SELLMEIER_TABLE"
+            ][self.name]
+
+        elif self.name in CUSTOM_data["SCHOTT_TABLE"]:
+            self.dispersion = "schott"
+            self.a0, self.a1, self.a2, self.a3, self.a4, self.a5 = CUSTOM_data[
+                "SCHOTT_TABLE"
+            ][self.name]
+
+        elif self.name in CUSTOM_data["MATERIAL_TABLE"]:
+            self.dispersion = "cauchy"
+            self.n, self.V = CUSTOM_data["MATERIAL_TABLE"][self.name]
+            self.A, self.B = self.nV_to_AB(self.n, self.V)
+
+        else:
+            raise NotImplementedError(f"Material {self.name} not implemented.")
+
+    def set_material_param_agf(self, material_data, material_name):
+        """Set the material parameters and dispersion equation from AGF file."""
+        if material_name in material_data:
+            material = material_data[material_name]
+
+            if material["calculate_mode"] == 1:
+                self.dispersion = "schott"
+                self.a0 = material["a_coeff"]
+                self.a1 = material["b_coeff"]
+                self.a2 = material["c_coeff"]
+                self.a3 = material["d_coeff"]
+                self.a4 = material["e_coeff"]
+                self.a5 = material["f_coeff"]
+            elif material["calculate_mode"] == 2:
+                self.dispersion = "sellmeier"
+                self.k1 = material["a_coeff"]
+                self.l1 = material["b_coeff"]
+                self.k2 = material["c_coeff"]
+                self.l2 = material["d_coeff"]
+                self.k3 = material["e_coeff"]
+                self.l3 = material["f_coeff"]
+            else:
+                raise NotImplementedError(
+                    f"Error: {material_name} calculate_mode {material['calculate_mode']}"
+                )
+
+            self.n = material["nd"]
+            self.V = material["vd"]
+        else:
+            print(f"error: not {material_name}")
+
+    def set_sellmeier_param(self, params=None):
+        """Manually set sellmeier parameters k1, l1, k2, l2, k3, l3.
+
+        This function is used when we want to manually set the sellmeier parameters for a custom material.
+        """
+        if params is None:
+            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = (
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            )
+        else:
+            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = params
+
+    # -------------------------------------------
+    # Calculate refractive index
+    # -------------------------------------------
     def refractive_index(self, wvln):
         """Compute the refractive index at given wvln."""
         if isinstance(wvln, float):
@@ -146,8 +206,7 @@ class Material(DeepObj):
 
     def ior(self, wvln):
         """Compute the refractive index at given wvln."""
-        # assert wvln > 0.1 and wvln < 1, "Wavelength should be in [um]."
-        assert wvln.max() > 0.1 and wvln.min() < 10, "Wavelength should be in [um]."
+        assert wvln.min() > 0.1 and wvln.max() < 10, "Wavelength should be in [um]."
 
         if self.dispersion == "sellmeier":
             # Sellmeier equation: https://en.wikipedia.org/wiki/Sellmeier_equation
@@ -179,7 +238,7 @@ class Material(DeepObj):
             ref_n = torch.tensor(self.ref_n, device=wvln.device)
 
             # Find the lower and upper bracketing wavelengths
-            i = torch.searchsorted(ref_wvlns, wvln, side='right')
+            i = torch.searchsorted(ref_wvlns, wvln, side="right")
             num_ref_wvlns = len(ref_wvlns)
             idx_low = torch.clamp(i - 1, 0, num_ref_wvlns - 1)
             idx_high = torch.clamp(i, 0, num_ref_wvlns - 1)
@@ -201,19 +260,9 @@ class Material(DeepObj):
             n = A + B / wvln**2
 
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Error: {self.dispersion} not implemented.")
 
         return n
-
-    def load_sellmeier_param(self, params=None):
-        """Manually set sellmeier parameters k1, l1, k2, l2, k3, l3.
-
-        This function is called when we want to use a custom material.
-        """
-        if params is None:
-            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-        else:
-            self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = params
 
     @staticmethod
     def nV_to_AB(n, V):
@@ -227,15 +276,23 @@ class Material(DeepObj):
         A = n - B * ivs(lambdas[1])
         return A, B
 
+    # -------------------------------------------
+    # Optimize and match material
+    # -------------------------------------------
     def match_material(self, mat_table=None):
-        """Find the closest material in the database."""
+        """Find the closest material in the CDGM common glasses database."""
+        # Material match table
         if mat_table is None:
-            mat_table = MATERIAL_TABLE
+            print("No material table provided. Using CDGM common glasses as default.")
+            mat_table = CUSTOM_data["CDGM_GLASS"]
         elif mat_table == "CDGM":
-            mat_table = CDGM_GLASS
+            mat_table = CUSTOM_data["CDGM_GLASS"]
+        elif mat_table == "PLASTIC":
+            mat_table = CUSTOM_data["PLASTIC_TABLE"]
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Material table {mat_table} not implemented.")
 
+        # Find the closest material
         weight_n = 2
         dist_min = 1e6
         for name in mat_table:
@@ -245,13 +302,14 @@ class Material(DeepObj):
                 self.name = name
                 dist_min = dist
 
+        # Load the new material parameters
         self.load_dispersion()
 
-    def get_optim_param_count(self, optim_mat=False):
+    def get_optim_param_count(self):
         """Get number of optimizable parameters."""
         return 2
 
-    def get_optimizer_params(self, lrs=[1e-4, 1e-3]):
+    def get_optimizer_params(self, lrs=[1e-5, 1e-3]):
         """Optimize the material parameters (n, V)."""
         if isinstance(self.n, float):
             self.n = torch.tensor(self.n).to(self.device)
@@ -261,5 +319,8 @@ class Material(DeepObj):
         self.V.requires_grad = True
         self.dispersion = "optimizable"
 
-        params = [{"params": [self.n], "lr": lrs[0]}, {"params": [self.V], "lr": lrs[1]}]
+        params = [
+            {"params": [self.n], "lr": lrs[0]},
+            {"params": [self.V], "lr": lrs[1]},
+        ]
         return params
