@@ -5,7 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Complex wave field class for diffraction simulation. Better to use float64 precision.
+"""Complex wave field class for diffraction simulation.
 
 This file contains:
     1. Complex wave field class
@@ -348,6 +348,7 @@ class ComplexWave(DeepObj):
             raise Exception(f"Unimplemented visualization: {data}.")
 
         if len(self.u.shape) == 2:
+            raise Exception("Deprecated.")
             if save_name is not None:
                 save_image(value, save_name, normalize=True)
             else:
