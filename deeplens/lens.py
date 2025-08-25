@@ -27,7 +27,7 @@ from deeplens.optics.basics import (
     DeepObj,
     init_device,
 )
-from deeplens.optics.psf import conv_psf, conv_psf_map, psf_conv_depth_interp
+from deeplens.optics.psf import conv_psf, conv_psf_map, conv_psf_depth_interp
 
 
 class Lens(DeepObj):
@@ -74,7 +74,7 @@ class Lens(DeepObj):
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
 
     def set_sensor_res(self, sensor_res):
-        """Set sensor resolution.
+        """Set sensor resolution. Sensor radius does not change.
 
         Args:
             sensor_res (tuple): Sensor resolution (H, W).
@@ -87,6 +87,16 @@ class Lens(DeepObj):
         self.sensor_size[0] = round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 3)
         self.sensor_size[1] = round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 3)
         self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 3)
+
+    def set_sensor_size(self, sensor_size):
+        """Set sensor size. Pixel size does not change.
+
+        Args:
+            sensor_size (tuple): Sensor size (H, W).
+        """
+        self.sensor_size = sensor_size
+        self.r_sensor = np.sqrt(self.sensor_size[0] ** 2 + self.sensor_size[1] ** 2) / 2.0
+        self.sensor_res = (self.sensor_size[0] / self.pixel_size, self.sensor_size[1] / self.pixel_size)
 
     # ===========================================
     # PSF-ralated functions
@@ -555,7 +565,7 @@ class Lens(DeepObj):
             psfs = self.psf_rgb(points=points, ks=psf_ks)
             
             # Image simulation
-            img_render = psf_conv_depth_interp(img_obj, depth_map, psfs, depths_ref)
+            img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref)
             return img_render
         else:
             raise Exception(f"Image simulation method {method} is not supported.")

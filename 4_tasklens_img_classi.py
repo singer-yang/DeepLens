@@ -29,7 +29,7 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from deeplens import GeoLens
-from deeplens.optics.psf import render_psf
+from deeplens.optics.psf import conv_psf
 from deeplens.utils import set_logger, set_seed
 
 
@@ -187,7 +187,7 @@ def validate(lens, net, epoch, args, val_loader):
         labels = labels.to(device)
 
         # Render image with PSF map
-        img_render = render_psf(img_org, psf)
+        img_render = conv_psf(img_org, psf)
         img_render = torch.cat(img_render)
         labels = labels.repeat(psf_grid**2)
 
@@ -276,7 +276,7 @@ def train(args, lens:GeoLens, net):
             )  # [N, 3, ks, ks]
             img_render = []
             for psf_idx in range(psf.shape[0]):
-                img_render.append(render_psf(img_org, psf[psf_idx, ...]))
+                img_render.append(conv_psf(img_org, psf[psf_idx, ...]))
             img_render = torch.cat(img_render)  # [N * B, 3, sensor_res, sensor_res]
             labels = labels.repeat(psf.shape[0])
 
