@@ -94,6 +94,53 @@ def render_psf_map(img, psf_map):
 
     return render_img
 
+def psf_conv_depth_interp(img, depth, psf_kernels, psf_depths):
+    """PSF convolution with image for all depths, then do interpolation regarding depth.
+
+    The differentiability of this function is not guaranteed.
+
+    Args:
+        img: (B, 3, H, W), [0, 1]
+        depth: (B, 1, H, W), [0, 1]
+        psf_kernels: (num_depth, 3, ks, ks)
+        psf_depths: (num_depth). Used to interpolate psf_kernels.
+    """
+    # assert img.device != torch.device("cpu"), "Image must be on GPU"
+    num_depths, _, ks, _ = psf_kernels.shape
+
+    # PSF convolution for all depths
+    imgs_blur = []
+    for i in range(num_depths):
+        img_blur = conv_psf(img, psf_kernels[i, ...])  # shape [B, 3, H, W]
+        imgs_blur.append(img_blur)
+    imgs_blur = torch.stack(imgs_blur, dim=0)  # shape [num_depths, B, 3, H, W]
+
+    # Calculate indices for depth interpolation
+    B, _, H, W = depth.shape
+    depth_flat = depth.flatten(1)  # shape [B, H*W]
+    depth_flat = depth_flat.clamp(min(psf_depths) + 0.01, max(psf_depths) - 0.01)
+    indices = torch.searchsorted(psf_depths, depth_flat, right=True)  # shape [B, H*W]
+    indices = indices.clamp(1, num_depths - 1)
+    idx0 = indices - 1
+    idx1 = indices
+
+    # Calculate weights for depth interpolation
+    d0 = psf_depths[idx0]  # shape [B, H*W]
+    d1 = psf_depths[idx1]
+    denom = d1 - d0
+    denom[denom == 0] = 1e-6  # Avoid division by zero
+    w1 = (depth_flat - d0) / denom  # shape [B, H*W]
+    w0 = 1 - w1
+
+    # Create a weight tensor
+    weights = torch.zeros(num_depths, B, H * W, device=img.device, dtype=img.dtype)
+    weights.scatter_add_(0, idx0.unsqueeze(0).long(), w0.unsqueeze(0))
+    weights.scatter_add_(0, idx1.unsqueeze(0).long(), w1.unsqueeze(0))
+    weights = weights.view(num_depths, B, 1, H, W)
+
+    # Apply weights to the blurred images
+    img_blur = torch.sum(imgs_blur * weights, dim=0)
+    return img_blur
 
 def local_psf_render(input, psf, expand=False):
     """Render an image with pixel-wise PSF. Use the different PSF kernel for different pixels (folding approach).

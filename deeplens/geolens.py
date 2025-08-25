@@ -71,7 +71,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     def __init__(
         self,
         filename=None,
-        sensor_res=(1000, 1000),
+        sensor_res=(2000, 2000),
         sensor_size=(8.0, 8.0),
         device=None,
     ):
@@ -649,7 +649,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     # ====================================================================================
     # Image simulation
     # ====================================================================================
-    def render(self, img_obj, depth=DEPTH, method="raytracing", **kwargs):
+    def render(self, img_obj, method="ray_tracing", depth=DEPTH, **kwargs):
         """Differentiable image simulation.
 
         Image simulation methods:
@@ -674,33 +674,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # Differentiable image simulation
         if method == "psf_map":
             # PSF based rendering - uses PSF map to render image
-            if "psf_grid" in kwargs and "psf_ks" in kwargs:
-                psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
-                img_render = self.render_psf_map(
-                    img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
-                )
-            else:
-                # Use default PSF grid and kernel size
-                img_render = self.render_psf_map(img_obj, depth=depth)
+            psf_grid = kwargs.get("psf_grid", (7, 7))
+            psf_ks = kwargs.get("psf_ks", 51)
+            img_render = self.render_psf_map(img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks)
 
         elif method == "psf_patch":
             # PSF patch based rendering - uses a single PSF to render a patch of the image
-            if "psf_center" in kwargs and "psf_ks" in kwargs:
-                psf_center, psf_ks = kwargs["psf_center"], kwargs["psf_ks"]
-                img_render, field_channel = self.render_psf_patch(
-                    img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
-                )
-            else:
-                img_render = self.render_psf_patch(img_obj, depth=depth)
+            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            psf_ks = kwargs.get("psf_ks", 51)
+            img_render = self.render_psf_patch(img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks)
 
-        elif method == "raytracing":
+        elif method == "ray_tracing":
             # Ray tracing based rendering
-            if "spp" in kwargs:
-                spp = kwargs["spp"]
-                img_render = self.render_raytracing(img_obj, depth=depth, spp=spp)
-            else:
-                # Use default sample per pixel
-                img_render = self.render_raytracing(img_obj, depth=depth)
+            spp = kwargs.get("spp", SPP_RENDER)
+            img_render = self.render_raytracing(img_obj, depth=depth, spp=spp)
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
@@ -858,7 +845,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         spp=SPP_RENDER,
         unwarp=False,
         noise=0.0,
-        method="raytracing",
+        method="ray_tracing",
     ):
         """Render a single image for visualization and analysis. This function is designed to be non-differentiable. If want to use differentiable rendering, call self.render() function.
 
@@ -869,12 +856,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             unwarp (bool, optional): unwarp the image. Defaults to False.
             save_name (str, optional): save name. Defaults to None.
             noise (float, optional): sensor noise. Defaults to 0.0.
-            method (str, optional): rendering method. Defaults to 'raytracing'.
+            method (str, optional): rendering method. Defaults to 'ray_tracing'.
         """
         # Change sensor resolution to match the image
         sensor_res_original = self.sensor_res
         img = img2batch(img_org).to(self.device)
-        self.set_sensor(sensor_res=img.shape[-2:], sensor_size=self.sensor_size)
+        # self.set_sensor(sensor_res=img.shape[-2:], sensor_size=self.sensor_size)
+        self.set_sensor(sensor_res=img.shape[-2:], r_sensor=self.r_sensor)
 
         # Image rendering
         img_render = self.render(img, depth=depth, method=method, spp=spp)
@@ -905,7 +893,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
                 save_image(img_render, f"{save_name}_unwarped.png")
 
         # Change the sensor resolution back
-        self.set_sensor(sensor_res=sensor_res_original, sensor_size=self.sensor_size)
+        # self.set_sensor(sensor_res=sensor_res_original, sensor_size=self.sensor_size)
+        self.set_sensor(sensor_res=sensor_res_original, r_sensor=self.r_sensor)
 
         return img_render
 
