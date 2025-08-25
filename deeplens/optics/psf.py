@@ -16,18 +16,12 @@ import torch.nn.functional as F
 # PSF convolution for image simulation
 # ================================================
 def render_psf(img, psf):
-    """Convolve an image with a PSF.
-
-    Args:
-        img (torch.Tensor): [B, C, H, W]
-        psf (torch.Tensor): [C, ks, ks]
-    """
     raise Exception("This function has been renamed to conv_psf.")
     return conv_psf(img, psf)
 
 
 def conv_psf(img, psf):
-    """Convolve an image with a PSF.
+    """Convolve an image batch with a PSF.
 
     Args:
         img (torch.Tensor): [B, C, H, W]
@@ -49,12 +43,6 @@ def conv_psf(img, psf):
 
 
 def render_psf_map(img, psf_map):
-    """Convolve an image batch with a PSF map.
-
-    Args:
-        img (torch.Tensor): [B, 3, H, W]
-        psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
-    """
     raise Exception("This function has been renamed to conv_psf_map.")
     return conv_psf_map(img, psf_map)
 
@@ -149,40 +137,35 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
     return img_render
 
 
-def local_psf_render(input, psf, expand=False):
-    """Convolve an image batch with pixel-wise PSF.
-
-    Args:
-        input (torch.Tensor): [B, C, H, W]
-        psf (torch.Tensor): [C, ks, ks]
-    """
-    return conv_psf_pixel(input, psf, expand)
+def local_psf_render(img, psf, expand=False):
+    raise Exception("This function has been renamed to conv_psf_pixel.")
+    return conv_psf_pixel(img, psf, expand)
 
 
-def conv_psf_pixel(input, psf, expand=False):
+def conv_psf_pixel(img, psf, expand=False):
     """Convolve an image batch with pixel-wise PSF.
 
     Use the different PSF kernel for different pixels (folding approach). Application example: Blurs image with dynamic Gaussian blur.
 
     Args:
-        input (Tensor): The image to be blurred (B, C, H, W).
+        img (Tensor): The image to be blurred (B, C, H, W).
         psf (Tensor): Per pixel local PSFs (H, W, C, Ks, Ks)
         expand (bool): Whether to expand image for the final output. Default is False.
 
     Returns:
-        output (Tensor): Rendered image (B, C, H, W). (if expand is True, the output will be (B, C, H+pad*2, W+pad*2))
+        img_render (Tensor): Rendered image (B, C, H, W). (if expand is True, the output will be (B, C, H+pad*2, W+pad*2))
     """
     # Folding for convolution
-    B, Cimg, Himg, Wimg = input.shape
+    B, Cimg, Himg, Wimg = img.shape
     Hpsf, Wpsf, Cpsf, Ks, Ks = psf.shape
     assert Cimg == Cpsf and Himg == Hpsf and Wimg == Wpsf, (
         "Input and PSF shape mismatch"
     )
 
     # do the scattering
-    input = input.unsqueeze(-1).unsqueeze(-1)  # [B, C, H, W, 1, 1]
+    img = img.unsqueeze(-1).unsqueeze(-1)  # [B, C, H, W, 1, 1]
     kernels = psf.permute(2, 0, 1, 3, 4).unsqueeze(0)  # [1, C, H, W, Ks, Ks]
-    y = input * kernels  # [B, C, H, W, Ks, Ks]
+    y = img * kernels  # [B, C, H, W, Ks, Ks]
 
     # permute and fold the result
     y = y.permute(0, 1, 4, 5, 2, 3).reshape(
@@ -192,19 +175,20 @@ def conv_psf_pixel(input, psf, expand=False):
     # output processing
     pad = int((Ks - 1) / 2)
     if expand:
-        img = F.fold(y, (Himg + pad * 2, Wimg + pad * 2), (Ks, Ks), padding=0)
+        img_render = F.fold(y, (Himg + pad * 2, Wimg + pad * 2), (Ks, Ks), padding=0)
     else:
-        img = F.fold(y, (Himg, Wimg), (Ks, Ks), padding=pad)
-    return img
+        img_render = F.fold(y, (Himg, Wimg), (Ks, Ks), padding=pad)
+    return img_render
 
-def local_psf_render_high_res(input, psf, patch_num=(4, 4), expand=False):
-    return conv_psf_pixel_high_res(input, psf, patch_num, expand)
+def local_psf_render_high_res(img, psf, patch_num=(4, 4), expand=False):
+    raise Exception("This function has been renamed to conv_psf_pixel_high_res.")
+    return conv_psf_pixel_high_res(img, psf, patch_num, expand)
 
-def conv_psf_pixel_high_res(input, psf, patch_num=(4, 4), expand=False):
+def conv_psf_pixel_high_res(img, psf, patch_num=(4, 4), expand=False):
     """Convolve an image batch with pixel-wise PSF patch by patch. Overlapping windows are used to avoid boundary artifacts.
 
     Args:
-        input (Tensor): The image to be blurred (N, C, H, W).
+        img (Tensor): The image to be blurred (N, C, H, W).
         psf (Tensor): Per pixel local PSFs (H, W, 3, ks, ks)
         patch_num (list): Number of patches in each dimension. Defaults to [4, 4].
         expand (bool): Whether to expand image for the final output. Default is False.
@@ -212,7 +196,7 @@ def conv_psf_pixel_high_res(input, psf, patch_num=(4, 4), expand=False):
     Returns:
         img_render (Tensor): Rendered image with same shape (N, C, H, W) as input. if expand is True, the output will be (N, C, H+pad*2, W+pad*2)
     """
-    B, Cimg, Himg, Wimg = input.shape
+    B, Cimg, Himg, Wimg = img.shape
     Hpsf, Wpsf, Cpsf, Ks, Ks = psf.shape
     assert Cimg == Cpsf and Himg == Hpsf and Wimg == Wpsf, (
         "Input and PSF shape mismatch"
@@ -225,7 +209,7 @@ def conv_psf_pixel_high_res(input, psf, patch_num=(4, 4), expand=False):
     pad = int((Ks - 1) / 2)
 
     # Initialize output and weight accumulation tensors
-    img_render = torch.zeros_like(input)  # [B, C, Himg, Wimg  ]
+    img_render = torch.zeros_like(img)  # [B, C, Himg, Wimg  ]
     img_render = F.pad(
         img_render, (pad, pad, pad, pad), mode="reflect"
     )  # [B, C, Himg+pad*2, Wimg+pad*2]
@@ -247,11 +231,11 @@ def conv_psf_pixel_high_res(input, psf, patch_num=(4, 4), expand=False):
                 up_j = Wimg
 
             # Extract patches
-            img_patch = input[:, :, low_i:up_i, low_j:up_j]
+            img_patch = img[:, :, low_i:up_i, low_j:up_j]
             psf_patch = psf[low_i:up_i, low_j:up_j, :, :, :]
 
             # Process patch, expand boundary to [B, C, Himg+pad*2, Wimg+pad*2]
-            rendered_patch = local_psf_render(img_patch, psf_patch, expand=True)  #
+            rendered_patch = conv_psf_pixel(img_patch, psf_patch, expand=True)
 
             # Accumulate weighted result
             img_render[:, :, low_i : up_i + pad * 2, low_j : up_j + pad * 2] += (
