@@ -22,7 +22,7 @@ from torchvision.utils import save_image
 from deeplens.lens import Lens
 from deeplens.optics.basics import DEPTH, DEFAULT_WAVE
 from deeplens.optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
-from deeplens.optics.psf import render_psf
+from deeplens.optics.psf import conv_psf
 from deeplens.optics.wave import ComplexWave
 from deeplens.optics.utils import diff_float
 
@@ -198,7 +198,7 @@ class DiffractiveLens(Lens):
             img_render (torch.Tensor): Rendered image. Shape: (B, C, H, W)
         """
         psf = self.psf_infinite(wvln=wvln, ks=ks).unsqueeze(0)  # (1, ks, ks)
-        img_render = render_psf(img, psf)
+        img_render = conv_psf(img, psf)
         return img_render
 
     def psf(self, depth=float("inf"), wvln=0.589, ks=101, upsample_factor=1):

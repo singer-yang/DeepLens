@@ -15,17 +15,18 @@ import torch.nn.functional as F
 # ================================================
 # PSF convolution for image simulation
 # ================================================
-def conv_psf(img, psf):
+def render_psf(img, psf):
     """Convolve an image with a PSF.
 
     Args:
         img (torch.Tensor): [B, C, H, W]
         psf (torch.Tensor): [C, ks, ks]
     """
-    return render_psf(img, psf)
+    raise Exception("This function has been renamed to conv_psf.")
+    return conv_psf(img, psf)
 
 
-def render_psf(img, psf):
+def conv_psf(img, psf):
     """Render rgb image batch with rgb PSF.
 
     Args:
@@ -47,25 +48,26 @@ def render_psf(img, psf):
     return img_render
 
 
-def conv_psf_map(img, psf_map):
-    """Convolve an image with a PSF map.
+def render_psf_map(img, psf_map):
+    """Convolve an image with PSF map.
 
     Args:
         img (torch.Tensor): [B, 3, H, W]
         psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
     """
-    return render_psf_map(img, psf_map)
+    raise Exception("This function has been renamed to conv_psf_map.")
+    return conv_psf_map(img, psf_map)
 
 
-def render_psf_map(img, psf_map):
-    """Render a rgb image batch with PSF map using patch convolution.
+def conv_psf_map(img, psf_map):
+    """Convolve an image with PSF map.
 
     Args:
         img (torch.Tensor): [B, 3, H, W]
         psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
 
     Returns:
-        render_img (torch.Tensor): [B, C, H, W]
+        img_render (torch.Tensor): [B, C, H, W]
     """
     # Patch convolution
     grid_h, grid_w, _, ks, ks = psf_map.shape
@@ -74,7 +76,7 @@ def render_psf_map(img, psf_map):
     img_pad = F.pad(img, (pad, pad, pad, pad), mode="reflect")
 
     # Render image patch by patch
-    render_img = torch.zeros_like(img)
+    img_render = torch.zeros_like(img)
     for i in range(grid_h):
         for j in range(grid_w):
             psf = psf_map[i, j]  # shape [C, ks, ks]
@@ -90,12 +92,13 @@ def render_psf_map(img, psf_map):
             render_patch = F.conv2d(
                 img_pad_patch, psf, groups=img.shape[1], padding="valid", bias=None
             )
-            render_img[:, :, h_low:h_high, w_low:w_high] = render_patch
+            img_render[:, :, h_low:h_high, w_low:w_high] = render_patch
 
-    return render_img
+    return img_render
 
-def psf_conv_depth_interp(img, depth, psf_kernels, psf_depths):
-    """PSF convolution with image for all depths, then do interpolation regarding depth.
+
+def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
+    """PSF convolution with image for all depths, then do interpolation with depth map.
 
     The differentiability of this function is not guaranteed.
 
@@ -104,6 +107,9 @@ def psf_conv_depth_interp(img, depth, psf_kernels, psf_depths):
         depth: (B, 1, H, W), [0, 1]
         psf_kernels: (num_depth, 3, ks, ks)
         psf_depths: (num_depth). Used to interpolate psf_kernels.
+
+    Returns:
+        img_blur: (B, 3, H, W), [0, 1]
     """
     # assert img.device != torch.device("cpu"), "Image must be on GPU"
     num_depths, _, ks, _ = psf_kernels.shape
@@ -139,13 +145,24 @@ def psf_conv_depth_interp(img, depth, psf_kernels, psf_depths):
     weights = weights.view(num_depths, B, 1, H, W)
 
     # Apply weights to the blurred images
-    img_blur = torch.sum(imgs_blur * weights, dim=0)
-    return img_blur
+    img_render = torch.sum(imgs_blur * weights, dim=0)
+    return img_render
+
 
 def local_psf_render(input, psf, expand=False):
-    """Render an image with pixel-wise PSF. Use the different PSF kernel for different pixels (folding approach).
+    """Convolve an image with a PSF.
 
-        Application example: Blurs image with dynamic Gaussian blur.
+    Args:
+        input (torch.Tensor): [B, C, H, W]
+        psf (torch.Tensor): [C, ks, ks]
+    """
+    return conv_psf_pixel(input, psf, expand)
+
+
+def conv_psf_pixel(input, psf, expand=False):
+    """Convolve an image with pixel-wise PSF.
+
+    Use the different PSF kernel for different pixels (folding approach). Application example: Blurs image with dynamic Gaussian blur.
 
     Args:
         input (Tensor): The image to be blurred (B, C, H, W).
