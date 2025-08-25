@@ -103,7 +103,7 @@ class Material(DeepObj):
         if self.name == "air" or self.name == "vacuum" or self.name == "occluder":
             self.dispersion = "sellmeier"
             self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = 0, 0, 0, 0, 0, 0
-            self.n, self.V = 1, 1e38
+            self.n, self.V = 1.0, 1e38
 
         # Material found in AGF file
         elif self.name in MATERIAL_data:
@@ -112,10 +112,8 @@ class Material(DeepObj):
         # Material is given by a (n, V) string, e.g. "1.5168/64.17"
         elif "/" in self.name:
             self.dispersion = "cauchy"
-            self.n, self.V = (
-                float(self.name.split("/")[0]),
-                float(self.name.split("/")[1]),
-            )
+            self.n = float(self.name.split("/")[0])
+            self.V = float(self.name.split("/")[1])
             self.A, self.B = self.nV_to_AB(self.n, self.V)
 
         # Material found in custom JSON file
@@ -130,12 +128,16 @@ class Material(DeepObj):
             self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = CUSTOM_data[
                 "SELLMEIER_TABLE"
             ][self.name]
+            self.n = CUSTOM_data["MATERIAL_TABLE"][self.name][0]
+            self.V = CUSTOM_data["MATERIAL_TABLE"][self.name][1]
 
         elif self.name in CUSTOM_data["SCHOTT_TABLE"]:
             self.dispersion = "schott"
             self.a0, self.a1, self.a2, self.a3, self.a4, self.a5 = CUSTOM_data[
                 "SCHOTT_TABLE"
             ][self.name]
+            self.n = CUSTOM_data["MATERIAL_TABLE"][self.name][0]
+            self.V = CUSTOM_data["MATERIAL_TABLE"][self.name][1]
 
         elif self.name in CUSTOM_data["MATERIAL_TABLE"]:
             self.dispersion = "cauchy"
