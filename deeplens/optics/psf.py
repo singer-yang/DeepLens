@@ -27,7 +27,7 @@ def render_psf(img, psf):
 
 
 def conv_psf(img, psf):
-    """Render rgb image batch with rgb PSF.
+    """Convolve an image with a PSF.
 
     Args:
         img (torch.Tensor): [B, C, H, W]
@@ -49,7 +49,7 @@ def conv_psf(img, psf):
 
 
 def render_psf_map(img, psf_map):
-    """Convolve an image with PSF map.
+    """Convolve an image batch with a PSF map.
 
     Args:
         img (torch.Tensor): [B, 3, H, W]
@@ -60,7 +60,7 @@ def render_psf_map(img, psf_map):
 
 
 def conv_psf_map(img, psf_map):
-    """Convolve an image with PSF map.
+    """Convolve an image batch with a PSF map.
 
     Args:
         img (torch.Tensor): [B, 3, H, W]
@@ -98,7 +98,7 @@ def conv_psf_map(img, psf_map):
 
 
 def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
-    """PSF convolution with image for all depths, then do interpolation with depth map.
+    """Convolve an image batch with PSF at given depths, then do interpolation with a depth map.
 
     The differentiability of this function is not guaranteed.
 
@@ -150,7 +150,7 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
 
 
 def local_psf_render(input, psf, expand=False):
-    """Convolve an image with a PSF.
+    """Convolve an image batch with pixel-wise PSF.
 
     Args:
         input (torch.Tensor): [B, C, H, W]
@@ -160,7 +160,7 @@ def local_psf_render(input, psf, expand=False):
 
 
 def conv_psf_pixel(input, psf, expand=False):
-    """Convolve an image with pixel-wise PSF.
+    """Convolve an image batch with pixel-wise PSF.
 
     Use the different PSF kernel for different pixels (folding approach). Application example: Blurs image with dynamic Gaussian blur.
 
@@ -197,9 +197,11 @@ def conv_psf_pixel(input, psf, expand=False):
         img = F.fold(y, (Himg, Wimg), (Ks, Ks), padding=pad)
     return img
 
+def local_psf_render_high_res(input, psf, patch_num=(4, 4), expand=False):
+    return conv_psf_pixel_high_res(input, psf, patch_num, expand)
 
-def local_psf_render_high_res(input, psf, patch_num=[4, 4], expand=False):
-    """Render an image with pixel-wise PSF using patch-wise rendering. Overlapping windows are used to avoid boundary artifacts.
+def conv_psf_pixel_high_res(input, psf, patch_num=(4, 4), expand=False):
+    """Convolve an image batch with pixel-wise PSF patch by patch. Overlapping windows are used to avoid boundary artifacts.
 
     Args:
         input (Tensor): The image to be blurred (N, C, H, W).
@@ -208,7 +210,7 @@ def local_psf_render_high_res(input, psf, patch_num=[4, 4], expand=False):
         expand (bool): Whether to expand image for the final output. Default is False.
 
     Returns:
-        Tensor: Rendered image with same shape (N, C, H, W) as input. if expand is True, the output will be (N, C, H+pad*2, W+pad*2)
+        img_render (Tensor): Rendered image with same shape (N, C, H, W) as input. if expand is True, the output will be (N, C, H+pad*2, W+pad*2)
     """
     B, Cimg, Himg, Wimg = input.shape
     Hpsf, Wpsf, Cpsf, Ks, Ks = psf.shape
