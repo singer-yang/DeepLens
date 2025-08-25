@@ -27,7 +27,7 @@ from deeplens.optics.basics import (
     DeepObj,
     init_device,
 )
-from deeplens.optics.psf import conv_psf, conv_psf_map, conv_psf_depth_interp
+from deeplens.optics.psf import conv_psf, conv_psf_map, conv_psf_depth_interp, conv_psf_pixel
 
 
 class Lens(DeepObj):
@@ -136,20 +136,20 @@ class Lens(DeepObj):
     def psf_spectrum(self, points, ks=51, **kwargs):
         """Compute RGB PSF considering full spectrum for each color.
 
-        A placeholder RGB sensor response function is used to calculate the final PSF. But the actual sensor response function will be more reasonable.
-
         Note:
-            This function is not differentiable.
-
-        Reference:
-            https://en.wikipedia.org/wiki/Spectral_sensitivity
-
+            The differentiability of this function is not guaranteed.
+            A placeholder RGB sensor response function is used to calculate the final PSF. 
+            But the actual sensor response function will be more reasonable.
+        
         Args:
             points (tensor): Shape of [N, 3] or [3].
             ks (int, optional): Kernel size. Defaults to 51.
 
         Returns:
             psf: Shape of [3, ks, ks].
+
+        Reference:
+            https://en.wikipedia.org/wiki/Spectral_sensitivity
         """
         # Red
         psf_r = []
@@ -426,7 +426,8 @@ class Lens(DeepObj):
         """Differentiable image simulation. 
         
         Note:
-            This function handles only the differentiable components of image simulation, specifically the optical aberrations. The non-differentiable components (such as noise simulation) are handled separately in other functions to ensure more accurate overall image simulation.
+            This function handles only the differentiable components of image simulation, specifically the optical aberrations. 
+            The non-differentiable components (such as noise simulation) are handled separately in other functions.
     
         Image simulation methods:
             [1] PSF map, convolution by patches.
@@ -480,7 +481,7 @@ class Lens(DeepObj):
                 ),
                 indexing="xy",
             )
-            field_channel = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
+            field_chan = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
@@ -520,7 +521,8 @@ class Lens(DeepObj):
     def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
         """Render image using PSF block convolution.
 
-        Note: larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
+        Note: 
+            Larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
@@ -546,6 +548,9 @@ class Lens(DeepObj):
             depth_map (tensor): Depth map. Shape of [B, 1, H, W].
             method (str, optional): Image simulation method. Defaults to "psf_patch".
             **kwargs: Additional arguments for different methods.
+
+        Returns:
+            img_render: Rendered image. Shape of [B, C, H, W].
         """
         if method == "psf_patch":
             # Render a small image patch (same FoV, different depth)
@@ -567,6 +572,30 @@ class Lens(DeepObj):
             # Image simulation
             img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref)
             return img_render
+
+        elif method == "psf_pixel":
+            # Render full resolution image with pixel-wise PSF convolution
+            psf_ks = kwargs.get("psf_ks", 21)
+            assert img_obj.shape[0] == 1, "Now only support batch size 1"
+
+            # Calculate points in the object space
+            points_xy = torch.meshgrid(
+                torch.linspace(-1, 1, img_obj.shape[-1], device=self.device),
+                torch.linspace(1, -1, img_obj.shape[-2], device=self.device),
+                indexing="xy",
+            )
+            points_xy = torch.stack(points_xy, dim=0).unsqueeze(0)
+            points = torch.cat([points_xy, depth_map], dim=1) # shape [B, 3, H, W]
+
+            # Calculate PSF at different pixels. This step is the most time-consuming.
+            points = points.permute(0, 2, 3, 1).reshape(-1, 3) # shape [H*W, 3]
+            psfs = self.psf_rgb(points=points, ks=psf_ks) # shape [H*W, 3, ks, ks]
+            psfs = psfs.reshape(img_obj.shape[-2], img_obj.shape[-1], 3, psf_ks, psf_ks) # shape [H, W, 3, ks, ks]
+
+            # Image simulation
+            img_render = conv_psf_pixel(img_obj, psfs) # shape [1, C, H, W]
+            return img_render
+
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
 
