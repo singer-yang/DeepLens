@@ -427,7 +427,7 @@ class Lens(DeepObj):
         
         Note:
             This function handles only the differentiable components of image simulation, specifically the optical aberrations. 
-            The non-differentiable components (such as noise simulation) are handled separately in other functions.
+            The non-differentiable components (e.g., noise simulation) are handled separately in other functions.
     
         Image simulation methods:
             [1] PSF map, convolution by patches.
@@ -440,6 +440,12 @@ class Lens(DeepObj):
             depth (float, optional): Depth of the object. Defaults to DEPTH.
             method (str, optional): Image simulation method. Defaults to "psf".
             **kwargs: Additional arguments for different methods.
+
+        Returns:
+            img_render (tensor): Rendered image. Shape of [N, C, H, W].
+
+        Reference:
+            [1] "Optical Aberration Correction in Postprocessing using Imaging Simulation", TOG 2021.
         """
         # Check sensor resolution
         if not (
@@ -551,6 +557,10 @@ class Lens(DeepObj):
 
         Returns:
             img_render: Rendered image. Shape of [B, C, H, W].
+
+        Reference:
+            [1] "Aberration-Aware Depth-from-Focus", TPAMI 2023. 
+            [2] "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur", ICCVW 2025.
         """
         if method == "psf_patch":
             # Render a small image patch (same FoV, different depth)
@@ -574,7 +584,7 @@ class Lens(DeepObj):
             return img_render
 
         elif method == "psf_pixel":
-            # Render full resolution image with pixel-wise PSF convolution
+            # Render full resolution image with pixel-wise PSF convolution. This method is computationally expensive.
             psf_ks = kwargs.get("psf_ks", 21)
             assert img_obj.shape[0] == 1, "Now only support batch size 1"
 
