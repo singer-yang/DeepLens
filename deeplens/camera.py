@@ -15,7 +15,10 @@ from deeplens.sensor import RGBSensor
 
 
 class Renderer:
-    """Renderer is a basic class for image simulation."""
+    """Renderer is a basic class for image simulation.
+    
+    We will support Camera renderer, and PSF renderer.
+    """
 
     def __init__(self, device=None):
         if device is None:
@@ -76,19 +79,29 @@ class Camera(Renderer):
         ).to(device)
 
     def __call__(self, data_dict):
-        """Render a blurry and noisy RGB image considering camera and lens."""
+        """Simulate a blurry and noisy RGB image considering lens and sensor."""
         return self.render(data_dict)
 
     def render(self, data_dict):
-        """Render a blurry and noisy RGB image considering camera and lens.
+        """Simulate a blurry and noisy RGB image considering lens and sensor. 
+        
+        This function focuses on unprocessing and noise simulation. Lens simulation is handled in the render_lens function.
 
         Args:
-            data_dict (dict): Dictionary containing essential information for image simulation, for example:
-                {
-                    "img": rgb image (torch.Tensor), (B, 3, H, W), [0, 1]
-                    "iso": iso (int),
-                    "output_type": "rggbi",
-                }
+            data_dict (dict): Dictionary containing essential information for image simulation. 
+                For example:
+                    {
+                        "img": rgb image (torch.Tensor), (B, 3, H, W), [0, 1]
+                        "iso": iso (int),
+                        "output_type": "rggbi",
+                    }
+
+        Returns:
+            img_rgb (torch.Tensor): RGB image (B, 3, H, W), [0, 1]
+
+        Reference:
+            [1] "Unprocessing Images for Learned Raw Denoising", CVPR 2018.
+            [2] "Noise Modeling in One Hour: Minimizing Preparation Efforts for Self-supervised Low-Light RAW Image Denoising", CVPR 2025.
         """
         data_dict = self.move_to_device(data_dict)
         img = data_dict["img"]
@@ -121,9 +134,14 @@ class Camera(Renderer):
         return img_rgb
 
     def render_lens(self, img_raw, field=None):
-        """Render a blurry rgb raw image with the lens.
+        """Simulate a blurry rgb image considering lens aberrations and defocus.
 
-        Here we adopt the full sensor resolution rendering, while a PSF-based patch rendering is also possible.
+        Args:
+            img_raw (torch.Tensor): Raw image (Bayer after demosaic). (B, 3, H, W), [0, 1]
+            field (torch.Tensor): Field of view parameters (B, 2), [0, 1]. Defaults to None.
+
+        Returns:
+            img_blur (torch.Tensor): Blurry image (B, 3, H, W), [0, 1]
         """
         return self.lens.render(img_raw)
 
@@ -142,9 +160,9 @@ class Camera(Renderer):
             bayer_gt (torch.Tensor): Bayer image (B, 1, H, W), [~black_level, 2**bit - 1]
             bayer_blur_noise (torch.Tensor): Bayer image with noise (B, 1, H, W), [~black_level, 2**bit - 1]
             iso (torch.Tensor): ISO value (B,)
-            iso_scale (int): ISO scale
-            field_center (tuple): Center of the field of view (B, 2)
-            output_type (str): Output type
+            iso_scale (int): ISO scale. Defaults to 1000.
+            field_center (tuple): Center of the field of view (B, 2). Defaults to ((0.0, 0.0)).
+            output_type (str): Output type. Defaults to "rggbi".
 
         Returns:
             rggbi_blur_noise (torch.Tensor): RGGB image with noise (B, C, H, W)
