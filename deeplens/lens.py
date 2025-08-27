@@ -423,7 +423,7 @@ class Lens(DeepObj):
     # Simulate 2D scene
     # -------------------------------------------
     def render(self, img_obj, depth=DEPTH, method="psf_patch", **kwargs):
-        """Differentiable image simulation. 
+        """Differentiable image simulation, considering only 2D scene.
         
         Note:
             This function handles only the differentiable components of image simulation, specifically the optical aberrations. 
@@ -448,13 +448,8 @@ class Lens(DeepObj):
             [1] "Optical Aberration Correction in Postprocessing using Imaging Simulation", TOG 2021.
         """
         # Check sensor resolution
-        if not (
-            self.sensor_res[0] == img_obj.shape[-2]
-            and self.sensor_res[1] == img_obj.shape[-1]
-        ):
-            raise Exception("Sensor resolution does not match input image object.")
-            H, W = img_obj.shape[-2], img_obj.shape[-1]
-            self.prepare_sensor(sensor_res=[H, W])
+        B, C, H, W = img_obj.shape
+        assert self.sensor_res[0] == H and self.sensor_res[1] == W, "Sensor resolution must match input image object."
 
         # Image simulation (in RAW space)
         if method == "psf_map":
