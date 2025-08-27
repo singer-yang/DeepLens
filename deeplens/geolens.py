@@ -649,7 +649,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     # ====================================================================================
     # Image simulation
     # ====================================================================================
-    def render(self, img_obj, method="ray_tracing", depth=DEPTH, **kwargs):
+    def render(self, img_obj, depth=DEPTH,  method="ray_tracing", **kwargs):
         """Differentiable image simulation.
 
         Image simulation methods:
