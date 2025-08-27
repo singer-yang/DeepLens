@@ -128,16 +128,22 @@ class Material(DeepObj):
             self.k1, self.l1, self.k2, self.l2, self.k3, self.l3 = CUSTOM_data[
                 "SELLMEIER_TABLE"
             ][self.name]
-            self.n = CUSTOM_data["MATERIAL_TABLE"][self.name][0]
-            self.V = CUSTOM_data["MATERIAL_TABLE"][self.name][1]
+            try:
+                self.n = CUSTOM_data["MATERIAL_TABLE"][self.name][0]
+                self.V = CUSTOM_data["MATERIAL_TABLE"][self.name][1]
+            except KeyError:
+                print(f"Warning: {self.name} found in SELLMEIER_TABLE but not in MATERIAL_TABLE.")
 
         elif self.name in CUSTOM_data["SCHOTT_TABLE"]:
             self.dispersion = "schott"
             self.a0, self.a1, self.a2, self.a3, self.a4, self.a5 = CUSTOM_data[
                 "SCHOTT_TABLE"
             ][self.name]
-            self.n = CUSTOM_data["MATERIAL_TABLE"][self.name][0]
-            self.V = CUSTOM_data["MATERIAL_TABLE"][self.name][1]
+            try:
+                self.n = CUSTOM_data["MATERIAL_TABLE"][self.name][0]
+                self.V = CUSTOM_data["MATERIAL_TABLE"][self.name][1]
+            except KeyError:
+                print(f"Warning: {self.name} found in SCHOTT_TABLE but not in MATERIAL_TABLE.")
 
         elif self.name in CUSTOM_data["MATERIAL_TABLE"]:
             self.dispersion = "cauchy"

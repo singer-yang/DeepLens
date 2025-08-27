@@ -11,6 +11,8 @@ import cv2 as cv
 import torch
 import torch.nn.functional as F
 
+from deeplens.optics.basics import DELTA
+
 
 # ================================================
 # PSF convolution for image simulation
@@ -112,7 +114,7 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
     # Calculate indices for depth interpolation
     B, _, H, W = depth.shape
     depth_flat = depth.flatten(1)  # shape [B, H*W]
-    depth_flat = depth_flat.clamp(min(psf_depths) + 0.01, max(psf_depths) - 0.01)
+    depth_flat = depth_flat.clamp(min(psf_depths) + DELTA, max(psf_depths) - DELTA)
     indices = torch.searchsorted(psf_depths, depth_flat, right=True)  # shape [B, H*W]
     indices = indices.clamp(1, num_depths - 1)
     idx0 = indices - 1
