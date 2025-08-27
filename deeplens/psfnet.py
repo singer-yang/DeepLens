@@ -492,11 +492,9 @@ class PSFNet(DeepObj):
             psf = self.pred(o)
 
             if high_res:
-                render = conv_psf_pixel_high_res(
-                    img, psf, kernel_size=self.kernel_size
-                )
+                render = conv_psf_pixel_high_res(img, psf)
             else:
-                render = conv_psf_pixel(img, psf, self.kernel_size)
+                render = conv_psf_pixel(img, psf)
 
             return render
 
@@ -514,11 +512,9 @@ class PSFNet(DeepObj):
             o = torch.stack((x, y, z, foc_z), -1).float()
             psf = self.pred(o)
             if high_res:
-                render = conv_psf_pixel_high_res(
-                    img, psf, kernel_size=self.kernel_size
-                )
+                render = conv_psf_pixel_high_res(img, psf)
             else:
-                render = conv_psf_pixel(img, psf, self.kernel_size)
+                render = conv_psf_pixel(img, psf)
 
             return render
 
@@ -648,5 +644,5 @@ class ThinLens(DeepObj):
             psf = psf * psf_mask
             psf = psf / psf.sum((-1, -2)).unsqueeze(-1).unsqueeze(-1)
 
-            render = conv_psf_pixel(img, psf, self.kernel_size)
+            render = conv_psf_pixel(img, psf)
             return render
