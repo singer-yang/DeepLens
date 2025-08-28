@@ -11,25 +11,28 @@ When creating a new lens (geolens, diffractivelens, etc.), it is recommended to 
 """
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 from torchvision.utils import make_grid, save_image
 
-from .optics import (
+from deeplens.optics.basics import (
     BLUE_RESPONSE,
     DEPTH,
     EPSILON,
     GREEN_RESPONSE,
     PSF_KS,
     RED_RESPONSE,
-    WAVE_BLUE,
     WAVE_BOARD_BAND,
-    WAVE_GREEN,
-    WAVE_RED,
     WAVE_RGB,
     DeepObj,
     init_device,
 )
-from deeplens.optics.psf import conv_psf, conv_psf_map
+from deeplens.optics.psf import (
+    conv_psf,
+    conv_psf_map,
+    conv_psf_depth_interp,
+    conv_psf_pixel,
+)
 
 
 class Lens(DeepObj):
@@ -75,8 +78,43 @@ class Lens(DeepObj):
         self.sensor_res = sensor_res
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
 
+    def set_sensor_res(self, sensor_res):
+        """Set sensor resolution. Sensor radius does not change.
+
+        Args:
+            sensor_res (tuple): Sensor resolution (H, W).
+        """
+        # Change sensor resolution
+        self.sensor_res = sensor_res
+
+        # Change sensor size (r_sensor is fixed)
+        diam_res = np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2)
+        self.sensor_size = (
+            round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 3),
+            round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 3),
+        )
+        self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 3)
+
+    def set_sensor_size(self, sensor_size):
+        """Set sensor size. Pixel size does not change.
+
+        Args:
+            sensor_size (tuple): Sensor size (H, W).
+        """
+        self.sensor_size = sensor_size
+        self.r_sensor = (
+            np.sqrt(self.sensor_size[0] ** 2 + self.sensor_size[1] ** 2) / 2.0
+        )
+        self.sensor_res = (
+            int(self.sensor_size[0] / self.pixel_size),
+            int(self.sensor_size[1] / self.pixel_size),
+        )
+
     # ===========================================
     # PSF-ralated functions
+    # 1. Point PSF
+    # 2. PSF map
+    # 3. PSF radial
     # ===========================================
     def psf(self, points, wvln=0.589, ks=51, **kwargs):
         """Compute monochrome point PSF. This function should be differentiable.
@@ -108,10 +146,12 @@ class Lens(DeepObj):
         return psf_rgb
 
     def psf_spectrum(self, points, ks=51, **kwargs):
-        """Compute RGB PSF considering full spectrum for each color. A placeholder RGB sensor response function is used to calculate the final PSF. But the actual sensor response function will be more reasonable.
+        """Compute RGB PSF considering full spectrum for each color.
 
-        Reference:
-            https://en.wikipedia.org/wiki/Spectral_sensitivity
+        Note:
+            The differentiability of this function is not guaranteed.
+            A placeholder RGB sensor response function is used to calculate the final PSF.
+            But the actual sensor response function will be more reasonable.
 
         Args:
             points (tensor): Shape of [N, 3] or [3].
@@ -119,6 +159,9 @@ class Lens(DeepObj):
 
         Returns:
             psf: Shape of [3, ks, ks].
+
+        Reference:
+            https://en.wikipedia.org/wiki/Spectral_sensitivity
         """
         # Red
         psf_r = []
@@ -208,29 +251,6 @@ class Lens(DeepObj):
             point_source[..., 0] *= scale * self.sensor_size[0] / 2
             point_source[..., 1] *= scale * self.sensor_size[1] / 2
 
-        return point_source
-
-    def point_source_radial(self, depth, grid=9, center=False):
-        """Compute point radial [0, 1] in the object space to compute PSF grid.
-
-        Args:
-            grid (int, optional): Grid size. Defaults to 9.
-
-        Returns:
-            point_source: Shape of [grid, 3].
-        """
-        if grid == 1:
-            x = torch.tensor([0.0])
-        else:
-            # Select center of bin to calculate PSF
-            if center:
-                half_bin_size = 1 / 2 / (grid - 1)
-                x = torch.linspace(0, 1 - half_bin_size, grid)
-            else:
-                x = torch.linspace(0, 0.98, grid)
-
-        z = torch.full_like(x, depth)
-        point_source = torch.stack([x, x, z], dim=-1)
         return point_source
 
     def psf_map(self, grid=(5, 5), wvln=0.589, depth=DEPTH, ks=51, **kwargs):
@@ -359,6 +379,29 @@ class Lens(DeepObj):
         plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
 
+    def point_source_radial(self, depth, grid=9, center=False):
+        """Compute point radial [0, 1] in the object space to compute PSF grid.
+
+        Args:
+            grid (int, optional): Grid size. Defaults to 9.
+
+        Returns:
+            point_source: Shape of [grid, 3].
+        """
+        if grid == 1:
+            x = torch.tensor([0.0])
+        else:
+            # Select center of bin to calculate PSF
+            if center:
+                half_bin_size = 1 / 2 / (grid - 1)
+                x = torch.linspace(0, 1 - half_bin_size, grid)
+            else:
+                x = torch.linspace(0, 0.98, grid)
+
+        z = torch.full_like(x, depth)
+        point_source = torch.stack([x, x, z], dim=-1)
+        return point_source
+
     @torch.no_grad()
     def draw_psf_radial(
         self, M=3, depth=DEPTH, ks=PSF_KS, log_scale=False, save_name="./psf_radial.png"
@@ -387,47 +430,77 @@ class Lens(DeepObj):
     # ===========================================
     # Image simulation-ralated functions
     # ===========================================
+
+    # -------------------------------------------
+    # Simulate 2D scene
+    # -------------------------------------------
     def render(self, img_obj, depth=DEPTH, method="psf_patch", **kwargs):
-        """Differentiable image simulation. This function handles only the differentiable components of image simulation, specifically the optical aberrations. The non-differentiable components (such as noise simulation) are handled separately in the self.render_unprocess() function to ensure more accurate overall image simulation.
+        """Differentiable image simulation, considering only 2D scene.
+
+        Note:
+            This function handles only the differentiable components of image simulation, specifically the optical aberrations.
+            The non-differentiable components (e.g., noise simulation) are handled separately in other functions.
 
         Image simulation methods:
-            [1] PSF map block convolution.
-            [2] Ray tracing-based rendering.
-            [3] ...
+            [1] PSF map, convolution by patches.
+            [2] PSF patch, convolution by a single PSF.
+            [3] Ray tracing-based rendering, in GeoLens.
+            [4] ...
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [N, C, H, W].
             depth (float, optional): Depth of the object. Defaults to DEPTH.
             method (str, optional): Image simulation method. Defaults to "psf".
             **kwargs: Additional arguments for different methods.
+
+        Returns:
+            img_render (tensor): Rendered image. Shape of [N, C, H, W].
+
+        Reference:
+            [1] "Optical Aberration Correction in Postprocessing using Imaging Simulation", TOG 2021.
         """
         # Check sensor resolution
-        if not (
-            self.sensor_res[0] == img_obj.shape[-2]
-            and self.sensor_res[1] == img_obj.shape[-1]
-        ):
-            raise Exception("Sensor resolution does not match input image object.")
-            H, W = img_obj.shape[-2], img_obj.shape[-1]
-            self.prepare_sensor(sensor_res=[H, W])
+        B, C, H, W = img_obj.shape
+        assert self.sensor_res[0] == H and self.sensor_res[1] == W, (
+            "Sensor resolution must match input image object."
+        )
 
         # Image simulation (in RAW space)
         if method == "psf_map":
-            if "psf_grid" in kwargs and "psf_ks" in kwargs:
-                psf_grid, psf_ks = kwargs["psf_grid"], kwargs["psf_ks"]
-                img_render = self.render_psf_map(
-                    img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
-                )
-            else:
-                img_render = self.render_psf_map(img_obj, depth=depth)
+            # Render full resolution image with PSF map convolution
+            psf_grid = kwargs.get("psf_grid", (7, 7))
+            psf_ks = kwargs.get("psf_ks", 51)
+            img_render = self.render_psf_map(
+                img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
+            )
 
         elif method == "psf_patch":
-            if "psf_center" in kwargs and "psf_ks" in kwargs:
-                psf_center, psf_ks = kwargs["psf_center"], kwargs["psf_ks"]
-                img_render, field_channel = self.render_psf_patch(
-                    img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
-                )
-            else:
-                img_render = self.render_psf_patch(img_obj, depth=depth)
+            # Render a small image patch with one PSF
+            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            psf_ks = kwargs.get("psf_ks", 51)
+            img_render = self.render_psf_patch(
+                img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+            )
+
+            # Compute positional encoding channel for image patch. Shape of [1, H, W].
+            Wobj, Hobj = img_obj.shape[-1], img_obj.shape[-2]
+            ps_norm = 2 / self.sensor_res[0]
+            grid_x, grid_y = torch.meshgrid(
+                torch.linspace(
+                    psf_center[0] - Wobj / 2 * ps_norm,
+                    psf_center[0] + Wobj / 2 * ps_norm,
+                    Wobj // 2,
+                    device=self.device,
+                ),
+                torch.linspace(
+                    psf_center[1] + Hobj / 2 * ps_norm,
+                    psf_center[1] - Hobj / 2 * ps_norm,
+                    Hobj // 2,
+                    device=self.device,
+                ),
+                indexing="xy",
+            )
+            field_chan = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
@@ -451,7 +524,6 @@ class Lens(DeepObj):
 
         Returns:
             img_render: Rendered image. Shape of [B, C, H, W].
-            field_channel: Positional encoding channel. Shape of [1, H, W].
         """
         # Convert psf_center to tensor
         if isinstance(psf_center, (list, tuple)):
@@ -463,33 +535,13 @@ class Lens(DeepObj):
         # Compute PSF and perform PSF convolution
         psf = self.psf_rgb(points=points, ks=psf_ks).squeeze(0)
         img_render = conv_psf(img_obj, psf=psf)
-
-        # Compute positional encoding channel for image patch
-        Wobj, Hobj = img_obj.shape[-1], img_obj.shape[-2]
-        ps_norm = 2 / self.sensor_res[0]
-        grid_x, grid_y = torch.meshgrid(
-            torch.linspace(
-                psf_center[0] - Wobj / 2 * ps_norm,
-                psf_center[0] + Wobj / 2 * ps_norm,
-                Wobj // 2,
-                device=self.device,
-            ),
-            torch.linspace(
-                psf_center[1] + Hobj / 2 * ps_norm,
-                psf_center[1] - Hobj / 2 * ps_norm,
-                Hobj // 2,
-                device=self.device,
-            ),
-            indexing="xy",
-        )
-        field_channel = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
-
-        return img_render  # , field_channel
+        return img_render
 
     def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
         """Render image using PSF block convolution.
 
-        Note: larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
+        Note:
+            Larger psf_grid and psf_ks are typically better for more accurate rendering, but slower.
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
@@ -503,6 +555,77 @@ class Lens(DeepObj):
         psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
         img_render = conv_psf_map(img_obj, psf_map)
         return img_render
+
+    # -------------------------------------------
+    # Simulate 3D scene
+    # -------------------------------------------
+    def render_rgbd(self, img_obj, depth_map, method="psf_patch", **kwargs):
+        """Render RGBD image.
+
+        Args:
+            img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
+            depth_map (tensor): Depth map. Shape of [B, 1, H, W].
+            method (str, optional): Image simulation method. Defaults to "psf_patch".
+            **kwargs: Additional arguments for different methods.
+
+        Returns:
+            img_render: Rendered image. Shape of [B, C, H, W].
+
+        Reference:
+            [1] "Aberration-Aware Depth-from-Focus", TPAMI 2023.
+            [2] "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur", ICCVW 2025.
+        """
+        if method == "psf_patch":
+            # Render a small image patch (same FoV, different depth)
+            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            psf_ks = kwargs.get("psf_ks", 51)
+            depth_min = kwargs.get("depth_min", depth_map.min())
+            depth_max = kwargs.get("depth_max", depth_map.max())
+            num_depth = kwargs.get("num_depth", 10)
+
+            # Calculate PSF at different depths, (num_depth, 3, ks, ks)
+            depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
+            points = torch.stack(
+                [
+                    torch.full_like(depths_ref, psf_center[0]),
+                    torch.full_like(depths_ref, psf_center[1]),
+                    depths_ref,
+                ],
+                dim=-1,
+            )
+            psfs = self.psf_rgb(points=points, ks=psf_ks)
+
+            # Image simulation
+            img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref)
+            return img_render
+
+        elif method == "psf_pixel":
+            # Render full resolution image with pixel-wise PSF convolution. This method is computationally expensive.
+            psf_ks = kwargs.get("psf_ks", 21)
+            assert img_obj.shape[0] == 1, "Now only support batch size 1"
+
+            # Calculate points in the object space
+            points_xy = torch.meshgrid(
+                torch.linspace(-1, 1, img_obj.shape[-1], device=self.device),
+                torch.linspace(1, -1, img_obj.shape[-2], device=self.device),
+                indexing="xy",
+            )
+            points_xy = torch.stack(points_xy, dim=0).unsqueeze(0)
+            points = torch.cat([points_xy, depth_map], dim=1)  # shape [B, 3, H, W]
+
+            # Calculate PSF at different pixels. This step is the most time-consuming.
+            points = points.permute(0, 2, 3, 1).reshape(-1, 3)  # shape [H*W, 3]
+            psfs = self.psf_rgb(points=points, ks=psf_ks)  # shape [H*W, 3, ks, ks]
+            psfs = psfs.reshape(
+                img_obj.shape[-2], img_obj.shape[-1], 3, psf_ks, psf_ks
+            )  # shape [H, W, 3, ks, ks]
+
+            # Image simulation
+            img_render = conv_psf_pixel(img_obj, psfs)  # shape [1, C, H, W]
+            return img_render
+
+        else:
+            raise Exception(f"Image simulation method {method} is not supported.")
 
     # ===========================================
     # Optimization-ralated functions
