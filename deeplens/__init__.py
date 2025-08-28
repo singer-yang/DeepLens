@@ -12,5 +12,5 @@ from .utils import *
 
 # doelens
 from .geolens import GeoLens
-from .psfnet import PSFNet
+from .psfnet import PSFNetLens
 from .camera import Camera
