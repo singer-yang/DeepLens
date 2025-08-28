@@ -16,7 +16,7 @@ This code and data is released under the Creative Commons Attribution-NonCommerc
 import os
 from datetime import datetime
 
-from deeplens.psfnet import PSFNet
+from deeplens.psfnet import PSFNetLens
 from deeplens.utils import set_logger, set_seed
 
 result_dir = "./results/" + datetime.now().strftime("%m%d-%H%M%S") + "-PSFNet"
@@ -26,20 +26,20 @@ set_seed(0)
 
 if __name__ == "__main__":
     # Init PSFNet (I changed the network archietecture to mlpconv for better performance on large PSF kernels.)
-    psfnet = PSFNet(
-        filename="./lenses/camera/ef50mm_f1.8.json",
+    psfnet = PSFNetLens(
+        lens_path="./lenses/camera/ef50mm_f1.8.json",
         model_name="mlpconv",
-        sensor_res=(1000, 1000),
-        kernel_size=128,
+        sensor_res=(2000, 2000),
+        kernel_size=64,
     )
     psfnet.lens.analysis(save_name=f"{result_dir}/lens")
     psfnet.lens.write_lens_json(f"{result_dir}/lens.json")
 
     # Train PSFNet
-    psfnet.load_net("./ckpts/psfnet/ef50mm_f1.8_1000x1000_ks128_mlpconv.pth")
+    # psfnet.load_net("./ckpts/psfnet/ef50mm_f1.8_1000x1000_ks128_mlpconv.pth")
     psfnet.train_psfnet(
         iters=20000,
-        bs=64,
+        bs=256,
         lr=1e-3,
         spp=100000,
         evaluate_every=1000,
