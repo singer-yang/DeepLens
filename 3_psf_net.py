@@ -41,8 +41,7 @@ if __name__ == "__main__":
         iters=20000,
         bs=256,
         lr=1e-3,
-        spp=100000,
-        evaluate_every=1000,
+        evaluate_every=100,
         result_dir=result_dir,
     )
     psfnet.evaluate_psf(result_dir=result_dir)

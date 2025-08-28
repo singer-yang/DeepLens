@@ -46,6 +46,7 @@ class PSFNetLens(DeepObj):
         self.device = init_device()
 
         # Load lens
+        self.lens_path = lens_path
         self.lens = GeoLens(filename=lens_path, device=self.device)
         self.lens.set_sensor_res(sensor_res=sensor_res)
         self.hfov = self.lens.hfov
@@ -73,11 +74,11 @@ class PSFNetLens(DeepObj):
         # For example, the Canon EF 50mm lens can only focus to 0.45m and further.
         self.foc_d_min = -400
         self.foc_d_max = -20000
-        self.foc_d_arr = np.round(
+        self.foc_d_arr = (
             (np.linspace(0, 1, 100)) ** 2 * (self.foc_d_max - self.foc_d_min)
-            + self.foc_d_min,
-            0,
+            + self.foc_d_min
         )
+        self.foc_d_arr = np.round(self.foc_d_arr, 0)
 
         # depth range
         self.d_min = -200
@@ -128,15 +129,17 @@ class PSFNetLens(DeepObj):
     def load_net(self, net_path):
         """Load pretrained network."""
         psfnet_dict = torch.load(net_path, weights_only=True)
-        self.psfnet.load_state_dict(psfnet_dict["psfnet"])
+        self.psfnet.load_state_dict(psfnet_dict["psfnet_model_weights"])
 
     def save_psfnet(self, psfnet_path):
         """Save the network."""
         psfnet_dict = {
-            "model_name": self.model_name,
+            "model_name": self.psfnet.__class__.__name__,
+            "in_chan": self.in_chan,
             "kernel_size": self.kernel_size,
-            "lens_name": self.lens.lens_name,
-            "psfnet": self.psfnet.state_dict(),
+            "psf_chan": self.psf_chan,
+            "lens_path": self.lens_path,
+            "psfnet_model_weights": self.psfnet.state_dict(),
         }
         torch.save(psfnet_dict, psfnet_path)
 
@@ -197,11 +200,11 @@ class PSFNetLens(DeepObj):
                 fig, axs = plt.subplots(n_vis, 2, figsize=(4, n_vis * 2))
                 for j in range(n_vis):
                     psf0 = sample_psf[j, ...].detach().clone().cpu()
-                    axs[j, 0].imshow(psf0.permute(1, 2, 0) * 255.0)
+                    axs[j, 0].imshow(psf0.permute(1, 2, 0))
                     axs[j, 0].axis("off")
 
                     psf1 = pred_psf[j, ...].detach().clone().cpu()
-                    axs[j, 1].imshow(psf1.permute(1, 2, 0) * 255.0)
+                    axs[j, 1].imshow(psf1.permute(1, 2, 0))
                     axs[j, 1].axis("off")
 
                 axs[0, 0].set_title("GT")
@@ -214,7 +217,7 @@ class PSFNetLens(DeepObj):
 
                 # Save network
                 self.save_psfnet(
-                    f"{result_dir}/iter{i + 1}_PSFNet_{self.model_name}.pth"
+                    f"{result_dir}/iter{i + 1}_PSFNet.pth"
                 )
 
         self.save_psfnet(f"{result_dir}/PSFNet_{self.model_name}.pth")
@@ -258,7 +261,8 @@ class PSFNetLens(DeepObj):
         points_y = fov / self.hfov
         points_z = depth
         points = torch.stack((points_x, points_y, points_z), dim=-1)
-        sample_psf = lens.psf_rgb(points=points, ks=self.kernel_size)
+        with torch.no_grad():
+            sample_psf = lens.psf_rgb(points=points, ks=self.kernel_size)
 
         return sample_input, sample_psf
 
