@@ -26,7 +26,7 @@ from transformers import get_cosine_schedule_with_warmup
 from deeplens.geolens import GeoLens
 from deeplens.network.surrogate import MLP, MLPConv
 from deeplens.optics.basics import DeepObj, init_device
-from deeplens.optics.psf import local_psf_render, local_psf_render_high_res
+from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res
 
 DMIN = 200  # [mm]
 DMAX = 20000  # [mm]
@@ -492,11 +492,9 @@ class PSFNet(DeepObj):
             psf = self.pred(o)
 
             if high_res:
-                render = local_psf_render_high_res(
-                    img, psf, kernel_size=self.kernel_size
-                )
+                render = conv_psf_pixel_high_res(img, psf)
             else:
-                render = local_psf_render(img, psf, self.kernel_size)
+                render = conv_psf_pixel(img, psf)
 
             return render
 
@@ -514,11 +512,9 @@ class PSFNet(DeepObj):
             o = torch.stack((x, y, z, foc_z), -1).float()
             psf = self.pred(o)
             if high_res:
-                render = local_psf_render_high_res(
-                    img, psf, kernel_size=self.kernel_size
-                )
+                render = conv_psf_pixel_high_res(img, psf)
             else:
-                render = local_psf_render(img, psf, self.kernel_size)
+                render = conv_psf_pixel(img, psf)
 
             return render
 
@@ -648,5 +644,5 @@ class ThinLens(DeepObj):
             psf = psf * psf_mask
             psf = psf / psf.sum((-1, -2)).unsqueeze(-1).unsqueeze(-1)
 
-            render = local_psf_render(img, psf, self.kernel_size)
+            render = conv_psf_pixel(img, psf)
             return render
