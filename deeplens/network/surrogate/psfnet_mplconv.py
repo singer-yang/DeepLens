@@ -120,7 +120,7 @@ class PSFMLPConvModel(nn.Module):
 if __name__ == "__main__":
     # Instantiate the model
     model = PSFMLPConvModel(
-        in_chan=2, kernel_size=64, out_chan=4, latent_dim=4096, latent_channels=64
+        in_chan=2, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64
     )
 
     # Dummy input: batch_size=2, with example (r, z) values
