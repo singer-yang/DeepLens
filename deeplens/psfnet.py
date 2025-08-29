@@ -5,10 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""
-An implicit network to represent the PSF of a lens.
-
-For rotationally symmetric lenses, we can represent the PSF along the optical axis to improve accuracy.
+"""A surrogate network model to represent the PSF of a lens.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, Mohamed Elhoseiny, and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
@@ -24,7 +21,7 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from deeplens.geolens import GeoLens
-from deeplens.network.surrogate import MLP, MLPConv, PSFMLPConvModel
+from deeplens.network.surrogate import MLP, MLPConv, PSFNet_MLPConv
 from deeplens.optics.basics import DeepObj, init_device
 from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res
 
@@ -116,7 +113,7 @@ class PSFNetLens(DeepObj):
         #         in_features=in_chan, ks=kernel_size, channels=3, activation="sigmoid"
         #     )
         elif model_name == "mlpconv":
-            psfnet = PSFMLPConvModel(
+            psfnet = PSFNet_MLPConv(
                 in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
             )
         elif model_name == "siren":
@@ -200,11 +197,11 @@ class PSFNetLens(DeepObj):
                 fig, axs = plt.subplots(n_vis, 2, figsize=(4, n_vis * 2))
                 for j in range(n_vis):
                     psf0 = sample_psf[j, ...].detach().clone().cpu()
-                    axs[j, 0].imshow(psf0.permute(1, 2, 0))
+                    axs[j, 0].imshow(psf0.permute(1, 2, 0) * 255.0)
                     axs[j, 0].axis("off")
 
                     psf1 = pred_psf[j, ...].detach().clone().cpu()
-                    axs[j, 1].imshow(psf1.permute(1, 2, 0))
+                    axs[j, 1].imshow(psf1.permute(1, 2, 0) * 255.0)
                     axs[j, 1].axis("off")
 
                 axs[0, 0].set_title("GT")
@@ -262,7 +259,7 @@ class PSFNetLens(DeepObj):
         points_z = depth
         points = torch.stack((points_x, points_y, points_z), dim=-1)
         with torch.no_grad():
-            sample_psf = lens.psf_rgb(points=points, ks=self.kernel_size)
+            sample_psf = lens.psf_rgb(points=points, ks=self.kernel_size, recenter=True)
 
         return sample_input, sample_psf
 
