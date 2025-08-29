@@ -1,16 +1,14 @@
-"""
-Implicit representation for a realistic lens (PSFs). In this code, we will train a neural network to represent the PSF of a lens system. Then we can fast calculate the spatially-varying, focus-dependent PSF of the lens for image simulation.
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
 
-Input: [x, y, z, focus_distance]
-Output: [3, ks, ks] PSF
+"""Represent the PSF of a lens with a neural network. Surrogate model accelerates the calculation of PSF compared to ray tracing.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, Mohammed Elhoseiny and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import os
@@ -40,7 +38,7 @@ if __name__ == "__main__":
     psfnet.train_psfnet(
         iters=20000,
         bs=256,
-        lr=1e-3,
+        lr=1e-2,
         evaluate_every=100,
         result_dir=result_dir,
     )
