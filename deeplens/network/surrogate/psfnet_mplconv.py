@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import time
 
 
 class ChannelwiseNormalization(nn.Module):
@@ -30,50 +31,49 @@ class ResidualBlock(nn.Module):
         )
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
+
+        # Second conv should have stride=1
         self.conv2 = nn.Conv2d(
             out_channels,
             out_channels,
             kernel_size=kernel_size,
-            stride=stride,
+            stride=1,
             padding=padding,
         )
         self.bn2 = nn.BatchNorm2d(out_channels)
 
-        # Shortcut connection to match dimensions
+        # Shortcut unchanged
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_channels, out_channels, kernel_size=1, stride=stride, padding=0
-                ),
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
                 nn.BatchNorm2d(out_channels),
             )
 
     def forward(self, x):
         residual = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out += self.shortcut(residual)  # Add shortcut
-        out = self.relu(out)
-        return out
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(residual)
+        return self.relu(out)
+
 
 class DecoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.residual = ResidualBlock(in_channels, in_channels)
-        self.upsample = nn.ConvTranspose2d(in_channels, out_channels, 
-                                         kernel_size=4, stride=2, padding=1)
+        self.upsample = nn.ConvTranspose2d(
+            in_channels, out_channels, kernel_size=4, stride=2, padding=1
+        )
         self.norm = nn.BatchNorm2d(out_channels)
         self.activation = nn.ReLU()
-    
+
     def forward(self, x):
         x = self.residual(x)  # Refine first
         x = self.upsample(x)  # Then upsample
         x = self.norm(x)
         return self.activation(x)
+
 
 class MLPConditioner(nn.Module):
     """
@@ -130,13 +130,10 @@ class ConvDecoder(nn.Module):
         self.decoder = nn.Sequential(
             # Upsample 8x8 -> 16x16
             DecoderBlock(latent_channels, 32),
-            
             # Upsample 16x16 -> 32x32
             DecoderBlock(32, 16),
-            
             # Upsample 32x32 -> 64x64
             DecoderBlock(16, 8),
-            
             # Final conv to 3 channels (no upsample)
             nn.Conv2d(8, out_chan, kernel_size=3, padding=1),
             ChannelwiseNormalization(),
@@ -169,13 +166,56 @@ class PSFNet_MLPConv(nn.Module):
         )
 
     def forward(self, x):
+        assert x[:, 0].abs().max() <= 1.1, "r should be in [-1, 1]"
+        assert x[:, 1].max() <= 0, "z should be <= 0"
+
         latent = self.mlp(x)
         psf = self.decoder(latent)
         return psf
 
 
+def test_inference_time():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    model = PSFNet_MLPConv(
+        in_chan=2, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64
+    )
+    model.to(device)
+    model.half()  # Convert model to float16
+    model.eval()
+
+    # Input tensor of shape [N, 2]
+    # r in [-1, 1], z <= 0
+    N = 200000
+    r = 2 * torch.rand(N, 1) - 1  # Random values between -1 and 1
+    z = -10000 * torch.rand(N, 1)  # Random values between -10000 and 0
+    input_tensor = (
+        torch.cat((r, z), dim=1).to(device).half()
+    )  # Convert input to float16
+
+    with torch.no_grad():
+        # Warm-up run
+        _ = model(input_tensor[:10])
+
+        # Measure inference time
+        torch.cuda.synchronize()
+        start_time = time.time()
+        output = model(input_tensor)
+        torch.cuda.synchronize()
+        end_time = time.time()
+
+    inference_time = end_time - start_time
+    print(f"Inference time for input shape [{N}, 2]: {inference_time:.4f} seconds")
+    print(f"Output shape: {output.shape}")
+
+
 # Test code
 if __name__ == "__main__":
+    # Test inference time
+    test_inference_time()
+    breakpoint()
+
     # Instantiate the model
     model = PSFNet_MLPConv(
         in_chan=2, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64
