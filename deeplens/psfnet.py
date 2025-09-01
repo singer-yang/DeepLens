@@ -14,22 +14,20 @@ Technical Paper:
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from matplotlib import pyplot as plt
-from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
+from deeplens.lens import Lens
 from deeplens.geolens import GeoLens
-from deeplens.network.surrogate import MLP, MLPConv, PSFNet_MLPConv
-from deeplens.optics.basics import DeepObj, init_device
-from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res
+from deeplens.network.surrogate import MLP, PSFNet_MLPConv, PSFNet_MLPConv2
+from deeplens.network.surrogate.psfnet_mplconv3 import PSFNet_MLPConv3
+from deeplens.optics.basics import init_device
+from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
+from deeplens.optics.basics import DEPTH
 
-# DMIN = 200  # [mm]
-# DMAX = 20000  # [mm]
 
-
-class PSFNetLens(DeepObj):
+class PSFNetLens(Lens):
     def __init__(
         self,
         lens_path,
@@ -52,6 +50,8 @@ class PSFNetLens(DeepObj):
         self.in_chan = in_chan
         self.psf_chan = psf_chan
         self.kernel_size = kernel_size
+        self.pixel_size = self.lens.pixel_size
+
         self.psfnet = self.init_net(
             in_chan=in_chan,
             psf_chan=psf_chan,
@@ -60,45 +60,42 @@ class PSFNetLens(DeepObj):
         )
         self.psfnet.to(self.device)
 
-        # Training settings
-        self.patch_size = 64
-        self.psf_grid = [
-            sensor_res[0] // self.patch_size,
-            sensor_res[1] // self.patch_size,
-        ]
+        print(
+            f"Sensor pixel size is {self.lens.pixel_size * 1000} um, PSF kernel size is {self.kernel_size}."
+        )
 
         # There is a minimum focal distance for each lens.
-        # For example, the Canon EF 50mm lens can only focus to 0.45m and further.
-        self.foc_d_min = -400
+        # For example, the Canon EF 50mm lens can only focus to 0.5m and further.
+        self.foc_d_min = -500
         self.foc_d_max = -20000
-        self.foc_d_arr = (
-            (np.linspace(0, 1, 100)) ** 2 * (self.foc_d_max - self.foc_d_min)
-            + self.foc_d_min
-        )
+        self.foc_d_arr = (np.linspace(0, 1, 100)) ** 2 * (
+            self.foc_d_max - self.foc_d_min
+        ) + self.foc_d_min
         self.foc_d_arr = np.round(self.foc_d_arr, 0)
 
         # depth range
         self.d_min = -200
         self.d_max = -20000
 
-        print(
-            f"Sensor pixel size is {self.lens.pixel_size * 1000} um, PSF kernel size is {self.kernel_size}."
-        )
-
     # ==================================================
     # Training functions
     # ==================================================
 
     def init_net(self, in_chan=2, psf_chan=3, kernel_size=64, model_name="mlpconv"):
-        """Initialize a network.
+        """Initialize a PSF network.
+        
+        PSF network:
+            Input: [B, 3], (fov, depth, foc_dist). fov from [0, pi/2], depth from [-20000, -100], foc_dist from [-20000, -500]
+            Output: psf kernel [B, 3, ks, ks]
 
-        Basically there are three kinds of network architectures: (1) MLP, (2) MLP + Conv, (3) Siren.
+        Args:
+            in_chan (int): number of input channels
+            psf_chan (int): number of output channels
+            kernel_size (int): kernel size
+            model_name (str): name of the network architecture
 
-        We can also choose to represent (1) single-point PSF, (2) PSF map.
-
-        Network input: (fov, depth, foc_dist). fov from [-1, 1], depth from [-20000, -100], foc_dist from [-20000, -500]
-        Network output: psf kernel (ks * ks)
-
+        Returns:
+            psfnet (nn.Module): network
         """
         if model_name == "mlp":
             psfnet = MLP(
@@ -107,32 +104,48 @@ class PSFNetLens(DeepObj):
                 hidden_features=256,
                 hidden_layers=8,
             )
-        # if model_name == "mlpconv_psf_radial":
-        #     # Input is (rho/alpha, theta, z, foc_dist)
-        #     self.psfnet = MLPConv(
-        #         in_features=in_chan, ks=kernel_size, channels=3, activation="sigmoid"
-        #     )
         elif model_name == "mlpconv":
             psfnet = PSFNet_MLPConv(
                 in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
             )
-        elif model_name == "siren":
-            raise NotImplementedError
+        elif model_name == "mlpconv2":
+            psfnet = PSFNet_MLPConv2(
+                in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
+            )
+        elif model_name == "mlpconv3":
+            psfnet = PSFNet_MLPConv3(
+                in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
+            )
         else:
             raise Exception(f"Unsupported PSF network architecture: {model_name}.")
 
         return psfnet
 
     def load_net(self, net_path):
-        """Load pretrained network."""
+        """Load pretrained network.
+
+        Args:
+            net_path (str): path to load the network
+        """
         psfnet_dict = torch.load(net_path, weights_only=True)
+        # assert psfnet_dict["pixel_size"] == self.pixel_size, (
+        #     "Pixel size mismatch between network and lens"
+        # )
+        assert psfnet_dict["lens_path"] == self.lens_path, (
+            "Lens path mismatch between network and lens"
+        )
         self.psfnet.load_state_dict(psfnet_dict["psfnet_model_weights"])
 
     def save_psfnet(self, psfnet_path):
-        """Save the network."""
+        """Save the PSF network.
+
+        Args:
+            psfnet_path (str): path to save the PSF network
+        """
         psfnet_dict = {
             "model_name": self.psfnet.__class__.__name__,
             "in_chan": self.in_chan,
+            "pixel_size": self.pixel_size,
             "kernel_size": self.kernel_size,
             "psf_chan": self.psf_chan,
             "lens_path": self.lens_path,
@@ -142,7 +155,7 @@ class PSFNetLens(DeepObj):
 
     def train_psfnet(
         self,
-        iters=10000,
+        iters=100000,
         bs=128,
         lr=1e-3,
         evaluate_every=500,
@@ -150,18 +163,14 @@ class PSFNetLens(DeepObj):
         result_dir="./results/psfnet",
     ):
         """Train the PSF surrogate network.
-
+        
         Args:
-            iters (int): number of iterations
+            iters (int): number of training iterations
             bs (int): batch size
             lr (float): learning rate
-            evaluate_every (int): evaluate the network every N iterations
+            evaluate_every (int): evaluate every how many iterations
             spp (int): number of samples per pixel
             result_dir (str): directory to save the results
-
-        Output:
-            - psfnet.pth: the trained network
-            - iter{i+1}.png: the PSFs at each iteration
         """
         # Init network and prepare for training
         psfnet = self.psfnet
@@ -183,14 +192,14 @@ class PSFNetLens(DeepObj):
             # Forward pass, pred_psf: [B, 3, ks, ks]
             pred_psf = psfnet(sample_input)
 
-            # Backward pass
+            # Backward propagation
             optimizer.zero_grad()
             loss = loss_fn(pred_psf, sample_psf)
             loss.backward()
             optimizer.step()
             scheduler.step()
 
-            # Evaluate
+            # Evaluate training
             if (i + 1) % evaluate_every == 0:
                 # Visualize PSFs
                 n_vis = 16
@@ -213,9 +222,7 @@ class PSFNetLens(DeepObj):
                 plt.close()
 
                 # Save network
-                self.save_psfnet(
-                    f"{result_dir}/iter{i + 1}_PSFNet.pth"
-                )
+                self.save_psfnet(f"{result_dir}/PSFNet_last.pth")
 
         self.save_psfnet(f"{result_dir}/PSFNet_{self.model_name}.pth")
 
@@ -226,23 +233,26 @@ class PSFNetLens(DeepObj):
             num_points (int): number of training points
 
         Returns:
-            sample_input (tensor): [B, 3] tensor, [fov, depth, foc_dist].
-                - fov from [0, hfov] on 0y-axis, depth from [d_min, d_max], foc_dist from [foc_d_min, foc_d_max].
+            sample_input (tensor): [B, 3] tensor, (fov, depth, foc_dist).
+                - fov from [0, hfov] on 0y-axis, [radians]
+                - depth from [d_min, d_max], [mm]
+                - foc_dist from [foc_d_min, foc_d_max], [mm]
                 - We use absolute fov and depth.
+
             sample_psf (tensor): [B, 3, ks, ks] tensor
         """
         lens = self.lens
         d_min = self.d_min
         d_max = self.d_max
 
-        # In each iteration, sample one focus distance
+        # In each iteration, sample one focus distance, [mm], range [foc_d_max, foc_d_min]
         foc_dist = float(np.random.choice(self.foc_d_arr))
         lens.refocus(foc_dist)
 
-        # Sample (fov), uniform distribution from [0, hfov]
+        # Sample (fov), uniform distribution, [radians], range[0, hfov]
         fov = torch.rand(num_points) * self.hfov
 
-        # Sample (depth), sample more points near the focus distance
+        # Sample (depth), sample more points near the focus distance, [mm], range [d_max, d_min]
         std_dev = -foc_dist / 2.0  # A smaller value concentrates points more tightly
         depth = foc_dist + torch.randn(num_points) * std_dev
         depth = torch.clamp(depth, d_max, d_min)
@@ -262,87 +272,6 @@ class PSFNetLens(DeepObj):
             sample_psf = lens.psf_rgb(points=points, ks=self.kernel_size, recenter=True)
 
         return sample_input, sample_psf
-
-    # def get_training_psf_map(self, bs=8, psf_grid=(11, 11), psf_map_size=(128, 128)):
-    #     """Generate PSF map for training. This training data is used for MLP_Conv network architecture.
-
-    #         Reference: "Differentiable Compound Optics and Processing Pipeline Optimization for End-To-end Camera Design."
-
-    #     Args:
-    #         bs (int): batch size
-    #         psf_grid (tuple): PSF grid size
-    #         psf_map_size (tuple): PSF map size
-
-    #     Returns:
-    #         inp (tensor): [B, 2] tensor, [z, foc_z]
-    #         psf_map_batch (tensor): [B, 3, psf_map_size, psf_map_size] tensor
-    #     """
-    #     lens = self.lens
-
-    #     # Refocus
-    #     foc_z = np.random.choice(self.foc_z_arr)
-    #     foc_dist = foc_z * (self.d_max - self.d_min) + self.d_min
-
-    #     # Different depths
-    #     z_gauss = torch.clamp(torch.randn(bs), min=-3, max=3)
-    #     z = torch.zeros_like(z_gauss)
-    #     z[z_gauss > 0] = (1 - foc_z) * z_gauss[z_gauss > 0] / 3 + foc_z
-    #     z[z_gauss < 0] = foc_z * z_gauss[z_gauss < 0] / 3 + foc_z
-    #     depth = self.z2depth(z)
-
-    #     # 2D Input (foc_z, z)
-    #     foc_z_tensor = torch.full_like(z, foc_z)
-    #     inp = torch.stack((z, foc_z_tensor), dim=-1)  # [B, 2]
-
-    #     # Calculate PSF map
-    #     psf_map_batch = []
-    #     for depth_i in depth:
-    #         psf_map = lens.calc_psf_map(foc_dist, depth_i, psf_grid=psf_grid)
-    #         psf_map_batch.append(psf_map)
-    #     # [B, 3, psf_grid*ks, psf_grid*ks]
-    #     psf_map_batch = torch.stack(psf_map_batch, dim=0)
-
-    #     # Resize to meet the network requirement
-    #     psf_map_batch = F.interpolate(
-    #         psf_map_batch, size=psf_map_size, mode="bilinear", align_corners=False
-    #     )  # [B, 3, size, size]
-
-    #     return inp, psf_map_batch
-
-    # def calc_psf_map(self, foc_dist, depth, psf_grid=(11, 11)):
-    #     """Calculate PSF grid by ray tracing.
-
-    #     This function is similiar for self.psf() function.
-    #     """
-    #     lens = self.lens
-    #     ks = self.kernel_size
-
-    #     # Focus to given distance
-    #     lens.refocus(foc_dist)
-
-    #     # Sample grid points
-    #     x, y = torch.meshgrid(
-    #         torch.linspace(
-    #             -1 + 1 / (2 * psf_grid[1]), 1 - 1 / (2 * psf_grid[1]), psf_grid[1]
-    #         ),
-    #         torch.linspace(
-    #             1 - 1 / (2 * psf_grid[0]), -1 + 1 / (2 * psf_grid[0]), psf_grid[0]
-    #         ),
-    #         indexing="xy",
-    #     )
-    #     x, y = x.reshape(-1), y.reshape(-1)
-    #     depth = torch.full_like(x, depth)
-    #     o = torch.stack((x, y, depth), dim=-1)
-
-    #     # Calculate PSf by ray-tracing
-    #     # [psf_grid^2, ks, ks]
-    #     psf = lens.psf(o=o, kernel_size=ks, center=True)
-
-    #     # Convert to tensor and save image
-    #     # [3, psf_grid*ks, psf_grid*ks]
-    #     psf_map = make_grid(psf.unsqueeze(1), nrow=psf_grid[1], padding=0)
-
-    #     return psf_map
 
     # ==================================================
     # Test
@@ -440,28 +369,89 @@ class PSFNetLens(DeepObj):
     #                 print("Function interp_psf is missed during release. ")
 
     # ==================================================
-    # Use network after image simulation
+    # Use network
     # ==================================================
-    def psf(self, points, foc_dist=float("inf")):
-        pass
-        return self.pred_psf()
+    def refocus(self, foc_dist):
+        """Refocus the lens to the given focus distance."""
+        self.lens.refocus(foc_dist)
+        self.foc_dist = foc_dist
 
-    def pred_psf(self, inp):
-        """Predict PSFs using the PSF network.
+    def psf_rgb(self, points, ks=64):
+        """Calculate RGB PSF using the PSF network.
 
         Args:
-            inp (tensor): [N, 4] tensor, [x, y, z, foc_dist]
+            points (tensor): [N, 3] tensor, [-1, 1] * [-1, 1] * [depth_min, depth_max]
+            foc_dist (float): focus distance
 
         Returns:
-            psf (tensor): [N, ks, ks] or [H, W, ks, ks] tensor
+            psf (tensor): [N, 3, ks, ks] tensor
         """
-        # Network prediction, shape of [N, ks^2]
-        psf = self.psfnet(inp)
+        # Calculate network input
+        sensor_h, sensor_w = self.lens.sensor_size
+        points_x = points[:, 0] * sensor_w / 2
+        points_y = points[:, 1] * sensor_h / 2
+        foclen = self.lens.foclen
+        points_fov = torch.atan(torch.sqrt(points_x**2 + points_y**2) / foclen)
+        foc_dist = torch.full_like(points_fov, self.foc_dist)
+        network_inp = torch.stack((points_fov, points[:, 2], foc_dist), dim=-1)
 
-        # Reshape, shape of [N, ks, ks] or [H, W, ks, ks]
-        psf = psf.reshape(*psf.shape[:-1], self.kernel_size, self.kernel_size)
+        # Predict 0y-axis PSF from network
+        psf = self.psfnet(network_inp)
 
+        # Post-process PSF
+        # The psfnet is trained with PSFs on the y-axis.
+        # We need to rotate the PSF to the correct orientation based on the point's coordinates.
+        # The counter-clockwise angle from the positive y-axis to the point (x, y) is atan2(x, y).
+        rot_angle = torch.atan2(points[:, 0], points[:, 1])
+        psf = rotate_psf(psf, rot_angle)
+
+        # Crop PSF to the given kernel size
+        if ks < self.kernel_size:
+            psf = psf[
+                :,
+                :,
+                self.kernel_size // 2 - ks // 2 : self.kernel_size // 2 + ks // 2,
+                self.kernel_size // 2 - ks // 2 : self.kernel_size // 2 + ks // 2,
+            ]
         return psf
+
+    def psf_map_rgb(self, grid=(11, 11), depth=DEPTH, ks=51, **kwargs):
+        """Compute monochrome PSF map.
+
+        Args:
+            grid (tuple, optional): Grid size. Defaults to (5, 5), meaning 5x5 grid.
+            wvln (float, optional): Wavelength. Defaults to 0.589.
+            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            ks (int, optional): Kernel size. Defaults to 51, meaning 51x51 kernel size.
+
+        Returns:
+            psf_map: Shape of [grid, grid, 3, ks, ks].
+        """
+        # PSF map grid
+        points = self.point_source_grid(depth=depth, grid=grid, center=True)
+        points = points.reshape(-1, 3).to(self.device)
+
+        # Compute PSF map
+        psf = self.psf_rgb(points=points, ks=ks)  # [grid*grid, 3, ks, ks]
+        psf_map = psf.reshape(grid[0], grid[1], 3, ks, ks)  # [grid, grid, 3, ks, ks]
+        return psf_map
+
+    # def pred_psf(self, inp):
+    #     """Predict PSFs using the PSF network.
+
+    #     Args:
+    #         inp (tensor): [N, 4] tensor, [x, y, z, foc_dist]
+
+    #     Returns:
+    #         psf (tensor): [N, ks, ks] or [H, W, ks, ks] tensor
+    #     """
+    #     # Network prediction, shape of [N, ks^2]
+    #     psf = self.psfnet(inp)
+
+    #     # Reshape, shape of [N, ks, ks] or [H, W, ks, ks]
+    #     psf = psf.reshape(*psf.shape[:-1], self.kernel_size, self.kernel_size)
+
+    #     return psf
 
     @torch.no_grad()
     def render_rgbd(self, img, depth, foc_dist, high_res=False):
@@ -486,11 +476,16 @@ class PSFNetLens(DeepObj):
         )
         x, y = x.unsqueeze(0).repeat(B, 1, 1), y.unsqueeze(0).repeat(B, 1, 1)
         x, y = x.to(img.device), y.to(img.device)
-        foc_dist = foc_dist.unsqueeze(-1).unsqueeze(-1).repeat(1, H, W)
-        foc_z = self.depth2z(foc_dist)
 
-        o = torch.stack((x, y, z, foc_z), -1).float()
-        psf = self.pred_psf(o)
+        # =====>
+        # foc_dist = foc_dist.unsqueeze(-1).unsqueeze(-1).repeat(1, H, W)
+        # foc_z = self.depth2z(foc_dist)
+        # o = torch.stack((x, y, z, foc_z), -1).float()
+        # psf = self.pred_psf(o)
+        # =====>
+        o = torch.stack((x, y, z), -1).float()
+        psf = self.psf_rgb(points=o, foc_dist=foc_dist)
+        # =====>
 
         # Render image with per-pixel PSF convolution
         if high_res:
@@ -504,14 +499,14 @@ class PSFNetLens(DeepObj):
     # Utils
     # ==================================================
 
-    def depth2z(self, depth):
-        z = (depth - self.d_min) / (self.d_max - self.d_min)
-        z = torch.clamp(z, min=0, max=1)
-        return z
+    # def depth2z(self, depth):
+    #     z = (depth - self.d_min) / (self.d_max - self.d_min)
+    #     z = torch.clamp(z, min=0, max=1)
+    #     return z
 
-    def z2depth(self, z):
-        depth = z * (self.d_max - self.d_min) + self.d_min
-        return depth
+    # def z2depth(self, z):
+    #     depth = z * (self.d_max - self.d_min) + self.d_min
+    #     return depth
 
     def vis_psf_map(self, psf, filename=None):
         """Visualize a [N, N, k, k] or [N, N, k^2] or [N, k, k] PSF kernel."""
