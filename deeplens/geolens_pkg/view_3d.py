@@ -5,32 +5,42 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-import numpy as np
-from pyvista import PolyData, merge
-from math import pi, sqrt
+import os
+from math import pi
 from typing import List
-from os import mkdir
-from os import path as osp
+
+import numpy as np
+import torch
+from pyvista import Plotter, PolyData, merge
 
 from deeplens.geolens import GeoLens
-from deeplens.optics.basics import DEFAULT_WAVE
 from deeplens.optics import (
     Ray,
 )
+from deeplens.optics.basics import DEFAULT_WAVE
 from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
-    Cubic,
-    Phase,
-    Plane,
-    Spheric,
-    ThinLens,
     AsphericNorm,
+    Cubic,
+    Spheric,
 )
-
 from deeplens.optics.geometric_surface.base import EPSILON
 
-import torch
+
+# ====================================================
+# Polydata classes
+#
+# (1) LineMesh
+#     (1.1) Curve
+#     (1.2) LineSeg
+#     (1.3) Circle
+#
+# (2) FaceMesh
+#     (2.1) RectangleMesh
+#     (2.2) ApertureMesh
+#     (2.3) HeightMapAngular
+# ====================================================
 
 
 class CrossPoly:
@@ -42,6 +52,19 @@ class CrossPoly:
 
     def get_obj_data(self):
         pass
+
+    def draw(self, plotter: Plotter, color: List[float]):
+        """Draw the mesh to the plotter.
+
+        Args:
+            plotter: Plotter
+            color: List[float]. The color of the mesh.
+        """
+        poly = self.get_poly_data()
+        # Shade each points
+        n_v = poly.n_points
+        poly["colors"] = np.vstack([color] * n_v)
+        plotter.add_mesh(poly, scalars="colors", rgb=True)
 
 
 class LineMesh(CrossPoly):
@@ -90,11 +113,7 @@ class LineSeg(LineMesh):
 
 class Circle(LineMesh):
     def __init__(self, n_vertices, origin, direction, radius):
-        """
-        Create a circle mesh with normal direction and radius.\\
-        The normal direciton is defined right-hand rule.\\
-        
-        """
+        """A circle mesh with normal direction and radius. The normal direciton is defined right-hand rule."""
         self.direction = direction
         self.radius = radius
         self.origin = origin
@@ -128,6 +147,8 @@ class Circle(LineMesh):
 
 
 class FaceMesh(CrossPoly):
+    """A face mesh with vertices and faces."""
+
     def __init__(self, n_vertices: int, n_faces: int):
         self.n_vertices = n_vertices
         self.n_faces = n_faces
@@ -148,14 +169,14 @@ class FaceMesh(CrossPoly):
         pass
 
     def get_poly_data(self) -> PolyData:
-        face_vertex_n = 3  #
+        face_vertex_n = 3  # 3 vertices per face
         face = np.hstack(
             [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
         )
         return PolyData(self.vertices, face)
 
 
-class Rectangle(FaceMesh):
+class RectangleMesh(FaceMesh):
     def __init__(
         self,
         center: np.ndarray,
@@ -164,7 +185,7 @@ class Rectangle(FaceMesh):
         width: float,
         height: float,
     ):
-        # two directions should be orthogonal
+        # Two directions should be orthogonal
         assert np.dot(direction_w, direction_h) == 0, "Invalid directions"
         # width and height should be positive
         assert width > 0 and height > 0, "Invalid width or height"
@@ -212,8 +233,9 @@ class ApertureMesh(FaceMesh):
         n_vertices: int = 64,
     ):
         """
-        Define a circular aperture with radius.\\
-        The aperture is defined by the center and radius.\\
+        Define a circular aperture with radius.
+        The aperture is defined by the center and radius.
+
         ## Parameters
         - origin: np.ndarray, shape (3,)
             The center of the aperture.
@@ -493,20 +515,27 @@ def gen_cubic_height_map(surf: Cubic):
 
 
 # ====================================================
-# Polygon generation & visualization
+# Polygon visualization
 # ====================================================
 
 
-def draw_mesh(plotter, mesh: CrossPoly, color):
+def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0):
+    """Draw a mesh to the plotter.
+
+    Args:
+        plotter: Plotter
+        mesh: CrossPoly
+        color: List[float]. The color of the mesh.
+        opacity: float. The opacity of the mesh (0.0 = transparent, 1.0 = opaque).
+    """
     poly = mesh.get_poly_data()
     # shade each points
     n_v = poly.n_points
     poly["colors"] = np.vstack([color] * n_v)
-    plotter.add_mesh(poly, scalars="colors", rgb=True)
+    plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
 
 
-def draw_lens_3D(
-    plotter,
+def draw_lens_3d(
     lens: GeoLens,
     fovs: List[float] = [0.0],
     fov_phis: List[float] = [0.0],
@@ -514,36 +543,37 @@ def draw_lens_3D(
     ray_arms: int = 8,
     mesh_rings: int = 32,
     mesh_arms: int = 128,
-    is_show_bridge: bool = True,
-    is_show_aperture: bool = True,
-    is_show_sensor: bool = True,
     is_show_rays: bool = True,
     surface_color: List[float] = [0.06, 0.3, 0.6],
     bridge_color: List[float] = [0.0, 0.0, 0.0],
+    sensor_opacity: float = 0.5,
     save_dir: str = None,
 ):
-    n_surf = len(lens.surfaces)
-    surf_poly, bridge_poly, sensor_poly, ap_poly = geolens_poly(
+    """Draw a lens in 3D."""
+    plotter = Plotter(off_screen=True)
+
+    # Generate Gelens surfaces & bridges meshes
+    surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
         lens, mesh_rings, mesh_arms
     )
 
+    # Render the surfaces
     surf_color_rgb = np.array(surface_color) * 255
     surf_color_rgb = surf_color_rgb.astype(np.uint8)
 
-    # draw the surfaces
-    for sp in surf_poly:
-        if sp is not None:
-            draw_mesh(plotter, sp, surf_color_rgb)
+    for surf in surf_poly:
+        if surf is not None:
+            draw_mesh(plotter, surf, surf_color_rgb)
 
-    if is_show_bridge:
-        for bp in bridge_poly:
-            draw_mesh(plotter, bp, bridge_color)
-    if is_show_aperture:
-        for ap in ap_poly:
-            draw_mesh(plotter, ap, bridge_color)
-    if is_show_sensor:
-        draw_mesh(plotter, sensor_poly, np.array([10, 10, 10]))
+    for bridge in bridge_poly:
+        draw_mesh(plotter, bridge, bridge_color)
 
+    for aper in aper_poly:
+        draw_mesh(plotter, aper, bridge_color)
+
+    draw_mesh(plotter, sensor_poly, color=surf_color_rgb, opacity=sensor_opacity)
+
+    # Render the rays
     if is_show_rays:
         rays_curve = geolens_ray_poly(
             lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
@@ -553,75 +583,75 @@ def draw_lens_3D(
         for r in rays_poly_fov:
             plotter.add_mesh(r)
 
+    # Save surface meshes and rays
     if save_dir is not None:
-        if not osp.exists(save_dir):
-            mkdir(save_dir)
-        # merge meshes
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+
+        # Merge meshes
         merged_surf_poly = merge(
             [sp.get_poly_data() for sp in surf_poly if sp is not None]
         )
         merged_bridge_poly = merge([bp.get_poly_data() for bp in bridge_poly])
-        merged_ap_poly = merge([ap.get_poly_data() for ap in ap_poly])
+        merged_aper_poly = merge([aper.get_poly_data() for aper in aper_poly])
         merged_sensor_poly = sensor_poly.get_poly_data()
 
-        # save meshes
-        merged_surf_poly.save(osp.join(save_dir, "lens_surf.obj"))
-        merged_bridge_poly.save(osp.join(save_dir, "lens_bridge.obj"))
-        merged_ap_poly.save(osp.join(save_dir, "lens_ap.obj"))
-        merged_sensor_poly.save(osp.join(save_dir, "lens_sensor.obj"))
+        # Save meshes
+        merged_surf_poly.save(os.path.join(save_dir, "lens_surf.obj"))
+        merged_bridge_poly.save(os.path.join(save_dir, "lens_bridge.obj"))
+        merged_aper_poly.save(os.path.join(save_dir, "lens_aper.obj"))
+        merged_sensor_poly.save(os.path.join(save_dir, "lens_sensor.obj"))
 
-        # save rays
+        # Save rays
         for i, r in enumerate(rays_poly_fov):
-            r.save(osp.join(save_dir, f"lens_rays_fov_{i}.obj"))
+            r.save(os.path.join(save_dir, f"lens_rays_fov_{i}.obj"))
+
+        # Save the image
+        plotter.screenshot(os.path.join(save_dir, "lens_3d_visualization.png"))
 
 
-def geolens_poly(
+def generate_poly(
     lens: GeoLens,
     mesh_rings: int = 32,
     mesh_arms: int = 128,
 ) -> List[CrossPoly]:
     """
-    Generate the lens/bridge/sensor/aperture meshes.\\
-    The meshes are generated using the height map method.\\
-        
-    ## Parameters
-    - lens: GeoLens
-        The lens object.
-    - mesh_rings: int
-        The number of rings in the mesh.
-    - mesh_arms: int
-        The number of arms in the mesh.
-    
-    ## Returns
-    - surf_poly: List[HeightMapAngular]
-        The surface meshes.
-    - bridge_poly: List[FaceMesh]
-        The bridge meshes. (NOT support wrap around for now)
-    - sensor_poly: Rectangle
-        The sensor meshes. (only support rectangular sensor for now)
-    - ap_poly: List[ApertureMesh]
+    Generate the lens/bridge/sensor/aperture meshes. The meshes are generated using the height map method.
+
+    Args:
+        lens (GeoLens): The lens object.
+        mesh_rings (int): The number of rings in the mesh.
+        mesh_arms (int): The number of arms in the mesh.
+
+    Returns:
+        surf_poly (List[HeightMapAngular]): The surface meshes.
+        bridge_poly (List[FaceMesh]): The bridge meshes. (NOT support wrap around for now)
+        sensor_poly (RectangleMesh): The sensor meshes. (only support rectangular sensor for now)
+        aper_poly (List[ApertureMesh]): The aperture meshes.
     """
     n_surf = len(lens.surfaces)
 
     surf_poly = [None for _ in range(n_surf)]
     bridge_idx = []
     bridge_poly = []
-    ap_poly = []
+    aper_poly = []
     sensor_poly = None
 
     radius_list = [surf.r for surf in lens.surfaces]
     max_barrel_r = max(radius_list)
 
+    # Generate the surface meshes
     for i, surf in enumerate(lens.surfaces):
         if isinstance(surf, Aperture):
-            # generate the aperture mesh
+            # Generate the aperture mesh
             ap_origin = np.array([0, 0, surf.d.item()])
             ap_dir = np.array([0, 0, -1])
             ap_radius = surf.r
             outer_radius = max_barrel_r
-            ap_poly.append(
+            aper_poly.append(
                 ApertureMesh(ap_origin, ap_dir, ap_radius, outer_radius, n_vertices=32)
             )
+
         elif isinstance(surf, Spheric):
             # record the idx of the two surf
             # NOTICE:
@@ -631,32 +661,32 @@ def geolens_poly(
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
 
-            # create the surf poly
+            # create the surface poly
             r = surf.r
             c = surf.c.item()  # brutally assume c is a scalar tensor
             d = surf.d.item()
             height_func = gen_sphere_height_map(c, d)
             surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func)
+
         elif isinstance(surf, Aspheric) or isinstance(surf, AsphericNorm):
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
             height_func = gen_aspheric_height_map(surf)
             surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
+
         elif isinstance(surf, Cubic):
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
             height_func = gen_cubic_height_map(surf)
             surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
+
         else:
             raise NotImplementedError(
                 f"Surface type {type(surf)} not implemented in 3D visualization"
             )
 
-    print(f"Finishing creating {n_surf} surfaces")
-
+    # Generate the bridge meshes
     for i, pair in enumerate(bridge_idx):
-        print(f"bridging pair: {pair} surfaces")
-
         a_idx, b_idx = pair
         a = surf_poly[a_idx]
         b = surf_poly[b_idx]
@@ -664,14 +694,19 @@ def geolens_poly(
         bridge_mesh = bridge(a.rim, b.rim)
         bridge_poly.append(bridge_mesh)
 
+    # Generate the sensor mesh
     sensor_d = lens.d_sensor.item()
     sensor_r = lens.r_sensor
     h, w = sensor_r * 1.4142, sensor_r * 1.4142
-    sensor_poly = Rectangle(
+    sensor_poly = RectangleMesh(
         np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
     )
 
-    return surf_poly, bridge_poly, sensor_poly, ap_poly
+    # Generate the aperture meshes
+    for aper in aper_poly:
+        aper.create_data()
+
+    return surf_poly, bridge_poly, sensor_poly, aper_poly
 
 
 def geolens_ray_poly(
