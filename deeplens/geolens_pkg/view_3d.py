@@ -546,11 +546,13 @@ def draw_lens_3d(
     is_show_rays: bool = True,
     surface_color: List[float] = [0.06, 0.3, 0.6],
     bridge_color: List[float] = [0.0, 0.0, 0.0],
-    sensor_opacity: float = 0.5,
     save_dir: str = None,
 ):
     """Draw a lens in 3D."""
-    plotter = Plotter(off_screen=True)
+    plotter = Plotter(window_size=(3840, 2160), off_screen=True)
+    plotter.camera.up = [0, 1, 0]
+    plotter.camera.position = [-20, 10, -10+lens.d_sensor.item()/2]
+    plotter.camera.focal_point = [0, 0, lens.d_sensor.item()/2]
 
     # Generate Gelens surfaces & bridges meshes
     surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
@@ -563,15 +565,15 @@ def draw_lens_3d(
 
     for surf in surf_poly:
         if surf is not None:
-            draw_mesh(plotter, surf, surf_color_rgb)
+            draw_mesh(plotter, surf, color=surf_color_rgb, opacity=0.5)
 
     for bridge in bridge_poly:
-        draw_mesh(plotter, bridge, bridge_color)
+        draw_mesh(plotter, bridge, color=surf_color_rgb, opacity=0.5)
 
     for aper in aper_poly:
-        draw_mesh(plotter, aper, bridge_color)
+        draw_mesh(plotter, aper, color=[128, 128, 128], opacity=0.1)
 
-    draw_mesh(plotter, sensor_poly, color=surf_color_rgb, opacity=sensor_opacity)
+    draw_mesh(plotter, sensor_poly, color=[128, 128, 128], opacity=1.0)
 
     # Render the rays
     if is_show_rays:
@@ -596,7 +598,7 @@ def draw_lens_3d(
         merged_aper_poly = merge([aper.get_poly_data() for aper in aper_poly])
         merged_sensor_poly = sensor_poly.get_poly_data()
 
-        # Save meshes
+        # Save meshe objects (can be used in Blender)
         merged_surf_poly.save(os.path.join(save_dir, "lens_surf.obj"))
         merged_bridge_poly.save(os.path.join(save_dir, "lens_bridge.obj"))
         merged_aper_poly.save(os.path.join(save_dir, "lens_aper.obj"))
@@ -606,9 +608,8 @@ def draw_lens_3d(
         for i, r in enumerate(rays_poly_fov):
             r.save(os.path.join(save_dir, f"lens_rays_fov_{i}.obj"))
 
-        # Save the image
-        plotter.screenshot(os.path.join(save_dir, "lens_3d_visualization.png"))
-
+        # Save images
+        plotter.screenshot(os.path.join(save_dir, "lens_3d_vis.png"), return_img=False)
 
 def generate_poly(
     lens: GeoLens,
@@ -845,7 +846,6 @@ def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
         Traced ray represented by curves
     """
     ray, ray_o_records = lens.trace2sensor(ray=ray, record=True)
-    n_surf = lens.surfaces.__len__()
     rays_curve = []
     # the shape of ray_o_records if [n_surf, M, 3] ?
     ray_o_records = torch.stack(ray_o_records, dim=0)
