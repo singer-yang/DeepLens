@@ -20,9 +20,9 @@ from transformers import get_cosine_schedule_with_warmup
 
 from deeplens.lens import Lens
 from deeplens.geolens import GeoLens
-from deeplens.network.surrogate import MLP, PSFNet_MLPConv, PSFNet_MLPConv2
+from deeplens.network.surrogate import MLP, PSFNet_MLPConv
+from deeplens.network.surrogate.psfnet_mplconv2 import PSFNet_MLPConv2
 from deeplens.network.surrogate.psfnet_mplconv3 import PSFNet_MLPConv3
-from deeplens.optics.basics import init_device
 from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
 from deeplens.optics.basics import DEPTH
 
@@ -38,7 +38,6 @@ class PSFNetLens(Lens):
         sensor_res=(2000, 3000),
     ):
         super().__init__()
-        self.device = init_device()
 
         # Load lens
         self.lens_path = lens_path
@@ -127,7 +126,7 @@ class PSFNetLens(Lens):
         Args:
             net_path (str): path to load the network
         """
-        psfnet_dict = torch.load(net_path, weights_only=True)
+        psfnet_dict = torch.load(net_path, map_location='cpu', weights_only=False)
         # assert psfnet_dict["pixel_size"] == self.pixel_size, (
         #     "Pixel size mismatch between network and lens"
         # )
@@ -157,9 +156,10 @@ class PSFNetLens(Lens):
         self,
         iters=100000,
         bs=128,
-        lr=1e-3,
+        lr=5e-4,
         evaluate_every=500,
-        spp=10000,
+        spp=16384,
+        concentration_factor=2.0,
         result_dir="./results/psfnet",
     ):
         """Train the PSF surrogate network.
@@ -170,11 +170,12 @@ class PSFNetLens(Lens):
             lr (float): learning rate
             evaluate_every (int): evaluate every how many iterations
             spp (int): number of samples per pixel
+            concentration_factor (float): concentration factor for training data sampling
             result_dir (str): directory to save the results
         """
         # Init network and prepare for training
         psfnet = self.psfnet
-        loss_fn = nn.MSELoss()
+        loss_fn = nn.L1Loss()
         optimizer = torch.optim.AdamW(psfnet.parameters(), lr=lr)
         scheduler = get_cosine_schedule_with_warmup(
             optimizer, num_warmup_steps=int(iters) // 100, num_training_steps=iters
@@ -183,7 +184,7 @@ class PSFNetLens(Lens):
         # Train the network
         for i in tqdm(range(iters + 1)):
             # Sample training data
-            sample_input, sample_psf = self.sample_training_data(num_points=bs)
+            sample_input, sample_psf = self.sample_training_data(num_points=bs, concentration_factor=concentration_factor)
             sample_input, sample_psf = (
                 sample_input.to(self.device),
                 sample_psf.to(self.device),
@@ -226,11 +227,12 @@ class PSFNetLens(Lens):
 
         self.save_psfnet(f"{result_dir}/PSFNet_{self.model_name}.pth")
 
-    def sample_training_data(self, num_points=512):
+    def sample_training_data(self, num_points=512, concentration_factor=2.0):
         """Sample training data for PSF surrogate network.
 
         Args:
             num_points (int): number of training points
+            concentration_factor (float): concentration factor for training data sampling
 
         Returns:
             sample_input (tensor): [B, 3] tensor, (fov, depth, foc_dist).
@@ -241,19 +243,19 @@ class PSFNetLens(Lens):
 
             sample_psf (tensor): [B, 3, ks, ks] tensor
         """
-        lens = self.lens
         d_min = self.d_min
         d_max = self.d_max
+        eff_hfov = self.lens.calc_eff_hfov()
 
         # In each iteration, sample one focus distance, [mm], range [foc_d_max, foc_d_min]
         foc_dist = float(np.random.choice(self.foc_d_arr))
-        lens.refocus(foc_dist)
+        self.lens.refocus(foc_dist)
 
         # Sample (fov), uniform distribution, [radians], range[0, hfov]
-        fov = torch.rand(num_points) * self.hfov
+        fov = torch.rand(num_points) * eff_hfov
 
         # Sample (depth), sample more points near the focus distance, [mm], range [d_max, d_min]
-        std_dev = -foc_dist / 2.0  # A smaller value concentrates points more tightly
+        std_dev = -foc_dist / concentration_factor # A smaller value concentrates points more tightly. Default is -foc_dist / 2.0
         depth = foc_dist + torch.randn(num_points) * std_dev
         depth = torch.clamp(depth, d_max, d_min)
 
@@ -265,111 +267,16 @@ class PSFNetLens(Lens):
 
         # Calculate PSF by ray tracing, shape of [B, 3, ks, ks]
         points_x = torch.zeros_like(depth)
-        points_y = fov / self.hfov
+        points_y = self.lens.foclen * torch.tan(fov) / self.lens.r_sensor
         points_z = depth
         points = torch.stack((points_x, points_y, points_z), dim=-1)
         with torch.no_grad():
-            sample_psf = lens.psf_rgb(points=points, ks=self.kernel_size, recenter=True)
+            sample_psf = self.lens.psf_rgb(points=points, ks=self.kernel_size, recenter=True)
 
         return sample_input, sample_psf
 
     # ==================================================
-    # Test
-    # ==================================================
-
-    # @torch.no_grad()
-    # def evaluate_psf(self, result_dir="./"):
-    #     """Qualitaticely compare GT, pred, and thinlens PSF.
-
-    #     Lens focuses to 1.5m, evaluate PSF at 1.2m, 1.5m, 2m.
-    #     """
-    #     lens = self.lens
-
-    #     # Evalution settings
-    #     ks = self.kernel_size
-    #     ps = lens.sensor_size[0] / lens.sensor_res[0]
-    #     psfnet = self.psfnet
-    #     psfnet.eval()
-
-    #     x = torch.Tensor([0, 0.6, 0.98])
-    #     y = torch.Tensor([0, 0.6, 0.98])
-    #     test_foc_dists = torch.Tensor([-1500])
-    #     test_dists = torch.Tensor([-1200, -1500, -2000])
-    #     test_foc_z = self.depth2z(test_foc_dists)
-    #     test_z = self.depth2z(test_dists)
-
-    #     # Thin lens and Gaussian PSF parameters
-    #     thinlens = ThinLens(
-    #         lens.foclen, lens.fnum, ks, lens.sensor_size, lens.sensor_res
-    #     )
-    #     x_gaussi, y_gaussi = torch.meshgrid(
-    #         torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
-    #         torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
-    #         indexing="xy",
-    #     )
-
-    #     # Evaluation
-    #     for foc_z in test_foc_z:
-    #         foc_dist = foc_z * (self.d_max - self.d_min) + self.d_min
-    #         lens.refocus(foc_dist)
-
-    #         for z in test_z:
-    #             # GT PSF by ray tracing
-    #             depth = z * (self.d_max - self.d_min) + self.d_min
-    #             depth_tensor = torch.full_like(x, depth)
-    #             points = torch.stack((x, y, depth_tensor), dim=-1)
-    #             psf_gt = lens.psf(points=points, ks=ks, center=True)
-    #             self.vis_psf_map(
-    #                 psf_gt, filename=f"{result_dir}/foc{-foc_dist}_depth{-depth}_gt.png"
-    #             )
-
-    #             # Network prediction
-    #             z_tensor = torch.full_like(x, z)
-    #             foc_z_tensor = torch.full_like(x, foc_z)
-    #             inp = torch.stack((x, y, z_tensor, foc_z_tensor), dim=-1).to(
-    #                 self.device
-    #             )
-    #             psf_pred = psfnet(inp).view(-1, ks, ks)
-    #             self.vis_psf_map(
-    #                 psf_pred,
-    #                 filename=f"{result_dir}/foc{-foc_dist}_depth{-depth}_pred.png",
-    #             )
-
-    #             # Thin lens Gaussian model
-    #             # "Focus on defocus: bridging the synthetic to real domain gap for depth estimation" Eq.(1)
-    #             coc_pixel_radius = thinlens.coc(depth, foc_dist) / 2
-    #             # We ignore constant term because PSF will be normalized later
-    #             psf_thin = torch.exp(
-    #                 -(x_gaussi**2 + y_gaussi**2) / (2 * coc_pixel_radius**2)
-    #             )
-    #             psf_mask = x_gaussi**2 + y_gaussi**2 < coc_pixel_radius**2
-    #             psf_thin = psf_thin * psf_mask  # Un-clipped Gaussian PSF
-    #             psf_thin = psf_thin / psf_thin.sum((-1, -2)).unsqueeze(-1).repeat(
-    #                 3, 1, 1
-    #             )
-    #             self.vis_psf_map(
-    #                 psf_thin,
-    #                 filename=f"{result_dir}/foc{-foc_dist}_depth{-depth}_thin.png",
-    #             )
-
-    #             # Weighted interpolation of query PSFs
-    #             # Our PSF has small kernel size, so we donot use low-rank SVD decomposition. Instead, we use the original PSF for interpolation.
-    #             try:
-    #                 psf_interp = []
-    #                 for i in range(x.shape[0]):
-    #                     psf_temp = self.interp_psf(x[i], y[i], z)
-    #                     psf_interp.append(psf_temp)
-
-    #                 psf_interp = torch.stack(psf_interp, dim=0)
-    #                 self.vis_psf_map(
-    #                     psf_interp,
-    #                     filename=f"{result_dir}/foc{-foc_dist}_depth{-depth}_interp.png",
-    #                 )
-    #             except:
-    #                 print("Function interp_psf is missed during release. ")
-
-    # ==================================================
-    # Use network
+    # Network inference
     # ==================================================
     def refocus(self, foc_dist):
         """Refocus the lens to the given focus distance."""
@@ -436,23 +343,6 @@ class PSFNetLens(Lens):
         psf_map = psf.reshape(grid[0], grid[1], 3, ks, ks)  # [grid, grid, 3, ks, ks]
         return psf_map
 
-    # def pred_psf(self, inp):
-    #     """Predict PSFs using the PSF network.
-
-    #     Args:
-    #         inp (tensor): [N, 4] tensor, [x, y, z, foc_dist]
-
-    #     Returns:
-    #         psf (tensor): [N, ks, ks] or [H, W, ks, ks] tensor
-    #     """
-    #     # Network prediction, shape of [N, ks^2]
-    #     psf = self.psfnet(inp)
-
-    #     # Reshape, shape of [N, ks, ks] or [H, W, ks, ks]
-    #     psf = psf.reshape(*psf.shape[:-1], self.kernel_size, self.kernel_size)
-
-    #     return psf
-
     @torch.no_grad()
     def render_rgbd(self, img, depth, foc_dist, high_res=False):
         """Render image with aif image and depth map. Receive [N, C, H, W] image.
@@ -484,7 +374,8 @@ class PSFNetLens(Lens):
         # psf = self.pred_psf(o)
         # =====>
         o = torch.stack((x, y, z), -1).float()
-        psf = self.psf_rgb(points=o, foc_dist=foc_dist)
+        self.refocus(foc_dist.item() if isinstance(foc_dist, torch.Tensor) else foc_dist)
+        psf = self.psf_rgb(points=o)
         # =====>
 
         # Render image with per-pixel PSF convolution
@@ -494,46 +385,6 @@ class PSFNetLens(Lens):
             render = conv_psf_pixel(img, psf)
 
         return render
-
-    # ==================================================
-    # Utils
-    # ==================================================
-
-    # def depth2z(self, depth):
-    #     z = (depth - self.d_min) / (self.d_max - self.d_min)
-    #     z = torch.clamp(z, min=0, max=1)
-    #     return z
-
-    # def z2depth(self, z):
-    #     depth = z * (self.d_max - self.d_min) + self.d_min
-    #     return depth
-
-    def vis_psf_map(self, psf, filename=None):
-        """Visualize a [N, N, k, k] or [N, N, k^2] or [N, k, k] PSF kernel."""
-        if len(psf.shape) == 4:
-            N, _, _, _ = psf.shape
-            fig, axs = plt.subplots(N, N)
-            for i in range(N):
-                for j in range(N):
-                    psf0 = psf[i, j, :, :].detach().clone().cpu()
-                    axs[i, j].imshow(psf0, vmin=0.0, vmax=0.1)
-
-        elif len(psf.shape) == 3:
-            N, _, _ = psf.shape
-            fig, axs = plt.subplots(1, N)
-            for i in range(N):
-                psf0 = psf[i, :, :].detach().clone().cpu()
-                axs[i].imshow(psf0, vmin=0.0, vmax=0.1)
-                axs[i].axis("off")
-
-        # Return fig
-        if filename is not None:
-            plt.savefig(filename, dpi=300)
-        else:
-            plt.show()
-
-        plt.cla()
-
 
 # ==================================================================
 # Thin lens model (baseline)

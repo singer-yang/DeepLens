@@ -5,7 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Represent the PSF of a lens with a neural network. Surrogate model accelerates the calculation of PSF compared to ray tracing.
+"""Represent the PSF of a lens with a neural network. Surrogate model can accelerate the calculation of PSF compared to ray tracing.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, Mohammed Elhoseiny and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
@@ -23,25 +23,27 @@ set_logger(result_dir)
 set_seed(0)
 
 if __name__ == "__main__":
-    # Init PSFNet (I changed the network archietecture to mlpconv for better performance on large PSF kernels.)
+    # Init PSFNetLens
     psfnet = PSFNetLens(
         lens_path="./lenses/camera/ef50mm_f1.8.json",
-        model_name="mlpconv",
-        sensor_res=(2000, 2000),
-        kernel_size=64,
+        model_name="mlpconv3",
+        sensor_res=(3000, 3000),
+        kernel_size=128,
     )
     psfnet.lens.analysis(save_name=f"{result_dir}/lens")
     psfnet.lens.write_lens_json(f"{result_dir}/lens.json")
 
-    # Train PSFNet
-    # psfnet.load_net("./ckpts/psfnet/ef50mm_f1.8_1000x1000_ks128_mlpconv.pth")
+    # Train PSFNetLens
+    psfnet.load_net("./results/0901-174251-PSFNet/PSFNet_last.pth")
     psfnet.train_psfnet(
-        iters=20000,
+        iters=50000,
         bs=256,
-        lr=1e-2,
+        lr=1e-4,
         evaluate_every=100,
+        concentration_factor=4.0,
         result_dir=result_dir,
     )
-    psfnet.evaluate_psf(result_dir=result_dir)
 
+    # Evaluate PSFNetLens
+    psfnet.evaluate_psf(result_dir=result_dir)
     print("Finish PSF net fitting.")
