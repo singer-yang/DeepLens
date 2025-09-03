@@ -6,7 +6,7 @@ import torch
 import matplotlib.pyplot as plt
 
 import pyvista as pv
-import pyvistaqt as pvqt
+# import pyvistaqt as pvqt
 
 from deeplens.geolens_pkg.view_3d import draw_lens_3D
 
@@ -24,7 +24,8 @@ lens_config = os.path.relpath(
 lens = GeoLens(lens_config)
 
 lens.draw_layout(os.path.join(SAVE_DIR, "lens_2dlayout.png")),
-plotter = pvqt.BackgroundPlotter()
+# plotter = pvqt.BackgroundPlotter()
+plotter = pv.Plotter(off_screen=True)
 
 hfov = lens.hfov
 
@@ -34,5 +35,6 @@ draw_lens_3D(plotter,lens,
              is_show_bridge=False,
              save_dir=SAVE_DIR,)
 
-plotter.show()
-plotter.app.exec_()
+# plotter.show()
+# plotter.app.exec_()
+plotter.screenshot(os.path.join(SAVE_DIR, "lens_3d_visualization.png"))

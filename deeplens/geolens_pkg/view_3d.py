@@ -27,6 +27,7 @@ from deeplens.optics.geometric_surface import (
     Plane,
     Spheric,
     ThinLens,
+    AsphericNorm,
 )
 
 from deeplens.optics.geometric_surface.base import EPSILON
@@ -588,7 +589,7 @@ def geolens_poly(lens: GeoLens,
             d = surf.d.item()
             height_func = gen_sphere_height_map(c, d)
             surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func)
-        elif isinstance(surf, Aspheric):
+        elif isinstance(surf, Aspheric) or isinstance(surf, AsphericNorm):
             if i < n_surf-1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i+1])
             height_func = gen_aspheric_height_map(surf)
@@ -599,7 +600,7 @@ def geolens_poly(lens: GeoLens,
             height_func = gen_cubic_height_map(surf)
             surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
         else:
-            raise NotImplementedError("Surface type not implemented in 3D visualization")
+            raise NotImplementedError(f"Surface type {type(surf)} not implemented in 3D visualization")
     
     print(f"Finishing creating {n_surf} surfaces")
 
