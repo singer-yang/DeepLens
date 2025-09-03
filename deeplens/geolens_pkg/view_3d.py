@@ -14,10 +14,8 @@ import torch
 from pyvista import Plotter, PolyData, merge
 
 from deeplens.geolens import GeoLens
-from deeplens.optics import (
-    Ray,
-)
-from deeplens.optics.basics import DEFAULT_WAVE
+from deeplens.optics import Ray
+from deeplens.optics.basics import DEFAULT_WAVE, EPSILON
 from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
@@ -25,8 +23,6 @@ from deeplens.optics.geometric_surface import (
     Cubic,
     Spheric,
 )
-from deeplens.optics.geometric_surface.base import EPSILON
-
 
 # ====================================================
 # Polydata classes
@@ -53,18 +49,19 @@ class CrossPoly:
     def get_obj_data(self):
         pass
 
-    def draw(self, plotter: Plotter, color: List[float]):
+    def draw(self, plotter: Plotter, color: List[float], opacity: float = 1.0):
         """Draw the mesh to the plotter.
 
         Args:
             plotter: Plotter
             color: List[float]. The color of the mesh.
+            opacity: float. The opacity of the mesh.
         """
         poly = self.get_poly_data()
         # Shade each points
         n_v = poly.n_points
         poly["colors"] = np.vstack([color] * n_v)
-        plotter.add_mesh(poly, scalars="colors", rgb=True)
+        plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
 
 
 class LineMesh(CrossPoly):
@@ -195,7 +192,7 @@ class RectangleMesh(FaceMesh):
         self.direction_h = direction_h / np.linalg.norm(direction_h)
         self.width = width
         self.height = height
-        super().__init__(4, 2)
+        super().__init__(n_vertices=4, n_faces=2)
 
     def create_data(self):
         self.vertices[0] = (
@@ -252,7 +249,7 @@ class ApertureMesh(FaceMesh):
         self.direction = direction
         self.aperture_radius = aperture_radius
         self.radius = radius
-        super().__init__(n_vertices, n_vertices * 2)
+        super().__init__(n_vertices=n_vertices, n_faces=n_vertices * 2)
 
     def create_data(self):
         inner_circ = Circle(
@@ -271,21 +268,23 @@ class HeightMapAngular(FaceMesh):
     Triangulate a height map on a circular base with angular sampling
     """
 
-    def __init__(self, radius: float, n_rings: int, n_arms: int, height_func: callable):
+    def __init__(self, radius: float, n_rings: int, n_arms: int, height_func: callable, normal_direction: int = 1):
         assert n_rings > 0 and n_arms > 2, "Invalid number of rings or arms"
         assert radius > 0, "Invalid radius"
         assert callable(height_func), "Invalid height function"
+        assert normal_direction in [-1, 1], "Normal direction must be 1 (+z) or -1 (-z)"
 
         self.radius = radius
         self.n_rings = n_rings
         self.n_arms = n_arms
         self.height_func = height_func
+        self.normal_direction = normal_direction  # 1 for +z, -1 for -z
 
         # Calculate correct grid parameters
         n_vertices = n_rings * n_arms + 1  # central + verteces on rings
         n_faces = n_arms * (2 * n_rings - 1)  # central + outer triangle
 
-        super().__init__(n_vertices, n_faces)
+        super().__init__(n_vertices=n_vertices, n_faces=n_faces)
 
     def create_data(self):
         # Generate vertices
@@ -313,7 +312,11 @@ class HeightMapAngular(FaceMesh):
     def _generate_faces(self):
         # Generate central triangles
         for j in range(self.n_arms):
-            self.faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
+            if self.normal_direction == 1:
+                self.faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
+            else:
+                # Flip winding order for opposite normal direction
+                self.faces[j] = [0, 1 + (j + 1) % self.n_arms, 1 + j]
 
         # Generate radial quads
         face_idx = self.n_arms  # index start after central
@@ -329,8 +332,13 @@ class HeightMapAngular(FaceMesh):
                 d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
 
                 # Create two triangles per quad
-                self.faces[face_idx] = [a, c, b]
-                self.faces[face_idx + 1] = [b, c, d]
+                if self.normal_direction == 1:
+                    self.faces[face_idx] = [a, c, b]
+                    self.faces[face_idx + 1] = [b, c, d]
+                else:
+                    # Flip winding order for opposite normal direction
+                    self.faces[face_idx] = [a, b, c]
+                    self.faces[face_idx + 1] = [b, d, c]
                 face_idx += 2
 
     def create_rim(self):
@@ -537,22 +545,34 @@ def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0
 
 def draw_lens_3d(
     lens: GeoLens,
+    save_dir: str = None,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+    surface_color: List[float] = [0.06, 0.3, 0.6],
+    show_rays: bool = True,
     fovs: List[float] = [0.0],
     fov_phis: List[float] = [0.0],
     ray_rings: int = 6,
     ray_arms: int = 8,
-    mesh_rings: int = 32,
-    mesh_arms: int = 128,
-    is_show_rays: bool = True,
-    surface_color: List[float] = [0.06, 0.3, 0.6],
-    bridge_color: List[float] = [0.0, 0.0, 0.0],
-    save_dir: str = None,
 ):
-    """Draw a lens in 3D."""
+    """Draw lens 3D layout with rays using pyvista.
+    
+    Args:
+        lens (GeoLens): The lens object.
+        save_dir (str): The directory to save the image.
+        mesh_rings (int): The number of rings in the mesh.
+        mesh_arms (int): The number of arms in the mesh.
+        surface_color (List[float]): The color of the surfaces.
+        show_rays (bool): Whether to show the rays.
+        fovs (List[float]): The FoV angles to be sampled, unit: degree.
+        fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
+        ray_rings (int): The number of pupil rings to be sampled.
+        ray_arms (int): The number of pupil arms to be sampled.
+    """
     plotter = Plotter(window_size=(3840, 2160), off_screen=True)
     plotter.camera.up = [0, 1, 0]
-    plotter.camera.position = [-20, 10, -10+lens.d_sensor.item()/2]
-    plotter.camera.focal_point = [0, 0, lens.d_sensor.item()/2]
+    plotter.camera.position = [-20, 10, -10 + lens.d_sensor.item() / 2]
+    plotter.camera.focal_point = [0, 0, lens.d_sensor.item() / 2]
 
     # Generate Gelens surfaces & bridges meshes
     surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
@@ -576,7 +596,7 @@ def draw_lens_3d(
     draw_mesh(plotter, sensor_poly, color=[128, 128, 128], opacity=1.0)
 
     # Render the rays
-    if is_show_rays:
+    if show_rays:
         rays_curve = geolens_ray_poly(
             lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
         )
@@ -585,39 +605,75 @@ def draw_lens_3d(
         for r in rays_poly_fov:
             plotter.add_mesh(r)
 
-    # Save surface meshes and rays
+    # Save images
     if save_dir is not None:
-        if not os.path.exists(save_dir):
-            os.mkdir(save_dir)
+        os.makedirs(save_dir, exist_ok=True)
+        plotter.screenshot(os.path.join(save_dir, "lens_3d_vis.png"), return_img=False)
 
-        # Merge meshes
-        merged_surf_poly = merge(
-            [sp.get_poly_data() for sp in surf_poly if sp is not None]
+
+def save_lens_obj(
+    lens: GeoLens,
+    save_dir: str,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+    save_rays: bool = False,
+    fovs: List[float] = [0.0],
+    fov_phis: List[float] = [0.0],
+    ray_rings: int = 6,
+    ray_arms: int = 8,
+):
+    """Save lens geometry and rays as .obj files using pyvista.
+    
+    Args:
+        lens (GeoLens): The lens object.
+        save_dir (str): The directory to save the image.
+        mesh_rings (int): The number of rings in the mesh.
+        mesh_arms (int): The number of arms in the mesh.
+        save_rays (bool): Whether to save the rays.
+        fovs (List[float]): The FoV angles to be sampled, unit: degree.
+        fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
+        ray_rings (int): The number of pupil rings to be sampled.
+        ray_arms (int): The number of pupil arms to be sampled.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Generate Gelens surfaces & bridges meshes
+    surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
+        lens, mesh_rings, mesh_arms
+    )
+
+    # Merge and save meshes
+    surf_poly_data = [sp.get_poly_data() for sp in surf_poly if sp is not None]
+    bridge_poly_data = [bp.get_poly_data() for bp in bridge_poly]
+    
+    # Merge surfaces and bridges into lens elements
+    lens_elements_data = surf_poly_data + bridge_poly_data
+    merged_lens_elements = merge(lens_elements_data)
+    
+    merged_aper_poly = merge([aper.get_poly_data() for aper in aper_poly])
+    merged_sensor_poly = sensor_poly.get_poly_data()
+
+    merged_lens_elements.save(os.path.join(save_dir, "lens_elements.obj"))
+    merged_aper_poly.save(os.path.join(save_dir, "lens_aper.obj"))
+    merged_sensor_poly.save(os.path.join(save_dir, "lens_sensor.obj"))
+
+    # Generate and save rays
+    if save_rays:
+        rays_curve = geolens_ray_poly(
+            lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
         )
-        merged_bridge_poly = merge([bp.get_poly_data() for bp in bridge_poly])
-        merged_aper_poly = merge([aper.get_poly_data() for aper in aper_poly])
-        merged_sensor_poly = sensor_poly.get_poly_data()
-
-        # Save meshe objects (can be used in Blender)
-        merged_surf_poly.save(os.path.join(save_dir, "lens_surf.obj"))
-        merged_bridge_poly.save(os.path.join(save_dir, "lens_bridge.obj"))
-        merged_aper_poly.save(os.path.join(save_dir, "lens_aper.obj"))
-        merged_sensor_poly.save(os.path.join(save_dir, "lens_sensor.obj"))
-
-        # Save rays
+        rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
+        rays_poly_fov = [merge(r) for r in rays_poly_list]
         for i, r in enumerate(rays_poly_fov):
             r.save(os.path.join(save_dir, f"lens_rays_fov_{i}.obj"))
 
-        # Save images
-        plotter.screenshot(os.path.join(save_dir, "lens_3d_vis.png"), return_img=False)
 
 def generate_poly(
     lens: GeoLens,
     mesh_rings: int = 32,
     mesh_arms: int = 128,
 ) -> List[CrossPoly]:
-    """
-    Generate the lens/bridge/sensor/aperture meshes. The meshes are generated using the height map method.
+    """Generate the lens/bridge/sensor/aperture meshes. The meshes are generated using the height map method.
 
     Args:
         lens (GeoLens): The lens object.
@@ -662,24 +718,38 @@ def generate_poly(
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
 
-            # create the surface poly
+            # create the surface poly with correct normal direction
             r = surf.r
             c = surf.c.item()  # brutally assume c is a scalar tensor
             d = surf.d.item()
             height_func = gen_sphere_height_map(c, d)
-            surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func)
+            
+            # Determine normal direction based on material transition
+            # If next material is glass, normal points to -z
+            # If next material is air, normal points to +z
+            normal_dir = -1 if surf.mat2.name != "air" else 1
+            
+            surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func, normal_dir)
 
         elif isinstance(surf, Aspheric) or isinstance(surf, AsphericNorm):
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
             height_func = gen_aspheric_height_map(surf)
-            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
+            
+            # Determine normal direction based on material transition
+            normal_dir = -1 if surf.mat2.name != "air" else 1
+            
+            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func, normal_dir)
 
         elif isinstance(surf, Cubic):
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
             height_func = gen_cubic_height_map(surf)
-            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
+            
+            # Determine normal direction based on material transition
+            normal_dir = -1 if surf.mat2.name != "air" else 1
+            
+            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func, normal_dir)
 
         else:
             raise NotImplementedError(
@@ -691,7 +761,6 @@ def generate_poly(
         a_idx, b_idx = pair
         a = surf_poly[a_idx]
         b = surf_poly[b_idx]
-        # bridge the two surfaces
         bridge_mesh = bridge(a.rim, b.rim)
         bridge_poly.append(bridge_mesh)
 
