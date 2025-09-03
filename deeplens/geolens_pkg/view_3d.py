@@ -571,8 +571,9 @@ def draw_lens_3d(
     """
     plotter = Plotter(window_size=(3840, 2160), off_screen=True)
     plotter.camera.up = [0, 1, 0]
-    plotter.camera.position = [-20, 10, -10 + lens.d_sensor.item() / 2]
-    plotter.camera.focal_point = [0, 0, lens.d_sensor.item() / 2]
+    unit = lens.d_sensor.item()
+    plotter.camera.position = [-2 * unit, unit, -unit / 2]
+    plotter.camera.focal_point = [0, 0, unit / 2]
 
     # Generate Gelens surfaces & bridges meshes
     surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
