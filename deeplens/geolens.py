@@ -81,7 +81,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             1. Read a lens from .json/.zmx/.seq file
             2. Initialize a lens with no lens file, then manually add surfaces and materials
         """
-        super().__init__(device)
+        super().__init__(device=device)
 
         # Lens sensor size and resolution
         self.sensor_res = sensor_res
@@ -1456,6 +1456,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         self.hfov_y = math.atan((self.sensor_size[1] * math.tan(hfov)) / diag)
         self.hfov = hfov
 
+        return hfov
+
+    @torch.no_grad()
+    def calc_eff_hfov(self):
+        """Compute effective half fov.
+        """
+        tan_hfov = self.r_sensor / self.foclen
+        hfov = float(np.arctan(tan_hfov))
         return hfov
 
     @torch.no_grad()
