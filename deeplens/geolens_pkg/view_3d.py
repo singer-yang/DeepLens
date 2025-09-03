@@ -13,9 +13,7 @@ from os import mkdir
 from os import path as osp
 
 from deeplens.geolens import GeoLens
-from deeplens.optics.basics import (
-    DEFAULT_WAVE
-)
+from deeplens.optics.basics import DEFAULT_WAVE
 from deeplens.optics import (
     Ray,
 )
@@ -34,13 +32,17 @@ from deeplens.optics.geometric_surface.base import EPSILON
 
 import torch
 
+
 class CrossPoly:
     def __init__(self):
         pass
+
     def get_poly_data(self) -> PolyData:
         pass
+
     def get_obj_data(self):
         pass
+
 
 class LineMesh(CrossPoly):
     def __init__(self, n_vertices, is_loop=False):
@@ -51,7 +53,7 @@ class LineMesh(CrossPoly):
 
     def create_data(self):
         pass
-    
+
     def chain(self, other):
         if self.is_loop or other.is_loop:
             raise ValueError("One of the lines is a loop.")
@@ -62,16 +64,18 @@ class LineMesh(CrossPoly):
     def get_poly_data(self):
         n_line = 0 if self.is_loop else -1
         n_line += self.n_vertices
-        line = [[2, i, (i+1)%self.n_vertices] for i in range(n_line)]
-        
+        line = [[2, i, (i + 1) % self.n_vertices] for i in range(n_line)]
+
         return PolyData(self.vertices, lines=line)
+
 
 class Curve(LineMesh):
     def __init__(self, vertices: np.ndarray, is_loop: bool = None):
         n_vertices = vertices.shape[0]
         super().__init__(n_vertices, is_loop)
         self.vertices = vertices
-        
+
+
 class LineSeg(LineMesh):
     def __init__(self, origin: np.ndarray, direction: np.ndarray, length: float):
         self.origin = origin
@@ -82,6 +86,7 @@ class LineSeg(LineMesh):
     def create_data(self):
         self.vertices[0] = self.origin
         self.vertices[1] = self.origin + self.direction * self.length
+
 
 class Circle(LineMesh):
     def __init__(self, n_vertices, origin, direction, radius):
@@ -94,24 +99,24 @@ class Circle(LineMesh):
         self.radius = radius
         self.origin = origin
         super().__init__(n_vertices, is_loop=True)
-        
+
     def create_data(self):
         # Normalize the direction vector
         direction = np.array(self.direction, dtype=np.float32)
         direction = direction / np.linalg.norm(direction)
-        
+
         # Find a vector that is not parallel to the direction
         if np.abs(direction[0]) < 0.9:
             v1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
         else:
             v1 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-        
+
         # Use cross product to get perpendicular vectors
         u = np.cross(direction, v1)
         u = u / np.linalg.norm(u)
         v = np.cross(direction, u)
         v = v / np.linalg.norm(v)
-        
+
         # Generate points on the circle
         origin = np.array(self.origin, dtype=np.float32)
         for i in range(self.n_vertices):
@@ -120,6 +125,7 @@ class Circle(LineMesh):
             y = self.radius * (u[1] * np.cos(angle) + v[1] * np.sin(angle))
             z = self.radius * (u[2] * np.cos(angle) + v[2] * np.sin(angle))
             self.vertices[i] = origin + np.array([x, y, z])
+
 
 class FaceMesh(CrossPoly):
     def __init__(self, n_vertices: int, n_faces: int):
@@ -134,53 +140,77 @@ class FaceMesh(CrossPoly):
         vertices = np.zeros((self.n_vertices, 3), dtype=np.float32)
         faces = np.zeros((self.n_faces, 3), dtype=np.uint32)
         return vertices, faces
-    
+
     def create_data(self):
         pass
-    
+
     def create_rim(self):
         pass
-    
+
     def get_poly_data(self) -> PolyData:
-        face_vertex_n = 3 #
-        face = np.hstack([face_vertex_n*np.ones((self.n_faces, 1), dtype=np.uint32), self.faces])
+        face_vertex_n = 3  #
+        face = np.hstack(
+            [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
+        )
         return PolyData(self.vertices, face)
 
-class Rectangle(FaceMesh):
-    def __init__(self,
-                 center: np.ndarray,
-                 direction_w: np.ndarray,
-                 direction_h: np.ndarray,
-                 width: float,
-                 height: float):
 
+class Rectangle(FaceMesh):
+    def __init__(
+        self,
+        center: np.ndarray,
+        direction_w: np.ndarray,
+        direction_h: np.ndarray,
+        width: float,
+        height: float,
+    ):
         # two directions should be orthogonal
         assert np.dot(direction_w, direction_h) == 0, "Invalid directions"
         # width and height should be positive
         assert width > 0 and height > 0, "Invalid width or height"
-        
+
         self.center = center
         self.direction_w = direction_w / np.linalg.norm(direction_w)
         self.direction_h = direction_h / np.linalg.norm(direction_h)
         self.width = width
         self.height = height
         super().__init__(4, 2)
-    
+
     def create_data(self):
-        self.vertices[0] = self.center - 0.5*self.width*self.direction_w - 0.5*self.height*self.direction_h
-        self.vertices[1] = self.center + 0.5*self.width*self.direction_w - 0.5*self.height*self.direction_h
-        self.vertices[2] = self.center + 0.5*self.width*self.direction_w + 0.5*self.height*self.direction_h
-        self.vertices[3] = self.center - 0.5*self.width*self.direction_w + 0.5*self.height*self.direction_h
-        
+        self.vertices[0] = (
+            self.center
+            - 0.5 * self.width * self.direction_w
+            - 0.5 * self.height * self.direction_h
+        )
+        self.vertices[1] = (
+            self.center
+            + 0.5 * self.width * self.direction_w
+            - 0.5 * self.height * self.direction_h
+        )
+        self.vertices[2] = (
+            self.center
+            + 0.5 * self.width * self.direction_w
+            + 0.5 * self.height * self.direction_h
+        )
+        self.vertices[3] = (
+            self.center
+            - 0.5 * self.width * self.direction_w
+            + 0.5 * self.height * self.direction_h
+        )
+
         self.faces[0] = [0, 1, 2]
         self.faces[1] = [0, 2, 3]
 
+
 class ApertureMesh(FaceMesh):
-    def __init__(self, origin: np.ndarray,
-                 direction: np.ndarray,
-                 aperture_radius: float,
-                 radius: float,
-                 n_vertices: int = 64):
+    def __init__(
+        self,
+        origin: np.ndarray,
+        direction: np.ndarray,
+        aperture_radius: float,
+        radius: float,
+        n_vertices: int = 64,
+    ):
         """
         Define a circular aperture with radius.\\
         The aperture is defined by the center and radius.\\
@@ -200,37 +230,30 @@ class ApertureMesh(FaceMesh):
         self.direction = direction
         self.aperture_radius = aperture_radius
         self.radius = radius
-        super().__init__(n_vertices, n_vertices*2)
-    
+        super().__init__(n_vertices, n_vertices * 2)
+
     def create_data(self):
-        inner_circ = Circle(self.n_vertices,
-                            self.origin,
-                            self.direction,
-                            self.aperture_radius)
-        outer_circ = Circle(self.n_vertices,
-                            self.origin,
-                            self.direction,
-                            self.radius)
+        inner_circ = Circle(
+            self.n_vertices, self.origin, self.direction, self.aperture_radius
+        )
+        outer_circ = Circle(self.n_vertices, self.origin, self.direction, self.radius)
         # bridge the two circles
         bridge_mesh = bridge(inner_circ, outer_circ)
         self.vertices = bridge_mesh.vertices
         self.faces = bridge_mesh.faces
         self.rim = outer_circ
-        
+
 
 class HeightMapAngular(FaceMesh):
     """
     Triangulate a height map on a circular base with angular sampling
     """
-    def __init__(self,
-                 radius: float,
-                 n_rings: int,
-                 n_arms: int,
-                 height_func: callable):
+
+    def __init__(self, radius: float, n_rings: int, n_arms: int, height_func: callable):
         assert n_rings > 0 and n_arms > 2, "Invalid number of rings or arms"
         assert radius > 0, "Invalid radius"
         assert callable(height_func), "Invalid height function"
-        
+
         self.radius = radius
         self.n_rings = n_rings
         self.n_arms = n_arms
@@ -239,7 +262,7 @@ class HeightMapAngular(FaceMesh):
         # Calculate correct grid parameters
         n_vertices = n_rings * n_arms + 1  # central + verteces on rings
         n_faces = n_arms * (2 * n_rings - 1)  # central + outer triangle
-        
+
         super().__init__(n_vertices, n_faces)
 
     def create_data(self):
@@ -251,41 +274,41 @@ class HeightMapAngular(FaceMesh):
     def _generate_vertices(self):
         # Center vertex
         self.vertices[0] = [0.0, 0.0, self.height_func(0.0, 0.0)]
-        
+
         # Generate ring vertices
-        for i_ring in range(1, self.n_rings+1):
+        for i_ring in range(1, self.n_rings + 1):
             r = self.radius * i_ring / self.n_rings
-            
+
             for j_arm in range(self.n_arms):
                 theta = 2 * np.pi * j_arm / self.n_arms
                 x = r * np.cos(theta)
                 y = r * np.sin(theta)
                 z = self.height_func(x, y)
-                
-                idx = 1 + (i_ring-1)*self.n_arms + j_arm
+
+                idx = 1 + (i_ring - 1) * self.n_arms + j_arm
                 self.vertices[idx] = [x, y, z]
 
     def _generate_faces(self):
         # Generate central triangles
         for j in range(self.n_arms):
-            self.faces[j] = [0, 1+j, 1 + (j+1)%self.n_arms]
-        
+            self.faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
+
         # Generate radial quads
         face_idx = self.n_arms  # index start after central
-        
+
         for i_ring in range(1, self.n_rings):
             for j_arm in range(self.n_arms):
                 # Get indices for current ring
-                a = 1 + (i_ring-1)*self.n_arms + j_arm
-                b = 1 + (i_ring-1)*self.n_arms + (j_arm+1) % self.n_arms
-                
+                a = 1 + (i_ring - 1) * self.n_arms + j_arm
+                b = 1 + (i_ring - 1) * self.n_arms + (j_arm + 1) % self.n_arms
+
                 # Get indices for next ring
-                c = 1 + i_ring*self.n_arms + j_arm
-                d = 1 + i_ring*self.n_arms + (j_arm+1) % self.n_arms
-                
+                c = 1 + i_ring * self.n_arms + j_arm
+                d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
+
                 # Create two triangles per quad
                 self.faces[face_idx] = [a, c, b]
-                self.faces[face_idx+1] = [b, c, d]
+                self.faces[face_idx + 1] = [b, c, d]
                 face_idx += 2
 
     def create_rim(self):
@@ -299,16 +322,19 @@ class HeightMapAngular(FaceMesh):
         #     self.rim = start_idx + np.arange(self.n_arms)
         #     # rim is closed
         #     self.rim = np.append(self.rim, start_idx)
-        start_idx = 1 + (self.n_rings-1)*self.n_arms
+        start_idx = 1 + (self.n_rings - 1) * self.n_arms
         self.rim = Curve(self.vertices[start_idx:], is_loop=True)
+
 
 # ====================================================
 # Polydata utils
 # ====================================================
 
-def bridge(l_a: LineMesh,
-            l_b: LineMesh,
-            )-> FaceMesh:
+
+def bridge(
+    l_a: LineMesh,
+    l_b: LineMesh,
+) -> FaceMesh:
     """
     Bridge two curves/loops with triangulated faces.
     ## Parameters
@@ -322,13 +348,13 @@ def bridge(l_a: LineMesh,
     # Check if both lines are loops or both are open
     if l_a.is_loop ^ l_b.is_loop:
         raise ValueError("Both lines must be either loops or open curves.")
-    
+
     # Check if they have the same number of vertices
     if l_a.n_vertices != l_b.n_vertices:
         raise ValueError("Both lines must have the same number of vertices.")
-    
+
     n = l_a.n_vertices
-    
+
     # Align the vertices of l_b to l_a
     if l_a.is_loop:
         # Find the closest vertex in l_b to the first vertex of l_a
@@ -345,10 +371,10 @@ def bridge(l_a: LineMesh,
             reordered_b = l_b.vertices[::-1]
         else:
             reordered_b = l_b.vertices.copy()
-    
+
     # Combine the vertices of l_a and the reordered l_b
     vertices = np.vstack([l_a.vertices, reordered_b])
-    
+
     # Generate the faces
     faces = []
     if l_a.is_loop:
@@ -369,121 +395,141 @@ def bridge(l_a: LineMesh,
             b_j = j + n
             faces.append([a_i, a_j, b_i])
             faces.append([a_j, b_j, b_i])
-    
+
     faces = np.array(faces, dtype=np.uint32)
-    
+
     # Create the FaceMesh instance
     face_mesh = FaceMesh(n_vertices=vertices.shape[0], n_faces=faces.shape[0])
     face_mesh.vertices = vertices
     face_mesh.faces = faces
-    
+
     return face_mesh
+
 
 def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
     """Convert a list of Curve objects to a list of PolyData objects.
-    
+
     Args:
         meshes: List of Curve objects
-        
+
     Returns:
         List of PolyData objects
     """
     return [c.get_poly_data() for c in meshes]
-    
+
+
 def group_linemesh(meshes: List[PolyData]) -> PolyData:
     """
     Combine multiple line-based PolyData objects into a single PolyData.
-    
+
     This function merges multiple PolyData objects containing lines into one
     cohesive PolyData object while preserving the line connectivity information.
-    The vertex indices in the line connectivity arrays are adjusted to account 
+    The vertex indices in the line connectivity arrays are adjusted to account
     for the combined vertex array.
-    
+
     ## Parameters:
-    
+
     - meshes: List of PolyData objects to be combined
-        
+
     ## Returns:
-    
+
     - A single PolyData object containing all vertices and lines
     """
     if not meshes:
         return None
-    
+
     # Calculate vertex count offsets
     n_vertices = [mesh.n_points for mesh in meshes]
     vertex_offsets = np.cumsum([0] + n_vertices[:-1])
-    
+
     # Combine all vertices
     combined_vertices = np.vstack([mesh.points for mesh in meshes])
+
     def offset_vertex(x: np.ndarray, offset):
         x = x.reshape(-1, 3)
         x[:, 1:] += offset
         return x
-    
+
     # Combine all lines with adjusted vertices
-    combined_lines = np.vstack([ offset_vertex(mesh.lines, vertex_offsets[i]) for i, mesh in enumerate(meshes)])
+    combined_lines = np.vstack(
+        [offset_vertex(mesh.lines, vertex_offsets[i]) for i, mesh in enumerate(meshes)]
+    )
     return PolyData(combined_vertices, lines=combined_lines)
+
 
 # ====================================================
 # Height map generation
 # ====================================================
 
+
 def gen_sphere_height_map(c: float, d: float):
     if c == 0:
+
         def height_func(x, y):
             return d
     else:
-        r = np.abs(1/c)
+        r = np.abs(1 / c)
         sign = c / np.abs(c)
+
         def height_func(x, y):
-            z = d + sign*(r - np.sqrt(r**2 - x**2 - y**2 + EPSILON))
+            z = d + sign * (r - np.sqrt(r**2 - x**2 - y**2 + EPSILON))
             return z
+
     return height_func
+
 
 def gen_aspheric_height_map(surf: Aspheric):
     def height_func(x, y):
         return surf._sag(x, y).cpu().numpy() + surf.d.item()
+
     return height_func
+
 
 def gen_cubic_height_map(surf: Cubic):
     def height_func(x, y):
         return surf._sag(x, y).cpu().numpy() + surf.d.item()
+
     return height_func
+
 
 # ====================================================
 # Polygon generation & visualization
 # ====================================================
 
+
 def draw_mesh(plotter, mesh: CrossPoly, color):
     poly = mesh.get_poly_data()
     # shade each points
     n_v = poly.n_points
-    poly["colors"] = np.vstack([color]*n_v)
+    poly["colors"] = np.vstack([color] * n_v)
     plotter.add_mesh(poly, scalars="colors", rgb=True)
-    
-def draw_lens_3D(plotter, lens:GeoLens,
-                 fovs: List[float] = [0.],
-                 fov_phis: List[float] = [0.],
-                 ray_rings: int = 6,
-                 ray_arms: int = 8,
-                 mesh_rings: int = 32,
-                 mesh_arms: int = 128,
-                 is_show_bridge: bool = True,
-                 is_show_aperture: bool = True,
-                 is_show_sensor: bool = True,
-                 is_show_rays: bool = True,
-                 surface_color: List[float] = [0.06, 0.3, 0.6],
-                 bridge_color: List[float] = [0., 0., 0.],
-                 save_dir: str = None,):
+
+
+def draw_lens_3D(
+    plotter,
+    lens: GeoLens,
+    fovs: List[float] = [0.0],
+    fov_phis: List[float] = [0.0],
+    ray_rings: int = 6,
+    ray_arms: int = 8,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+    is_show_bridge: bool = True,
+    is_show_aperture: bool = True,
+    is_show_sensor: bool = True,
+    is_show_rays: bool = True,
+    surface_color: List[float] = [0.06, 0.3, 0.6],
+    bridge_color: List[float] = [0.0, 0.0, 0.0],
+    save_dir: str = None,
+):
     n_surf = len(lens.surfaces)
-    surf_poly, bridge_poly, sensor_poly, ap_poly = geolens_poly(lens,
-                                                                mesh_rings,
-                                                                mesh_arms)
+    surf_poly, bridge_poly, sensor_poly, ap_poly = geolens_poly(
+        lens, mesh_rings, mesh_arms
+    )
 
     surf_color_rgb = np.array(surface_color) * 255
     surf_color_rgb = surf_color_rgb.astype(np.uint8)
-    
+
     # draw the surfaces
     for sp in surf_poly:
         if sp is not None:
@@ -499,37 +545,41 @@ def draw_lens_3D(plotter, lens:GeoLens,
         draw_mesh(plotter, sensor_poly, np.array([10, 10, 10]))
 
     if is_show_rays:
-        rays_curve = geolens_ray_poly(lens, fovs, fov_phis,
-                                    n_rings=ray_rings,
-                                    n_arms=ray_arms)
+        rays_curve = geolens_ray_poly(
+            lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
+        )
         rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
         rays_poly_fov = [merge(r) for r in rays_poly_list]
         for r in rays_poly_fov:
             plotter.add_mesh(r)
-        
+
     if save_dir is not None:
         if not osp.exists(save_dir):
             mkdir(save_dir)
         # merge meshes
-        merged_surf_poly = merge([sp.get_poly_data() for sp in surf_poly if sp is not None])
+        merged_surf_poly = merge(
+            [sp.get_poly_data() for sp in surf_poly if sp is not None]
+        )
         merged_bridge_poly = merge([bp.get_poly_data() for bp in bridge_poly])
         merged_ap_poly = merge([ap.get_poly_data() for ap in ap_poly])
         merged_sensor_poly = sensor_poly.get_poly_data()
-        
+
         # save meshes
         merged_surf_poly.save(osp.join(save_dir, "lens_surf.obj"))
         merged_bridge_poly.save(osp.join(save_dir, "lens_bridge.obj"))
         merged_ap_poly.save(osp.join(save_dir, "lens_ap.obj"))
         merged_sensor_poly.save(osp.join(save_dir, "lens_sensor.obj"))
-        
+
         # save rays
         for i, r in enumerate(rays_poly_fov):
-            r.save(osp.join(save_dir, f"lens_rays_fov_{i}.obj"))        
-        
-def geolens_poly(lens: GeoLens,
-                 mesh_rings: int = 32,
-                 mesh_arms: int = 128,
-                 ) -> List[CrossPoly]:
+            r.save(osp.join(save_dir, f"lens_rays_fov_{i}.obj"))
+
+
+def geolens_poly(
+    lens: GeoLens,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+) -> List[CrossPoly]:
     """
     Generate the lens/bridge/sensor/aperture meshes.\\
     The meshes are generated using the height map method.\\
@@ -552,16 +602,16 @@ def geolens_poly(lens: GeoLens,
     - ap_poly: List[ApertureMesh]
     """
     n_surf = len(lens.surfaces)
-    
+
     surf_poly = [None for _ in range(n_surf)]
     bridge_idx = []
     bridge_poly = []
     ap_poly = []
     sensor_poly = None
-    
+
     radius_list = [surf.r for surf in lens.surfaces]
     max_barrel_r = max(radius_list)
-    
+
     for i, surf in enumerate(lens.surfaces):
         if isinstance(surf, Aperture):
             # generate the aperture mesh
@@ -569,68 +619,68 @@ def geolens_poly(lens: GeoLens,
             ap_dir = np.array([0, 0, -1])
             ap_radius = surf.r
             outer_radius = max_barrel_r
-            ap_poly.append(ApertureMesh(ap_origin,
-                                        ap_dir,
-                                        ap_radius,
-                                        outer_radius,
-                                        n_vertices=32)) 
+            ap_poly.append(
+                ApertureMesh(ap_origin, ap_dir, ap_radius, outer_radius, n_vertices=32)
+            )
         elif isinstance(surf, Spheric):
             # record the idx of the two surf
             # NOTICE:
             # this implementation only consider
             # situation where lens is placed in air
             # non-air material adjacent surf are bridged
-            if i < n_surf-1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i+1])
-                
+            if i < n_surf - 1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i + 1])
+
             # create the surf poly
             r = surf.r
-            c = surf.c.item() # brutally assume c is a scalar tensor
+            c = surf.c.item()  # brutally assume c is a scalar tensor
             d = surf.d.item()
             height_func = gen_sphere_height_map(c, d)
             surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func)
         elif isinstance(surf, Aspheric) or isinstance(surf, AsphericNorm):
-            if i < n_surf-1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i+1])
+            if i < n_surf - 1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i + 1])
             height_func = gen_aspheric_height_map(surf)
             surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
         elif isinstance(surf, Cubic):
-            if i < n_surf-1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i+1])
+            if i < n_surf - 1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i + 1])
             height_func = gen_cubic_height_map(surf)
             surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func)
         else:
-            raise NotImplementedError(f"Surface type {type(surf)} not implemented in 3D visualization")
-    
+            raise NotImplementedError(
+                f"Surface type {type(surf)} not implemented in 3D visualization"
+            )
+
     print(f"Finishing creating {n_surf} surfaces")
 
     for i, pair in enumerate(bridge_idx):
         print(f"bridging pair: {pair} surfaces")
-        
+
         a_idx, b_idx = pair
         a = surf_poly[a_idx]
         b = surf_poly[b_idx]
         # bridge the two surfaces
         bridge_mesh = bridge(a.rim, b.rim)
         bridge_poly.append(bridge_mesh)
-    
-    
+
     sensor_d = lens.d_sensor.item()
     sensor_r = lens.r_sensor
     h, w = sensor_r * 1.4142, sensor_r * 1.4142
-    sensor_poly = Rectangle(np.array([0, 0, sensor_d]), 
-                             np.array([1, 0, 0]),
-                             np.array([0, 1, 0]),
-                             w, h)
-    
+    sensor_poly = Rectangle(
+        np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
+    )
+
     return surf_poly, bridge_poly, sensor_poly, ap_poly
 
-def geolens_ray_poly(lens: GeoLens,
-                     fovs: List[float],
-                     fov_phis: List[float],
-                     n_rings: int = 3,
-                     n_arms: int = 4,
-                     ) -> List[List[Curve]]:
+
+def geolens_ray_poly(
+    lens: GeoLens,
+    fovs: List[float],
+    fov_phis: List[float],
+    n_rings: int = 3,
+    n_arms: int = 4,
+) -> List[List[Curve]]:
     """
     Sample parallel rays to draw the lens setup.\\
     Hx, Hy = fov * cos(fov_phi), fov * sin(fov_phi).\\
@@ -653,33 +703,41 @@ def geolens_ray_poly(lens: GeoLens,
         Traced ray represented by curves. Each FoV coord is a List[Curve].
     """
     rays_poly = []
-    
+
     R = lens.surfaces[0].r
 
     for fov in fovs:
-        if fov == 0.:
+        if fov == 0.0:
             center_ray = sample_parallel_3D(lens, R, rings=n_rings, arms=n_arms)
             rays_poly.append(curve_from_trace(lens, center_ray))
         else:
             for fov_phi in fov_phis:
                 print(f"fov: {fov}, fov_phi: {fov_phi}")
                 # Sample rays on the fov
-                ray = sample_parallel_3D(lens, R,
-                                        rings=n_rings, arms=n_arms,
-                                        view_polar=fov, view_azi=fov_phi)
+                ray = sample_parallel_3D(
+                    lens,
+                    R,
+                    rings=n_rings,
+                    arms=n_arms,
+                    view_polar=fov,
+                    view_azi=fov_phi,
+                )
                 rays_poly.append(curve_from_trace(lens, ray))
     return rays_poly
 
-def sample_parallel_3D(lens: GeoLens,
-                       R: float,
-                       wvln=DEFAULT_WAVE,
-                       z=None,
-                       view_polar: float = 0.,
-                       view_azi: float = 0.,
-                       rings: int = 3,
-                       arms: int = 4,
-                       forward: bool = True,
-                       entrance_pupil=True):
+
+def sample_parallel_3D(
+    lens: GeoLens,
+    R: float,
+    wvln=DEFAULT_WAVE,
+    z=None,
+    view_polar: float = 0.0,
+    view_azi: float = 0.0,
+    rings: int = 3,
+    arms: int = 4,
+    forward: bool = True,
+    entrance_pupil=True,
+):
     """
     Sample 2D parallel rays. Rays have shape [M, 3].
 
@@ -704,25 +762,25 @@ def sample_parallel_3D(lens: GeoLens,
         pupilz, pupilx = 0, lens.surfaces[0].r
 
     # x2 = torch.linspace(-pupilx, pupilx, M) * 0.99
-    rho2 = torch.linspace(0, pupilx, rings+1) * 0.99
-    rho2 = rho2[1:] # remove the central spot
-    phi2 = torch.linspace(0, 2*pi, arms+1)
+    rho2 = torch.linspace(0, pupilx, rings + 1) * 0.99
+    rho2 = rho2[1:]  # remove the central spot
+    phi2 = torch.linspace(0, 2 * pi, arms + 1)
     phi2 = phi2[:-1]
     RHO2, PHI2 = torch.meshgrid(rho2, phi2)
-    X2, Y2 = RHO2*torch.cos(PHI2), RHO2*torch.sin(PHI2)
+    X2, Y2 = RHO2 * torch.cos(PHI2), RHO2 * torch.sin(PHI2)
     x2, y2 = torch.flatten(X2), torch.flatten(Y2)
-    
+
     # add the central spot back
     x2 = torch.concat((torch.tensor([0]), x2))
     y2 = torch.concat((torch.tensor([0]), y2))
-    
+
     z2 = torch.full_like(x2, pupilz)
     o2 = torch.stack((x2, y2, z2), axis=-1)  # shape [M, 3]
 
     view_polar = view_polar / 57.3
     view_azi = view_azi / 57.3
-    dx = torch.full_like(x2, np.sin(view_polar)*np.cos(view_azi))
-    dy = torch.full_like(x2, np.sin(view_polar)*np.sin(view_azi))
+    dx = torch.full_like(x2, np.sin(view_polar) * np.cos(view_azi))
+    dy = torch.full_like(x2, np.sin(view_polar) * np.sin(view_azi))
     dz = torch.full_like(x2, np.cos(view_polar))
     d = torch.stack((dx, dy, dz), axis=-1)
 
@@ -738,7 +796,7 @@ def sample_parallel_3D(lens: GeoLens,
 def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
     """
     Trace the ray and return the Curve.
-    
+
     ## Parameters
     - lens: GeoLens
         The lens object.
@@ -746,7 +804,7 @@ def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
         Sampled ray from the lens.
     - delete_vignetting: bool
         Whether to delete the vignetting rays.
-    
+
     ## Returns
     - rays_curve: List[Curve]
         Traced ray represented by curves
@@ -764,5 +822,5 @@ def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
         pass
     for record in ray_o_records:
         curve = Curve(record, False)
-        rays_curve.append(curve)        
+        rays_curve.append(curve)
     return rays_curve
