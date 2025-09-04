@@ -82,7 +82,7 @@ class PSFNetLens(Lens):
 
     def init_net(self, in_chan=2, psf_chan=3, kernel_size=64, model_name="mlpconv"):
         """Initialize a PSF network.
-        
+
         PSF network:
             Input: [B, 3], (fov, depth, foc_dist). fov from [0, pi/2], depth from [-20000, -100], foc_dist from [-20000, -500]
             Output: psf kernel [B, 3, ks, ks]
@@ -126,10 +126,10 @@ class PSFNetLens(Lens):
         Args:
             net_path (str): path to load the network
         """
-        psfnet_dict = torch.load(net_path, map_location='cpu', weights_only=False)
-        # assert psfnet_dict["pixel_size"] == self.pixel_size, (
-        #     "Pixel size mismatch between network and lens"
-        # )
+        psfnet_dict = torch.load(net_path, map_location="cpu", weights_only=False)
+        assert psfnet_dict["pixel_size"] == self.pixel_size, (
+            "Pixel size mismatch between network and lens"
+        )
         assert psfnet_dict["lens_path"] == self.lens_path, (
             "Lens path mismatch between network and lens"
         )
@@ -163,7 +163,7 @@ class PSFNetLens(Lens):
         result_dir="./results/psfnet",
     ):
         """Train the PSF surrogate network.
-        
+
         Args:
             iters (int): number of training iterations
             bs (int): batch size
@@ -184,7 +184,9 @@ class PSFNetLens(Lens):
         # Train the network
         for i in tqdm(range(iters + 1)):
             # Sample training data
-            sample_input, sample_psf = self.sample_training_data(num_points=bs, concentration_factor=concentration_factor)
+            sample_input, sample_psf = self.sample_training_data(
+                num_points=bs, concentration_factor=concentration_factor
+            )
             sample_input, sample_psf = (
                 sample_input.to(self.device),
                 sample_psf.to(self.device),
@@ -255,13 +257,15 @@ class PSFNetLens(Lens):
         fov = torch.rand(num_points) * eff_hfov
 
         # Sample (depth), sample more points near the focus distance, [mm], range [d_max, d_min]
-        std_dev = -foc_dist / concentration_factor # A smaller value concentrates points more tightly. Default is -foc_dist / 2.0
+        std_dev = (
+            -foc_dist / concentration_factor
+        )  # A smaller value concentrates points more tightly. Default is -foc_dist / 2.0
         depth = foc_dist + torch.randn(num_points) * std_dev
         depth = torch.clamp(depth, d_max, d_min)
 
         # Create input tensor
         sample_input = torch.stack(
-            [fov, depth, torch.full((num_points,), foc_dist)], dim=1
+            [fov, depth / 1000.0, torch.full((num_points,), foc_dist / 1000.0)], dim=1
         )
         sample_input = sample_input.to(self.device)
 
@@ -271,7 +275,9 @@ class PSFNetLens(Lens):
         points_z = depth
         points = torch.stack((points_x, points_y, points_z), dim=-1)
         with torch.no_grad():
-            sample_psf = self.lens.psf_rgb(points=points, ks=self.kernel_size, recenter=True)
+            sample_psf = self.lens.psf_rgb(
+                points=points, ks=self.kernel_size, recenter=True
+            )
 
         return sample_input, sample_psf
 
@@ -300,7 +306,9 @@ class PSFNetLens(Lens):
         foclen = self.lens.foclen
         points_fov = torch.atan(torch.sqrt(points_x**2 + points_y**2) / foclen)
         foc_dist = torch.full_like(points_fov, self.foc_dist)
-        network_inp = torch.stack((points_fov, points[:, 2], foc_dist), dim=-1)
+        network_inp = torch.stack(
+            (points_fov, points[:, 2] / 1000.0, foc_dist / 1000.0), dim=-1
+        )
 
         # Predict 0y-axis PSF from network
         psf = self.psfnet(network_inp)
@@ -374,7 +382,9 @@ class PSFNetLens(Lens):
         # psf = self.pred_psf(o)
         # =====>
         o = torch.stack((x, y, z), -1).float()
-        self.refocus(foc_dist.item() if isinstance(foc_dist, torch.Tensor) else foc_dist)
+        self.refocus(
+            foc_dist.item() if isinstance(foc_dist, torch.Tensor) else foc_dist
+        )
         psf = self.psf_rgb(points=o)
         # =====>
 
@@ -385,6 +395,7 @@ class PSFNetLens(Lens):
             render = conv_psf_pixel(img, psf)
 
         return render
+
 
 # ==================================================================
 # Thin lens model (baseline)
