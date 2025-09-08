@@ -65,16 +65,16 @@ class PSFNetLens(Lens):
 
         # There is a minimum focal distance for each lens.
         # For example, the Canon EF 50mm lens can only focus to 0.5m and further.
-        self.foc_d_min = -500
-        self.foc_d_max = -20000
-        self.foc_d_arr = (np.linspace(0, 1, 100)) ** 2 * (
-            self.foc_d_max - self.foc_d_min
-        ) + self.foc_d_min
-        self.foc_d_arr = np.round(self.foc_d_arr, 0)
+        self.foc_d_close = -500
+        self.foc_d_far = -20000
+        # self.foc_d_arr = (np.linspace(0, 1, 100)) ** 2 * (
+        #     self.foc_d_far - self.foc_d_close
+        # ) + self.foc_d_close
+        # self.foc_d_arr = np.round(self.foc_d_arr, 0)
 
         # depth range
-        self.d_min = -200
-        self.d_max = -20000
+        self.d_close = -200
+        self.d_far = -20000
 
     # ==================================================
     # Training functions
@@ -229,6 +229,7 @@ class PSFNetLens(Lens):
 
         self.save_psfnet(f"{result_dir}/PSFNet_{self.model_name}.pth")
 
+    @torch.no_grad()
     def sample_training_data(self, num_points=512, concentration_factor=2.0):
         """Sample training data for PSF surrogate network.
 
@@ -239,33 +240,35 @@ class PSFNetLens(Lens):
         Returns:
             sample_input (tensor): [B, 3] tensor, (fov, depth, foc_dist).
                 - fov from [0, hfov] on 0y-axis, [radians]
-                - depth from [d_min, d_max], [mm]
-                - foc_dist from [foc_d_min, foc_d_max], [mm]
+                - depth from [d_far, d_close], [mm]
+                - foc_dist from [foc_d_far, foc_d_close], [mm]
                 - We use absolute fov and depth.
 
             sample_psf (tensor): [B, 3, ks, ks] tensor
         """
-        d_min = self.d_min
-        d_max = self.d_max
-        eff_hfov = self.lens.calc_eff_hfov()
+        d_close = self.d_close
+        d_far = self.d_far
+        hfov = self.lens.calc_eff_hfov()
 
-        # In each iteration, sample one focus distance, [mm], range [foc_d_max, foc_d_min]
-        foc_dist = float(np.random.choice(self.foc_d_arr))
+        # In each iteration, sample one focus distance, [mm], range [foc_d_far, foc_d_close]
+        beta_sample = np.random.beta(0.5, 4)  # Biased towards 0
+        foc_dist = self.foc_d_close + beta_sample * (self.foc_d_far - self.foc_d_close)
         self.lens.refocus(foc_dist)
+        foc_dist = torch.full((num_points,), foc_dist)
 
         # Sample (fov), uniform distribution, [radians], range[0, hfov]
-        fov = torch.rand(num_points) * eff_hfov
+        fov = torch.rand(num_points) * hfov
 
-        # Sample (depth), sample more points near the focus distance, [mm], range [d_max, d_min]
+        # Sample (depth), sample more points near the focus distance, [mm], range [d_far, d_close]
         std_dev = (
             -foc_dist / concentration_factor
         )  # A smaller value concentrates points more tightly. Default is -foc_dist / 2.0
         depth = foc_dist + torch.randn(num_points) * std_dev
-        depth = torch.clamp(depth, d_max, d_min)
+        depth = torch.clamp(depth, d_far, d_close)
 
         # Create input tensor
         sample_input = torch.stack(
-            [fov, depth / 1000.0, torch.full((num_points,), foc_dist / 1000.0)], dim=1
+            [fov, depth / 1000.0, foc_dist / 1000.0], dim=1
         )
         sample_input = sample_input.to(self.device)
 
@@ -274,12 +277,39 @@ class PSFNetLens(Lens):
         points_y = self.lens.foclen * torch.tan(fov) / self.lens.r_sensor
         points_z = depth
         points = torch.stack((points_x, points_y, points_z), dim=-1)
-        with torch.no_grad():
-            sample_psf = self.lens.psf_rgb(
-                points=points, ks=self.kernel_size, recenter=True
-            )
+        sample_psf = self.lens.psf_rgb(
+            points=points, ks=self.kernel_size, recenter=True
+        )
 
         return sample_input, sample_psf
+
+    def eval(self):
+        """Set the network to evaluation mode."""
+        self.psfnet.eval()
+
+    def points2input(self, points):
+        """Convert points to input tensor.
+
+        Args:
+            points (tensor): [N, 3] tensor, [-1, 1] * [-1, 1] * [depth_min, depth_max]
+
+        Returns:
+            input (tensor): [N, 3] tensor, (fov, depth, foc_dist).
+                - fov from [0, hfov] on y-axis, [radians]
+                - depth/1000.0 from [d_far, d_close], [mm]
+                - foc_dist/1000.0 from [foc_d_far, foc_d_close], [mm]
+        """
+        sensor_h, sensor_w = self.lens.sensor_size
+        foclen = self.lens.foclen
+
+        points_x = points[:, 0] * sensor_w / 2
+        points_y = points[:, 1] * sensor_h / 2
+        points_r = torch.sqrt(points_x**2 + points_y**2)
+        fov = torch.atan(points_r / foclen)
+        depth = points[:, 2]
+        foc_dist = torch.full_like(fov, self.foc_dist)
+        network_inp = torch.stack((fov, depth / 1000.0, foc_dist / 1000.0), dim=-1)
+        return network_inp
 
     # ==================================================
     # Network inference
@@ -300,17 +330,9 @@ class PSFNetLens(Lens):
             psf (tensor): [N, 3, ks, ks] tensor
         """
         # Calculate network input
-        sensor_h, sensor_w = self.lens.sensor_size
-        points_x = points[:, 0] * sensor_w / 2
-        points_y = points[:, 1] * sensor_h / 2
-        foclen = self.lens.foclen
-        points_fov = torch.atan(torch.sqrt(points_x**2 + points_y**2) / foclen)
-        foc_dist = torch.full_like(points_fov, self.foc_dist)
-        network_inp = torch.stack(
-            (points_fov, points[:, 2] / 1000.0, foc_dist / 1000.0), dim=-1
-        )
+        network_inp = self.points2input(points)
 
-        # Predict 0y-axis PSF from network
+        # Predict y-axis PSF from network
         psf = self.psfnet(network_inp)
 
         # Post-process PSF
@@ -395,93 +417,3 @@ class PSFNetLens(Lens):
             render = conv_psf_pixel(img, psf)
 
         return render
-
-
-# ==================================================================
-# Thin lens model (baseline)
-# ==================================================================
-# class ThinLens(DeepObj):
-#     def __init__(
-#         self, foc_len, fnum, kernel_size, sensor_size, sensor_res, device="cpu"
-#     ):
-#         super(ThinLens, self).__init__()
-
-#         self.d_max = -20000
-#         self.d_min = -200
-#         self.kernel_size = kernel_size
-#         self.foc_len = foc_len
-#         self.fnum = fnum
-#         self.sensor_size = sensor_size
-#         self.sensor_res = sensor_res
-#         self.ps = self.sensor_size[0] / self.sensor_res[0]
-
-#     def coc(self, depth, foc_dist):
-#         if (depth < 0).any():
-#             depth = -depth
-#             foc_dist = -foc_dist
-
-#         depth = torch.clamp(depth, self.d_min, self.d_max)
-#         coc = (
-#             self.foc_len
-#             / self.fnum
-#             * torch.abs(depth - foc_dist)
-#             / depth
-#             * self.foc_len
-#             / (foc_dist - self.foc_len)
-#         )
-#         # clamp_min is only a random constant avoiding getting coc_pixel = 0
-#         clamp_min = 2 if self.kernel_size % 2 == 0 else 0.2
-#         coc_pixel = torch.clamp(coc / self.ps, min=clamp_min)
-#         return coc_pixel
-
-#     def render(self, img, depth, foc_dist, high_res=False):
-#         """Render image with aif image and Gaussian PSFs.
-
-#         Args:
-#             img: [N, C, H, W]
-#             depth: [N, 1, H, W]
-#             foc_dist: [N]
-
-#         Raises:
-#             Exception: _description_
-
-#         Returns:
-#             _type_: _description_
-#         """
-#         ks = self.kernel_size
-#         device = img.device
-
-#         if len(img.shape) == 3:
-#             raise Exception("Untested.")
-
-#         elif len(img.shape) == 4:
-#             N, C, H, W = img.shape
-
-#             # [N] to [N, 1, H, W]
-#             foc_dist = (
-#                 foc_dist.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W)
-#             )
-
-#             psf = torch.zeros((N, H, W, ks, ks), device=device)
-#             x, y = torch.meshgrid(
-#                 torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
-#                 torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
-#                 indexing="xy",
-#             )
-#             x, y = x.to(device), y.to(device)
-
-#             coc_pixel = self.coc(depth, foc_dist)
-#             # Shape expands to [N, H, W, ks, ks]
-#             coc_pixel = (
-#                 coc_pixel.squeeze(1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, ks, ks)
-#             )
-#             coc_pixel_radius = coc_pixel / 2
-#             psf = torch.exp(-(x**2 + y**2) / 2 / coc_pixel_radius**2) / (
-#                 2 * np.pi * coc_pixel_radius**2
-#             )
-#             psf_mask = x**2 + y**2 < coc_pixel_radius**2
-#             psf = psf * psf_mask
-#             psf = psf / psf.sum((-1, -2)).unsqueeze(-1).unsqueeze(-1)
-
-#             render = conv_psf_pixel(img, psf)
-#             return render
