@@ -251,13 +251,15 @@ class PSFNetLens(Lens):
         hfov = self.lens.calc_eff_hfov()
 
         # In each iteration, sample one focus distance, [mm], range [foc_d_far, foc_d_close]
-        beta_sample = np.random.beta(0.5, 4)  # Biased towards 0
+        # Example beta distribution: https://share.google/images/Mrb9c39PdddYx3UHj
+        beta_sample = float(np.random.beta(1, 4))  # Biased towards 0
         foc_dist = self.foc_d_close + beta_sample * (self.foc_d_far - self.foc_d_close)
         self.lens.refocus(foc_dist)
         foc_dist = torch.full((num_points,), foc_dist)
 
-        # Sample (fov), uniform distribution, [radians], range[0, hfov]
-        fov = torch.rand(num_points) * hfov
+        # Sample (fov), [radians], range[0, hfov]
+        beta_values = torch.from_numpy(np.random.beta(4, 1, num_points)).float()  # Biased towards 1
+        fov = beta_values * hfov
 
         # Sample (depth), sample more points near the focus distance, [mm], range [d_far, d_close]
         std_dev = (
