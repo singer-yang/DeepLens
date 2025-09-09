@@ -45,8 +45,9 @@ class Lens(DeepObj):
         """
         # Lens device
         if device is None:
-            device = init_device()
-        self.device = device
+            self.device = init_device()
+        else:
+            self.device = torch.device(device)
 
         # Lens default dtype
         self.dtype = dtype

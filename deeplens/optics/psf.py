@@ -161,7 +161,9 @@ def conv_psf_pixel(img, psf, expand=False):
     B, C, H, W = img.shape
     _, _, _, _, ks = psf.shape
     assert B == 1, "Only support batch size 1"
-    assert C == psf.shape[2] and H == psf.shape[0] and W == psf.shape[1], ("Input and PSF shape mismatch.")
+    assert C == psf.shape[2] and H == psf.shape[0] and W == psf.shape[1], (
+        "Input and PSF shape mismatch."
+    )
 
     # Scattering for PSF convolution
     img = img.unsqueeze(-1).unsqueeze(-1)  # [B, C, H, W, 1, 1]
@@ -393,6 +395,38 @@ def read_psf_map(filename, grid=10):
             )
 
     return psf_map
+
+
+def rotate_psf(psf, theta):
+    """Rotate PSF by theta counter-clockwise. Rotation center is the center of the PSF.
+
+    Args:
+        psf: (N, 3, ks, ks).
+        theta: (N,). rotation angle in radians (counter-clockwise).
+
+    Returns:
+        rotated_psf: (N, 3, ks, ks).
+    """
+    assert len(psf.shape) == 4, "PSF should be [N, 3, ks, ks]"
+
+    N, _, ks, _ = psf.shape
+    assert ks == psf.shape[3], "PSF kernel should be square"
+
+    # To rotate the image counter-clockwise, the sampling grid must be rotated clockwise.
+    # The matrix for a clockwise rotation by theta is:
+    # [ cos(theta)  sin(theta) ]
+    # [ -sin(theta) cos(theta) ]
+    rotation_matrices = torch.zeros(N, 2, 3, device=psf.device, dtype=psf.dtype)
+    rotation_matrices[:, 0, 0] = torch.cos(theta)
+    rotation_matrices[:, 0, 1] = torch.sin(theta)
+    rotation_matrices[:, 1, 0] = -torch.sin(theta)
+    rotation_matrices[:, 1, 1] = torch.cos(theta)
+
+    # Rotate PSFs
+    grid = F.affine_grid(rotation_matrices, psf.shape, align_corners=True)
+    rotated_psf = F.grid_sample(psf, grid, align_corners=True)
+
+    return rotated_psf
 
 
 # ================================================
