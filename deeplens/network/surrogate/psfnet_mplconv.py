@@ -1,7 +1,16 @@
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
+"""A MLP-Conv network architecture to represent the spatiallly varying PSF of a lens.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import time
 
 
 class ChannelwiseNormalization(nn.Module):
@@ -90,11 +99,11 @@ class MLPConditioner(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(in_chan, 128),
             nn.ReLU(),
-            nn.Linear(128, 256),
+            nn.Linear(128, 512),
             nn.ReLU(),
-            nn.Linear(256, 512),
+            nn.Linear(512, 1024),
             nn.ReLU(),
-            nn.Linear(512, latent_dim),
+            nn.Linear(1024, latent_dim),
         )
 
     def forward(self, x):
@@ -104,17 +113,19 @@ class MLPConditioner(nn.Module):
 
 class ConvDecoder(nn.Module):
     """
-    Convolutional decoder to generate PSF from latent vector.
+    Convolutional decoder to generate PSF from latent vector with multi-scale features.
     Input: [batch_size, latent_dim] (flat)
     Output: [batch_size, out_chan, kernel_size, kernel_size]
-    Assumes kernel_size=64 and latent reshapes to [64, 8, 8].
+    Assumes kernel_size=128 and latent reshapes to [64, 16, 16].
     """
 
-    def __init__(self, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64):
+    def __init__(
+        self, kernel_size=128, out_chan=3, latent_dim=4096, latent_channels=16
+    ):
         super(ConvDecoder, self).__init__()
         # Validate latent dim matches reshape
         self.initial_height = (
-            8  # Starting height/width for upsampling (8 -> 16 -> 32 -> 64)
+            16  # Starting height/width for upsampling (16 -> 32 -> 64 -> 128)
         )
         self.initial_shape = (latent_channels, self.initial_height, self.initial_height)
         expected_dim = latent_channels * self.initial_height * self.initial_height
@@ -127,23 +138,43 @@ class ConvDecoder(nn.Module):
             f"Adjust upsample layers for kernel_size={kernel_size}"
         )
 
-        self.decoder = nn.Sequential(
-            # Upsample 8x8 -> 16x16
-            DecoderBlock(latent_channels, 32),
-            # Upsample 16x16 -> 32x32
-            DecoderBlock(32, 16),
-            # Upsample 32x32 -> 64x64
-            DecoderBlock(16, 8),
-            # Final conv to 3 channels (no upsample)
-            nn.Conv2d(8, out_chan, kernel_size=3, padding=1),
-            ChannelwiseNormalization(),
-        )
+        # Decoder blocks as individual modules for multi-scale access
+        self.decoder_block1 = DecoderBlock(latent_channels, 32)  # 16x16 -> 32x32
+        self.decoder_block2 = DecoderBlock(32, 16)  # 32x32 -> 64x64
+        self.decoder_block3 = DecoderBlock(16, 8)  # 64x64 -> 128x128
+
+        # Skip connections for multi-scale features
+        self.skip_conv1 = nn.Conv2d(32, 8, 1)  # From 32x32 level
+        self.skip_conv2 = nn.Conv2d(16, 8, 1)  # From 64x64 level
+
+        # Final layers
+        self.final_conv = nn.Conv2d(8, out_chan, kernel_size=3, padding=1)
+        self.normalization = ChannelwiseNormalization()
 
     def forward(self, latent):
         batch_size = latent.size(0)
         # Reshape flat latent to initial feature map
         x = latent.view(batch_size, *self.initial_shape)
-        return self.decoder(x)
+
+        # Store intermediate features for multi-scale processing
+        x = self.decoder_block1(x)  # 32x32, 32 channels
+        skip1 = F.interpolate(
+            self.skip_conv1(x), size=128, mode="bilinear", align_corners=False
+        )
+
+        x = self.decoder_block2(x)  # 64x64, 16 channels
+        skip2 = F.interpolate(
+            self.skip_conv2(x), size=128, mode="bilinear", align_corners=False
+        )
+
+        x = self.decoder_block3(x)  # 128x128, 8 channels
+
+        # Combine multi-scale features
+        x = x + skip1 + skip2
+
+        # Final processing
+        x = self.final_conv(x)
+        return self.normalization(x)
 
 
 class PSFNet_MLPConv(nn.Module):
@@ -154,7 +185,12 @@ class PSFNet_MLPConv(nn.Module):
     """
 
     def __init__(
-        self, in_chan=2, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64
+        self,
+        in_chan=2,
+        kernel_size=128,
+        out_chan=3,
+        latent_dim=4096,
+        latent_channels=16,
     ):
         super(PSFNet_MLPConv, self).__init__()
         self.mlp = MLPConditioner(in_chan=in_chan, latent_dim=latent_dim)
@@ -174,51 +210,11 @@ class PSFNet_MLPConv(nn.Module):
         return psf
 
 
-def test_inference_time():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    model = PSFNet_MLPConv(
-        in_chan=2, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64
-    )
-    model.to(device)
-    model.half()  # Convert model to float16
-    model.eval()
-
-    # Input tensor of shape [N, 2]
-    # r in [-1, 1], z <= 0
-    N = 200000
-    r = 2 * torch.rand(N, 1) - 1  # Random values between -1 and 1
-    z = -10000 * torch.rand(N, 1)  # Random values between -10000 and 0
-    input_tensor = (
-        torch.cat((r, z), dim=1).to(device).half()
-    )  # Convert input to float16
-
-    with torch.no_grad():
-        # Warm-up run
-        _ = model(input_tensor[:10])
-
-        # Measure inference time
-        torch.cuda.synchronize()
-        start_time = time.time()
-        output = model(input_tensor)
-        torch.cuda.synchronize()
-        end_time = time.time()
-
-    inference_time = end_time - start_time
-    print(f"Inference time for input shape [{N}, 2]: {inference_time:.4f} seconds")
-    print(f"Output shape: {output.shape}")
-
-
 # Test code
 if __name__ == "__main__":
-    # Test inference time
-    test_inference_time()
-    breakpoint()
-
     # Instantiate the model
     model = PSFNet_MLPConv(
-        in_chan=2, kernel_size=64, out_chan=3, latent_dim=4096, latent_channels=64
+        in_chan=2, kernel_size=128, out_chan=3, latent_dim=4096, latent_channels=16
     )
 
     # Dummy input: batch_size=2, with example (r, z) values
@@ -236,7 +232,7 @@ if __name__ == "__main__":
 
     # Print shapes and a sample value
     print(f"Input shape: {rz.shape}")
-    print(f"Output shape: {psf_output.shape}")  # Should be [2, 3, 64, 64]
+    print(f"Output shape: {psf_output.shape}")  # Should be [2, 3, 128, 128]
 
     # Check if output sums to ~1 per channel (if using Softmax instead)
     print(f"Sum per channel (first batch): {psf_output[0].sum(dim=(1, 2))}")

@@ -21,7 +21,7 @@ from transformers import get_cosine_schedule_with_warmup
 from deeplens.geolens import GeoLens
 from deeplens.lens import Lens
 from deeplens.network.surrogate import MLP
-from deeplens.network.surrogate.psfnet_mplconv3 import PSFNet_MLPConv3
+from deeplens.network.surrogate.psfnet_mplconv import PSFNet_MLPConv
 from deeplens.optics.basics import DEPTH
 from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
 
@@ -34,7 +34,7 @@ class PSFNetLens(Lens):
         psf_chan=3,
         model_name="mlp_conv",
         kernel_size=64,
-        sensor_res=(2000, 3000),
+        sensor_res=(3000, 3000),
     ):
         """Initialize a PSF network lens.
 
@@ -111,8 +111,8 @@ class PSFNetLens(Lens):
                 hidden_features=256,
                 hidden_layers=8,
             )
-        elif model_name == "mlpconv3":
-            psfnet = PSFNet_MLPConv3(
+        elif model_name == "mlpconv":
+            psfnet = PSFNet_MLPConv(
                 in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
             )
         else:
