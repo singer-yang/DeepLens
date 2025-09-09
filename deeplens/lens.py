@@ -5,7 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Basic lens class.
+"""Optical lens.
 
 When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and re-write core functions.
 """
@@ -138,7 +138,7 @@ class Lens(DeepObj):
             ks (int, optional): Kernel size. Defaults to 51.
 
         Returns:
-            psf_rgb: Shape of [3, ks, ks] or [N, 3, ks, ks].
+            psf_rgb: Shape of [N, 3, ks, ks] or [3, ks, ks].
         """
         psfs = []
         for wvln in WAVE_RGB:
