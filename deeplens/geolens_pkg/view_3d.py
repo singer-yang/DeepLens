@@ -6,7 +6,6 @@
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
 import os
-from math import pi
 from typing import List
 
 import numpy as np
@@ -15,14 +14,8 @@ from pyvista import Plotter, PolyData, merge
 
 from deeplens.geolens import GeoLens
 from deeplens.optics import Ray
-from deeplens.optics.basics import DEFAULT_WAVE, EPSILON
-from deeplens.optics.geometric_surface import (
-    Aperture,
-    Aspheric,
-    AsphericNorm,
-    Cubic,
-    Spheric,
-)
+from deeplens.optics.basics import DEFAULT_WAVE
+from deeplens.optics.geometric_surface import Aperture
 
 # ====================================================
 # Polydata classes
@@ -96,51 +89,51 @@ class Curve(LineMesh):
         self.vertices = vertices
 
 
-class LineSeg(LineMesh):
-    def __init__(self, origin: np.ndarray, direction: np.ndarray, length: float):
-        self.origin = origin
-        self.direction = direction
-        self.length = length
-        super().__init__(2, is_loop=False)
+# class LineSeg(LineMesh):
+#     def __init__(self, origin: np.ndarray, direction: np.ndarray, length: float):
+#         self.origin = origin
+#         self.direction = direction
+#         self.length = length
+#         super().__init__(2, is_loop=False)
 
-    def create_data(self):
-        self.vertices[0] = self.origin
-        self.vertices[1] = self.origin + self.direction * self.length
+#     def create_data(self):
+#         self.vertices[0] = self.origin
+#         self.vertices[1] = self.origin + self.direction * self.length
 
 
-class Circle(LineMesh):
-    def __init__(self, n_vertices, origin, direction, radius):
-        """A circle mesh with normal direction and radius. The normal direciton is defined right-hand rule."""
-        self.direction = direction
-        self.radius = radius
-        self.origin = origin
-        super().__init__(n_vertices, is_loop=True)
+# class Circle(LineMesh):
+#     def __init__(self, n_vertices, origin, direction, radius):
+#         """A circle mesh with normal direction and radius. The normal direciton is defined right-hand rule."""
+#         self.direction = direction
+#         self.radius = radius
+#         self.origin = origin
+#         super().__init__(n_vertices, is_loop=True)
 
-    def create_data(self):
-        # Normalize the direction vector
-        direction = np.array(self.direction, dtype=np.float32)
-        direction = direction / np.linalg.norm(direction)
+#     def create_data(self):
+#         # Normalize the direction vector
+#         direction = np.array(self.direction, dtype=np.float32)
+#         direction = direction / np.linalg.norm(direction)
 
-        # Find a vector that is not parallel to the direction
-        if np.abs(direction[0]) < 0.9:
-            v1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-        else:
-            v1 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+#         # Find a vector that is not parallel to the direction
+#         if np.abs(direction[0]) < 0.9:
+#             v1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+#         else:
+#             v1 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
-        # Use cross product to get perpendicular vectors
-        u = np.cross(direction, v1)
-        u = u / np.linalg.norm(u)
-        v = np.cross(direction, u)
-        v = v / np.linalg.norm(v)
+#         # Use cross product to get perpendicular vectors
+#         u = np.cross(direction, v1)
+#         u = u / np.linalg.norm(u)
+#         v = np.cross(direction, u)
+#         v = v / np.linalg.norm(v)
 
-        # Generate points on the circle
-        origin = np.array(self.origin, dtype=np.float32)
-        for i in range(self.n_vertices):
-            angle = 2 * np.pi * i / self.n_vertices
-            x = self.radius * (u[0] * np.cos(angle) + v[0] * np.sin(angle))
-            y = self.radius * (u[1] * np.cos(angle) + v[1] * np.sin(angle))
-            z = self.radius * (u[2] * np.cos(angle) + v[2] * np.sin(angle))
-            self.vertices[i] = origin + np.array([x, y, z])
+#         # Generate points on the circle
+#         origin = np.array(self.origin, dtype=np.float32)
+#         for i in range(self.n_vertices):
+#             angle = 2 * np.pi * i / self.n_vertices
+#             x = self.radius * (u[0] * np.cos(angle) + v[0] * np.sin(angle))
+#             y = self.radius * (u[1] * np.cos(angle) + v[1] * np.sin(angle))
+#             z = self.radius * (u[2] * np.cos(angle) + v[2] * np.sin(angle))
+#             self.vertices[i] = origin + np.array([x, y, z])
 
 
 class FaceMesh(CrossPoly):
@@ -220,140 +213,100 @@ class RectangleMesh(FaceMesh):
         self.faces[1] = [0, 2, 3]
 
 
-class ApertureMesh(FaceMesh):
-    def __init__(
-        self,
-        origin: np.ndarray,
-        direction: np.ndarray,
-        aperture_radius: float,
-        radius: float,
-        n_vertices: int = 64,
-    ):
-        """
-        Define a circular aperture with radius.
-        The aperture is defined by the center and radius.
-
-        ## Parameters
-        - origin: np.ndarray, shape (3,)
-            The center of the aperture.
-        - direction: np.ndarray, shape (3,)
-            Normal direction. Right-hand rule.
-        - aperture_radius: float
-            The radius of the clear aperture.
-        - radius: float
-            The radius of the aperture outer rim.
-        - n_vertices: int
-            The number of vertices in one circle.
-        """
-        self.origin = origin
-        self.direction = direction
-        self.aperture_radius = aperture_radius
-        self.radius = radius
-        super().__init__(n_vertices=n_vertices, n_faces=n_vertices * 2)
-
-    def create_data(self):
-        inner_circ = Circle(
-            self.n_vertices, self.origin, self.direction, self.aperture_radius
-        )
-        outer_circ = Circle(self.n_vertices, self.origin, self.direction, self.radius)
-        # bridge the two circles
-        bridge_mesh = bridge(inner_circ, outer_circ)
-        self.vertices = bridge_mesh.vertices
-        self.faces = bridge_mesh.faces
-        self.rim = outer_circ
+# ApertureMesh class removed - apertures now use their own get_mesh() method
 
 
-class HeightMapAngular(FaceMesh):
-    """
-    Triangulate a height map on a circular base with angular sampling
-    """
+# class HeightMapAngular(FaceMesh):
+#     """
+#     Triangulate a height map on a circular base with angular sampling
+#     """
 
-    def __init__(self, radius: float, n_rings: int, n_arms: int, height_func: callable, normal_direction: int = 1):
-        assert n_rings > 0 and n_arms > 2, "Invalid number of rings or arms"
-        assert radius > 0, "Invalid radius"
-        assert callable(height_func), "Invalid height function"
-        assert normal_direction in [-1, 1], "Normal direction must be 1 (+z) or -1 (-z)"
+#     def __init__(self, radius: float, n_rings: int, n_arms: int, height_func: callable, normal_direction: int = 1):
+#         assert n_rings > 0 and n_arms > 2, "Invalid number of rings or arms"
+#         assert radius > 0, "Invalid radius"
+#         assert callable(height_func), "Invalid height function"
+#         assert normal_direction in [-1, 1], "Normal direction must be 1 (+z) or -1 (-z)"
 
-        self.radius = radius
-        self.n_rings = n_rings
-        self.n_arms = n_arms
-        self.height_func = height_func
-        self.normal_direction = normal_direction  # 1 for +z, -1 for -z
+#         self.radius = radius
+#         self.n_rings = n_rings
+#         self.n_arms = n_arms
+#         self.height_func = height_func
+#         self.normal_direction = normal_direction  # 1 for +z, -1 for -z
 
-        # Calculate correct grid parameters
-        n_vertices = n_rings * n_arms + 1  # central + verteces on rings
-        n_faces = n_arms * (2 * n_rings - 1)  # central + outer triangle
+#         # Calculate correct grid parameters
+#         n_vertices = n_rings * n_arms + 1  # central + verteces on rings
+#         n_faces = n_arms * (2 * n_rings - 1)  # central + outer triangle
 
-        super().__init__(n_vertices=n_vertices, n_faces=n_faces)
+#         super().__init__(n_vertices=n_vertices, n_faces=n_faces)
 
-    def create_data(self):
-        # Generate vertices
-        self._generate_vertices()
-        # Generate faces
-        self._generate_faces()
+#     def create_data(self):
+#         # Generate vertices
+#         self._generate_vertices()
+#         # Generate faces
+#         self._generate_faces()
 
-    def _generate_vertices(self):
-        # Center vertex
-        self.vertices[0] = [0.0, 0.0, self.height_func(0.0, 0.0)]
+#     def _generate_vertices(self):
+#         # Center vertex
+#         self.vertices[0] = [0.0, 0.0, self.height_func(0.0, 0.0)]
 
-        # Generate ring vertices
-        for i_ring in range(1, self.n_rings + 1):
-            r = self.radius * i_ring / self.n_rings
+#         # Generate ring vertices
+#         for i_ring in range(1, self.n_rings + 1):
+#             r = self.radius * i_ring / self.n_rings
 
-            for j_arm in range(self.n_arms):
-                theta = 2 * np.pi * j_arm / self.n_arms
-                x = r * np.cos(theta)
-                y = r * np.sin(theta)
-                z = self.height_func(x, y)
+#             for j_arm in range(self.n_arms):
+#                 theta = 2 * np.pi * j_arm / self.n_arms
+#                 x = r * np.cos(theta)
+#                 y = r * np.sin(theta)
+#                 z = self.height_func(x, y)
 
-                idx = 1 + (i_ring - 1) * self.n_arms + j_arm
-                self.vertices[idx] = [x, y, z]
+#                 idx = 1 + (i_ring - 1) * self.n_arms + j_arm
+#                 self.vertices[idx] = [x, y, z]
 
-    def _generate_faces(self):
-        # Generate central triangles
-        for j in range(self.n_arms):
-            if self.normal_direction == 1:
-                self.faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
-            else:
-                # Flip winding order for opposite normal direction
-                self.faces[j] = [0, 1 + (j + 1) % self.n_arms, 1 + j]
+#     def _generate_faces(self):
+#         # Generate central triangles
+#         for j in range(self.n_arms):
+#             if self.normal_direction == 1:
+#                 self.faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
+#             else:
+#                 # Flip winding order for opposite normal direction
+#                 self.faces[j] = [0, 1 + (j + 1) % self.n_arms, 1 + j]
 
-        # Generate radial quads
-        face_idx = self.n_arms  # index start after central
+#         # Generate radial quads
+#         face_idx = self.n_arms  # index start after central
 
-        for i_ring in range(1, self.n_rings):
-            for j_arm in range(self.n_arms):
-                # Get indices for current ring
-                a = 1 + (i_ring - 1) * self.n_arms + j_arm
-                b = 1 + (i_ring - 1) * self.n_arms + (j_arm + 1) % self.n_arms
+#         for i_ring in range(1, self.n_rings):
+#             for j_arm in range(self.n_arms):
+#                 # Get indices for current ring
+#                 a = 1 + (i_ring - 1) * self.n_arms + j_arm
+#                 b = 1 + (i_ring - 1) * self.n_arms + (j_arm + 1) % self.n_arms
 
-                # Get indices for next ring
-                c = 1 + i_ring * self.n_arms + j_arm
-                d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
+#                 # Get indices for next ring
+#                 c = 1 + i_ring * self.n_arms + j_arm
+#                 d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
 
-                # Create two triangles per quad
-                if self.normal_direction == 1:
-                    self.faces[face_idx] = [a, c, b]
-                    self.faces[face_idx + 1] = [b, c, d]
-                else:
-                    # Flip winding order for opposite normal direction
-                    self.faces[face_idx] = [a, b, c]
-                    self.faces[face_idx + 1] = [b, d, c]
-                face_idx += 2
+#                 # Create two triangles per quad
+#                 if self.normal_direction == 1:
+#                     self.faces[face_idx] = [a, c, b]
+#                     self.faces[face_idx + 1] = [b, c, d]
+#                 else:
+#                     # Flip winding order for opposite normal direction
+#                     self.faces[face_idx] = [a, b, c]
+#                     self.faces[face_idx + 1] = [b, d, c]
+#                 face_idx += 2
 
-    def create_rim(self):
-        """
-        store the outer most verteces as a LineMesh
-        """
-        # if self.n_rings == 0:
-        #     self.rim = np.array([0], dtype=np.uint32)
-        # else:
-        #     start_idx = 1 + (self.n_rings-1)*self.n_arms
-        #     self.rim = start_idx + np.arange(self.n_arms)
-        #     # rim is closed
-        #     self.rim = np.append(self.rim, start_idx)
-        start_idx = 1 + (self.n_rings - 1) * self.n_arms
-        self.rim = Curve(self.vertices[start_idx:], is_loop=True)
+#     def create_rim(self):
+#         """
+#         store the outer most verteces as a LineMesh
+#         """
+#         # if self.n_rings == 0:
+#         #     self.rim = np.array([0], dtype=np.uint32)
+#         # else:
+#         #     start_idx = 1 + (self.n_rings-1)*self.n_arms
+#         #     self.rim = start_idx + np.arange(self.n_arms)
+#         #     # rim is closed
+#         #     self.rim = np.append(self.rim, start_idx)
+#         start_idx = 1 + (self.n_rings - 1) * self.n_arms
+#         self.rim = Curve(self.vertices[start_idx:], is_loop=True)
 
 
 # ====================================================
@@ -488,41 +441,6 @@ def group_linemesh(meshes: List[PolyData]) -> PolyData:
 
 
 # ====================================================
-# Height map generation
-# ====================================================
-
-
-def gen_sphere_height_map(c: float, d: float):
-    if c == 0:
-
-        def height_func(x, y):
-            return d
-    else:
-        r = np.abs(1 / c)
-        sign = c / np.abs(c)
-
-        def height_func(x, y):
-            z = d + sign * (r - np.sqrt(r**2 - x**2 - y**2 + EPSILON))
-            return z
-
-    return height_func
-
-
-def gen_aspheric_height_map(surf: Aspheric):
-    def height_func(x, y):
-        return surf._sag(x, y).cpu().numpy() + surf.d.item()
-
-    return height_func
-
-
-def gen_cubic_height_map(surf: Cubic):
-    def height_func(x, y):
-        return surf._sag(x, y).cpu().numpy() + surf.d.item()
-
-    return height_func
-
-
-# ====================================================
 # Polygon visualization
 # ====================================================
 
@@ -556,7 +474,7 @@ def draw_lens_3d(
     ray_arms: int = 8,
 ):
     """Draw lens 3D layout with rays using pyvista.
-    
+
     Args:
         lens (GeoLens): The lens object.
         save_dir (str): The directory to save the image.
@@ -644,14 +562,18 @@ def save_lens_obj(
     )
 
     # Merge and save meshes
-    surf_poly_data = [sp.get_poly_data() for sp in surf_poly if sp is not None]
-    bridge_poly_data = [bp.get_poly_data() for bp in bridge_poly]
-    
+    surf_poly_data = [surf.get_poly_data() for surf in surf_poly if surf is not None]
+    bridge_poly_data = [
+        bridge.get_poly_data() for bridge in bridge_poly if bridge is not None
+    ]
+
     # Merge surfaces and bridges into lens elements
     lens_elements_data = surf_poly_data + bridge_poly_data
     merged_lens_elements = merge(lens_elements_data)
-    
-    merged_aper_poly = merge([aper.get_poly_data() for aper in aper_poly])
+
+    merged_aper_poly = merge(
+        [aper.get_poly_data() for aper in aper_poly if aper is not None]
+    )
     merged_sensor_poly = sensor_poly.get_poly_data()
 
     merged_lens_elements.save(os.path.join(save_dir, "lens_elements.obj"))
@@ -682,7 +604,7 @@ def generate_poly(
         mesh_arms (int): The number of arms in the mesh.
 
     Returns:
-        surf_poly (List[HeightMapAngular]): The surface meshes.
+        surf_poly (List[Surface]): The surface meshes.
         bridge_poly (List[FaceMesh]): The bridge meshes. (NOT support wrap around for now)
         sensor_poly (RectangleMesh): The sensor meshes. (only support rectangular sensor for now)
         aper_poly (List[ApertureMesh]): The aperture meshes.
@@ -695,67 +617,18 @@ def generate_poly(
     aper_poly = []
     sensor_poly = None
 
-    radius_list = [surf.r for surf in lens.surfaces]
-    max_barrel_r = max(radius_list)
-
     # Generate the surface meshes
     for i, surf in enumerate(lens.surfaces):
         if isinstance(surf, Aperture):
-            # Generate the aperture mesh
-            ap_origin = np.array([0, 0, surf.d.item()])
-            ap_dir = np.array([0, 0, -1])
-            ap_radius = surf.r
-            outer_radius = max_barrel_r
-            aper_poly.append(
-                ApertureMesh(ap_origin, ap_dir, ap_radius, outer_radius, n_vertices=32)
-            )
-
-        elif isinstance(surf, Spheric):
-            # record the idx of the two surf
-            # NOTICE:
-            # this implementation only consider
-            # situation where lens is placed in air
-            # non-air material adjacent surf are bridged
-            if i < n_surf - 1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i + 1])
-
-            # create the surface poly with correct normal direction
-            r = surf.r
-            c = surf.c.item()  # brutally assume c is a scalar tensor
-            d = surf.d.item()
-            height_func = gen_sphere_height_map(c, d)
-            
-            # Determine normal direction based on material transition
-            # If next material is glass, normal points to -z
-            # If next material is air, normal points to +z
-            normal_dir = -1 if surf.mat2.name != "air" else 1
-            
-            surf_poly[i] = HeightMapAngular(r, mesh_rings, mesh_arms, height_func, normal_dir)
-
-        elif isinstance(surf, Aspheric) or isinstance(surf, AsphericNorm):
-            if i < n_surf - 1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i + 1])
-            height_func = gen_aspheric_height_map(surf)
-            
-            # Determine normal direction based on material transition
-            normal_dir = -1 if surf.mat2.name != "air" else 1
-            
-            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func, normal_dir)
-
-        elif isinstance(surf, Cubic):
-            if i < n_surf - 1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i + 1])
-            height_func = gen_cubic_height_map(surf)
-            
-            # Determine normal direction based on material transition
-            normal_dir = -1 if surf.mat2.name != "air" else 1
-            
-            surf_poly[i] = HeightMapAngular(surf.r, mesh_rings, mesh_arms, height_func, normal_dir)
+            aperture_mesh = surf.get_mesh(n_arms=mesh_arms)
+            aper_poly.append(aperture_mesh)
 
         else:
-            raise NotImplementedError(
-                f"Surface type {type(surf)} not implemented in 3D visualization"
-            )
+            if i < n_surf - 1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i + 1])
+
+            # Use the surface's own get_mesh method
+            surf_poly[i] = surf.get_mesh(n_rings=mesh_rings, n_arms=mesh_arms)
 
     # Generate the bridge meshes
     for i, pair in enumerate(bridge_idx):
@@ -772,10 +645,6 @@ def generate_poly(
     sensor_poly = RectangleMesh(
         np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
     )
-
-    # Generate the aperture meshes
-    for aper in aper_poly:
-        aper.create_data()
 
     return surf_poly, bridge_poly, sensor_poly, aper_poly
 
@@ -870,7 +739,7 @@ def sample_parallel_3D(
     # x2 = torch.linspace(-pupilx, pupilx, M) * 0.99
     rho2 = torch.linspace(0, pupilx, rings + 1) * 0.99
     rho2 = rho2[1:]  # remove the central spot
-    phi2 = torch.linspace(0, 2 * pi, arms + 1)
+    phi2 = torch.linspace(0, 2 * np.pi, arms + 1)
     phi2 = phi2[:-1]
     RHO2, PHI2 = torch.meshgrid(rho2, phi2)
     X2, Y2 = RHO2 * torch.cos(PHI2), RHO2 * torch.sin(PHI2)

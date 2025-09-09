@@ -372,9 +372,9 @@ class Surface(DeepObj):
     def is_within_boundary(self, x, y):
         """Valid points within the boundary of the surface."""
         if self.is_square:
-            valid = (torch.abs(x) <= (self.w / 2)) & (torch.abs(y) <= (self.h / 2))
+            valid = (torch.abs(x) <= (self.w / 2 + EPSILON)) & (torch.abs(y) <= (self.h / 2 + EPSILON))
         else:
-            valid = (x**2 + y**2).sqrt() <= self.r
+            valid = (x**2 + y**2).sqrt() <= (self.r + EPSILON)
 
         return valid
 
@@ -403,18 +403,6 @@ class Surface(DeepObj):
         x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
         return self.sag(x, y)
-
-    def surface_with_offset(self, x, y, valid_check=True):
-        """Calculate z coordinate of the surface at (x, y).
-
-        This function is used in lens setup plotting.
-        """
-        x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
-        y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
-        if valid_check:
-            return self.sag(x, y) + self.d
-        else:
-            return self._sag(x, y) + self.d
 
     def surface_sag(self, x, y):
         """Calculate sag of the surface at (x, y)."""
@@ -471,10 +459,20 @@ class Surface(DeepObj):
         self.d_offset = float(torch.randn(1).item() * tolerance.get("d", 0.001))
 
     # =========================================
-    # Visualization
+    # Visualization (2D and 3D)
     # =========================================
+    def surface_with_offset(self, x, y, valid_check=True):
+        """Calculate z coordinate of the surface at (x, y)."""
+        if torch.is_tensor(x):
+            return self._sag(x, y) + self.d
+        else:
+            x = torch.tensor(x).to(self.device)
+            y = torch.tensor(y).to(self.device)
+            z = self._sag(x, y) + self.d
+            return z.cpu().numpy()        
+
     def draw_widget(self, ax, color="black", linestyle="solid"):
-        """Draw wedge for the surface on the plot."""
+        """Draw widget for the surface on the 2D plot."""
         r = torch.linspace(-self.r, self.r, 128, device=self.device)
         z = self.surface_with_offset(r, torch.zeros(len(r), device=self.device))
         ax.plot(
@@ -487,6 +485,7 @@ class Surface(DeepObj):
 
     def draw_widget3D(self, ax, color="lightblue", res=128):
         """Draw the surface in a 3D plot."""
+        raise Exception("draw_widget3D() is deprecated. Use get_mesh() instead.")
         if self.is_square:
             x = torch.linspace(-self.r, self.r, res, device=self.device)
             y = torch.linspace(-self.r, self.r, res, device=self.device)
@@ -555,6 +554,118 @@ class Surface(DeepObj):
 
         return surf
 
+    def get_mesh(self, n_rings=32, n_arms=128):
+        """Generate a triangulated mesh for the surface using angular sampling.
+        
+        Args:
+            n_rings (int): Number of concentric rings for sampling.
+            n_arms (int): Number of angular divisions.
+        
+        Returns:
+            self: The surface with generated mesh data.
+        """
+        # Store mesh parameters
+        self.n_rings = n_rings
+        self.n_arms = n_arms
+        
+        # Normal direction: -1 if next material is not air, 1 if next material is air
+        self.normal_direction = -1 if self.mat2.name != "air" else 1
+        
+        # Calculate mesh dimensions
+        self.n_vertices = n_rings * n_arms + 1  # center + ring vertices
+        self.n_faces = n_arms * (2 * n_rings - 1)  # center triangles + ring quads
+        
+        # Generate mesh data
+        self.vertices = self._generate_vertices()
+        self.faces = self._generate_faces()
+        self.rim = self._create_rim()
+        
+        return self
+    
+    def _generate_vertices(self):
+        """Generate vertices in radial pattern. Vertices will be used to plot the surface in PyVista."""
+        vertices = np.zeros((self.n_vertices, 3), dtype=np.float32)
+        
+        # Center vertex
+        vertices[0] = [0.0, 0.0, self.surface_with_offset(0.0, 0.0)]
+        
+        # Generate ring vertices
+        for i_ring in range(1, self.n_rings + 1):
+            r = self.r * i_ring / self.n_rings
+            
+            for j_arm in range(self.n_arms):
+                theta = 2 * np.pi * j_arm / self.n_arms
+                x = r * np.cos(theta)
+                y = r * np.sin(theta)
+                z = self.surface_with_offset(x, y)
+                
+                idx = 1 + (i_ring - 1) * self.n_arms + j_arm
+                vertices[idx] = [x, y, z]
+        
+        return vertices
+    
+    def _generate_faces(self):
+        """Generate triangular faces. Faces will be used to plot the surface in PyVista."""
+        faces = np.zeros((self.n_faces, 3), dtype=np.uint32)
+        
+        # Generate central triangles
+        for j in range(self.n_arms):
+            if self.normal_direction == 1:
+                faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
+            else:
+                # Flip winding order for opposite normal direction
+                faces[j] = [0, 1 + (j + 1) % self.n_arms, 1 + j]
+        
+        # Generate radial quads (2 triangles each)
+        face_idx = self.n_arms
+        
+        for i_ring in range(1, self.n_rings):
+            for j_arm in range(self.n_arms):
+                # Get indices for current ring
+                a = 1 + (i_ring - 1) * self.n_arms + j_arm
+                b = 1 + (i_ring - 1) * self.n_arms + (j_arm + 1) % self.n_arms
+                
+                # Get indices for next ring
+                c = 1 + i_ring * self.n_arms + j_arm
+                d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
+                
+                # Create two triangles per quad
+                if self.normal_direction == 1:
+                    faces[face_idx] = [a, c, b]
+                    faces[face_idx + 1] = [b, c, d]
+                else:
+                    # Flip winding order for opposite normal direction
+                    faces[face_idx] = [a, b, c]
+                    faces[face_idx + 1] = [b, d, c]
+                face_idx += 2
+        
+        return faces
+    
+    def _create_rim(self):
+        """Create rim (outer edge) vertices. Rims will be used to bridge two surfaces."""
+        if self.n_rings == 0:
+            return RimCurve(self.vertices[[0]], is_loop=False)
+        
+        # Get outer ring vertices
+        start_idx = 1 + (self.n_rings - 1) * self.n_arms
+        rim_vertices = self.vertices[start_idx:start_idx + self.n_arms]
+        return RimCurve(rim_vertices, is_loop=True)
+    
+    def get_poly_data(self):
+        """Get PyVista PolyData object from previously generated vertices and faces."""
+        try:
+            from pyvista import PolyData
+            # Format faces for PyVista (add face vertex count)
+            face_vertex_n = 3  # 3 vertices per triangle
+            formatted_faces = np.hstack([
+                face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), 
+                self.faces
+            ])
+            return PolyData(self.vertices, formatted_faces)
+        except ImportError:
+            raise ImportError("PyVista is required for get_poly_data()")
+
+
     # =========================================
     # IO
     # =========================================
@@ -574,3 +685,11 @@ class Surface(DeepObj):
         raise NotImplementedError(
             "zmx_str() is not implemented for {}".format(self.__class__.__name__)
         )
+
+class RimCurve:
+    """Simple curve class for surface rim, compatible with LineMesh interface."""
+    
+    def __init__(self, vertices, is_loop=False):
+        self.vertices = vertices.copy() if hasattr(vertices, 'copy') else np.array(vertices)
+        self.is_loop = is_loop
+        self.n_vertices = len(vertices)
