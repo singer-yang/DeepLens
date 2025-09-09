@@ -1,5 +1,6 @@
 import math
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -78,9 +79,33 @@ class MLPConv(nn.Module):
 
         # Decode the output using the CNN
         decoded = self.decoder(decoded_input)
-        # decoded = self.activation(decoded)
 
         # This normalization only works for PSF network
+        decoded = nn.Sigmoid()(decoded)
         decoded = F.normalize(decoded, p=1, dim=[-1, -2])
 
         return decoded
+
+
+if __name__ == "__main__":
+    # Test case
+    # Create a model with 4 input features and a 64x64 output
+    model = MLPConv(in_features=4, ks=64, channels=3)
+
+    # Create a dummy input tensor with batch size 1 and 4 features
+    # Shape: [batch_size, in_features]
+    input_tensor = torch.randn(1, 4)
+
+    # Get the model output
+    output_tensor = model(input_tensor)
+
+    # Print the shapes
+    print("Input shape:", input_tensor.shape)
+    print("Output shape:", output_tensor.shape)
+
+    # Verify the output shape
+    # Expected shape: [batch_size, channels, ks, ks]
+    assert output_tensor.shape == (1, 3, 64, 64)
+    print("Test passed!")
+
+
