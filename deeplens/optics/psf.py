@@ -423,8 +423,8 @@ def rotate_psf(psf, theta):
     rotation_matrices[:, 1, 1] = torch.cos(theta)
 
     # Rotate PSFs
-    grid = F.affine_grid(rotation_matrices, psf.shape, align_corners=False)
-    rotated_psf = F.grid_sample(psf, grid, align_corners=False)
+    grid = F.affine_grid(rotation_matrices, psf.shape, align_corners=True)
+    rotated_psf = F.grid_sample(psf, grid, align_corners=True)
 
     return rotated_psf
 

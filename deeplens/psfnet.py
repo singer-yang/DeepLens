@@ -18,13 +18,12 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
-from deeplens.lens import Lens
 from deeplens.geolens import GeoLens
-from deeplens.network.surrogate import MLP, PSFNet_MLPConv
-from deeplens.network.surrogate.psfnet_mplconv2 import PSFNet_MLPConv2
+from deeplens.lens import Lens
+from deeplens.network.surrogate import MLP
 from deeplens.network.surrogate.psfnet_mplconv3 import PSFNet_MLPConv3
-from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
 from deeplens.optics.basics import DEPTH
+from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
 
 
 class PSFNetLens(Lens):
@@ -37,6 +36,18 @@ class PSFNetLens(Lens):
         kernel_size=64,
         sensor_res=(2000, 3000),
     ):
+        """Initialize a PSF network lens.
+
+        In the default settings, the PSF network takes (fov, depth, foc_dist) as input and outputs RGB PSF on y-axis at (fov, depth, foc_dist).
+
+        Args:
+            lens_path (str): Path to the lens file.
+            in_chan (int): Number of input channels.
+            psf_chan (int): Number of output channels.
+            model_name (str): Name of the model.
+            kernel_size (int): Kernel size.
+            sensor_res (tuple): Sensor resolution.
+        """
         super().__init__()
 
         # Load lens
@@ -63,18 +74,15 @@ class PSFNetLens(Lens):
             f"Sensor pixel size is {self.lens.pixel_size * 1000} um, PSF kernel size is {self.kernel_size}."
         )
 
-        # There is a minimum focal distance for each lens.
-        # For example, the Canon EF 50mm lens can only focus to 0.5m and further.
-        self.foc_d_close = -500
-        self.foc_d_far = -20000
-        # self.foc_d_arr = (np.linspace(0, 1, 100)) ** 2 * (
-        #     self.foc_d_far - self.foc_d_close
-        # ) + self.foc_d_close
-        # self.foc_d_arr = np.round(self.foc_d_arr, 0)
-
-        # depth range
+        # Object depth range
         self.d_close = -200
         self.d_far = -20000
+
+        # Focus distance range
+        # There is a minimum focal distance for each lens. For example, the Canon EF 50mm lens can only focus to 0.5m and further.
+        self.foc_d_close = -500
+        self.foc_d_far = -20000
+        self.refocus(foc_dist=-20000)
 
     # ==================================================
     # Training functions
@@ -102,14 +110,6 @@ class PSFNetLens(Lens):
                 out_features=psf_chan * kernel_size**2,
                 hidden_features=256,
                 hidden_layers=8,
-            )
-        elif model_name == "mlpconv":
-            psfnet = PSFNet_MLPConv(
-                in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
-            )
-        elif model_name == "mlpconv2":
-            psfnet = PSFNet_MLPConv2(
-                in_chan=in_chan, kernel_size=kernel_size, out_chan=psf_chan
             )
         elif model_name == "mlpconv3":
             psfnet = PSFNet_MLPConv3(
@@ -156,7 +156,7 @@ class PSFNetLens(Lens):
         self,
         iters=100000,
         bs=128,
-        lr=5e-4,
+        lr=5e-5,
         evaluate_every=500,
         spp=16384,
         concentration_factor=2.0,
@@ -258,20 +258,18 @@ class PSFNetLens(Lens):
         foc_dist = torch.full((num_points,), foc_dist)
 
         # Sample (fov), [radians], range[0, hfov]
-        beta_values = torch.from_numpy(np.random.beta(4, 1, num_points)).float()  # Biased towards 1
+        beta_values = np.random.beta(4, 1, num_points)  # Biased towards 1
+        beta_values = torch.from_numpy(beta_values).float()
         fov = beta_values * hfov
 
         # Sample (depth), sample more points near the focus distance, [mm], range [d_far, d_close]
-        std_dev = (
-            -foc_dist / concentration_factor
-        )  # A smaller value concentrates points more tightly. Default is -foc_dist / 2.0
+        # A smaller std_dev value samples points more tightly
+        std_dev = -foc_dist / concentration_factor
         depth = foc_dist + torch.randn(num_points) * std_dev
         depth = torch.clamp(depth, d_far, d_close)
 
         # Create input tensor
-        sample_input = torch.stack(
-            [fov, depth / 1000.0, foc_dist / 1000.0], dim=1
-        )
+        sample_input = torch.stack([fov, depth / 1000.0, foc_dist / 1000.0], dim=1)
         sample_input = sample_input.to(self.device)
 
         # Calculate PSF by ray tracing, shape of [B, 3, ks, ks]
@@ -375,6 +373,9 @@ class PSFNetLens(Lens):
         psf_map = psf.reshape(grid[0], grid[1], 3, ks, ks)  # [grid, grid, 3, ks, ks]
         return psf_map
 
+    # ==================================================
+    # Image simulation
+    # ==================================================
     @torch.no_grad()
     def render_rgbd(self, img, depth, foc_dist, high_res=False):
         """Render image with aif image and depth map. Receive [N, C, H, W] image.
@@ -399,18 +400,11 @@ class PSFNetLens(Lens):
         x, y = x.unsqueeze(0).repeat(B, 1, 1), y.unsqueeze(0).repeat(B, 1, 1)
         x, y = x.to(img.device), y.to(img.device)
 
-        # =====>
-        # foc_dist = foc_dist.unsqueeze(-1).unsqueeze(-1).repeat(1, H, W)
-        # foc_z = self.depth2z(foc_dist)
-        # o = torch.stack((x, y, z, foc_z), -1).float()
-        # psf = self.pred_psf(o)
-        # =====>
-        o = torch.stack((x, y, z), -1).float()
+        points = torch.stack((x, y, z), -1).float()
         self.refocus(
             foc_dist.item() if isinstance(foc_dist, torch.Tensor) else foc_dist
         )
-        psf = self.psf_rgb(points=o)
-        # =====>
+        psf = self.psf_rgb(points=points)
 
         # Render image with per-pixel PSF convolution
         if high_res:
