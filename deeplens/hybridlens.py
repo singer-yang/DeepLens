@@ -71,7 +71,7 @@ class HybridLens(Lens):
     def read_lens_json(self, filename):
         """Read the lens from .json file."""
         # Load geolens
-        geolens = GeoLens(filename=filename)
+        geolens = GeoLens(filename=filename, device=self.device)
 
         # Load DOE (diffractive surface)
         with open(filename, "r") as f:
@@ -102,7 +102,7 @@ class HybridLens(Lens):
         # Update hybrid lens sensor resolution and pixel size
         self.set_sensor(sensor_size=geolens.sensor_size, sensor_res=geolens.sensor_res)
         self.to(self.device)
-        
+
     def write_lens_json(self, lens_path):
         """Write the lens into .json file."""
         geolens = self.geolens
@@ -353,6 +353,8 @@ class HybridLens(Lens):
                 entrance_pupil=True,
                 wvln=WAVE_RGB[2 - i],
             )
+            ray.prop_to(-1.0)
+            
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
             ax, fig = geolens.draw_ray_2d(
                 ray_o_record, ax=ax, fig=fig, color=color_list[i]

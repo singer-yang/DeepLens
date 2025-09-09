@@ -669,7 +669,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             and self.sensor_res[1] == img_obj.shape[-1]
         ):
             H, W = img_obj.shape[-2], img_obj.shape[-1]
-            self.set_sensor(sensor_res=(H, W), sensor_size=self.sensor_size)
+            self.set_sensor_res(sensor_res=(H, W))
 
         # Differentiable image simulation
         if method == "psf_map":
@@ -862,7 +862,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         sensor_res_original = self.sensor_res
         img = img2batch(img_org).to(self.device)
         # self.set_sensor(sensor_res=img.shape[-2:], sensor_size=self.sensor_size)
-        self.set_sensor(sensor_res=img.shape[-2:], r_sensor=self.r_sensor)
+        self.set_sensor_res(sensor_res=img.shape[-2:])
 
         # Image rendering
         img_render = self.render(img, depth=depth, method=method, spp=spp)
@@ -893,8 +893,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
                 save_image(img_render, f"{save_name}_unwarped.png")
 
         # Change the sensor resolution back
-        # self.set_sensor(sensor_res=sensor_res_original, sensor_size=self.sensor_size)
-        self.set_sensor(sensor_res=sensor_res_original, r_sensor=self.r_sensor)
+        self.set_sensor_res(sensor_res=sensor_res_original)
 
         return img_render
 
@@ -1896,24 +1895,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         self.surfaces[self.aper_idx].r = optim_aper_r
 
     @torch.no_grad()
-    def set_target_fov_fnum(self, hfov, fnum, foclen):
+    def set_target_fov_fnum(self, hfov, fnum):
         """Set FoV, ImgH and F number, only use this function to assign design targets.
 
         Args:
             hfov (float): half diagonal-FoV in radian.
             fnum (float): F number.
-            foclen (float): focal length in [mm].
         """
-        self.hfov = hfov
-        self.fnum = fnum
-        # ======>
-        # self.foclen = foclen
-        # ======>
-        self.foclen = self.r_sensor / math.tan(hfov)
-        # ======>
+        if hfov > math.pi:
+            self.hfov = hfov / 180.0 * math.pi
+        else:
+            self.hfov = hfov
 
+        self.foclen = self.r_sensor / math.tan(self.hfov)
+        self.fnum = fnum
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].update_r(float(aper_r))
+
 
     @torch.no_grad()
     def set_fov(self, hfov):
@@ -1924,56 +1922,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         """
         self.hfov = hfov
 
-    @torch.no_grad()
-    def set_sensor(self, sensor_res, sensor_size=None, r_sensor=None):
-        """Set four parameters of camera sensor: resolution, size, r_sensor and pixel size.
-
-        Args:
-            sensor_res: Resolution, pixel number.
-            sensor_size: Sensor size in [mm].
-            r_sensor: Sensor radius in [mm].
-        """
-        if sensor_size is not None:
-            assert r_sensor is None, (
-                "Sensor_size is provided, no need to provide r_sensor."
-            )
-            assert sensor_res[0] * sensor_size[1] == sensor_res[1] * sensor_size[0], (
-                "sensor_res and sensor_size are not consistent"
-            )
-
-            self.sensor_res = sensor_res
-            self.sensor_size = sensor_size
-            self.r_sensor = math.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2) / 2
-            self.pixel_size = sensor_size[0] / sensor_res[0]
-
-            self.update_float_setting()
-
-        elif r_sensor is not None:
-            assert sensor_size is None, (
-                "sensor_res and r_sensor are provided, no need to provide sensor_size."
-            )
-            if isinstance(sensor_res, int):
-                sensor_res = (sensor_res, sensor_res)
-            self.sensor_res = sensor_res
-            self.r_sensor = r_sensor
-            self.sensor_size = [
-                2
-                * self.r_sensor
-                * sensor_res[0]
-                / math.sqrt(sensor_res[0] ** 2 + sensor_res[1] ** 2),
-                2
-                * self.r_sensor
-                * sensor_res[1]
-                / math.sqrt(sensor_res[0] ** 2 + sensor_res[1] ** 2),
-            ]
-            self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
-
-            self.update_float_setting()
-
-        else:
-            raise ValueError(
-                "Either sensor_res or r_sensor must be provided, and both cannot be provided at the same time."
-            )
 
     @torch.no_grad()
     def prune_surf(self, expand_factor=None):
@@ -2315,7 +2263,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         self.r_sensor = data["r_sensor"]
 
         self.to(self.device)
-        self.set_sensor(sensor_res=sensor_res, r_sensor=self.r_sensor)
+        self.set_sensor_res(sensor_res=sensor_res)
 
     def write_lens_json(self, filename="./test.json"):
         """Write the lens into .json file."""
