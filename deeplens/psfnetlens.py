@@ -227,8 +227,6 @@ class PSFNetLens(Lens):
                 # Save network
                 self.save_psfnet(f"{result_dir}/PSFNet_last.pth")
 
-        self.save_psfnet(f"{result_dir}/PSFNet_{self.model_name}.pth")
-
     @torch.no_grad()
     def sample_training_data(self, num_points=512, concentration_factor=2.0):
         """Sample training data for PSF surrogate network.
@@ -377,13 +375,14 @@ class PSFNetLens(Lens):
     # Image simulation
     # ==================================================
     @torch.no_grad()
-    def render_rgbd(self, img, depth, foc_dist, high_res=False):
+    def render_rgbd(self, img, depth, foc_dist, ks=64, high_res=False):
         """Render image with aif image and depth map. Receive [N, C, H, W] image.
 
         Args:
             img (tensor): [1, C, H, W]
             depth (tensor): [1, H, W], depth map, unit in mm, range from [-20000, -200]
             foc_dist (tensor): [1], unit in mm, range from [-20000, -200]
+            ks (int): kernel size
             high_res (bool): whether to use high resolution rendering
 
         Returns:
@@ -392,19 +391,20 @@ class PSFNetLens(Lens):
         B, C, H, W = img.shape
         assert B == 1, "Only support batch size 1"
 
+        # Refocus the lens to the given focus distance
+        self.refocus(foc_dist)
+
         # Estimate PSF for each pixel
-        z = self.depth2z(depth).squeeze(1)
         x, y = torch.meshgrid(
-            torch.linspace(-1, 1, W), torch.linspace(1, -1, H), indexing="xy"
+            torch.linspace(-1, 1, W, device=self.device),
+            torch.linspace(1, -1, H, device=self.device),
+            indexing="xy",
         )
         x, y = x.unsqueeze(0).repeat(B, 1, 1), y.unsqueeze(0).repeat(B, 1, 1)
-        x, y = x.to(img.device), y.to(img.device)
+        depth = depth.squeeze(1) / 1000.0
 
-        points = torch.stack((x, y, z), -1).float()
-        self.refocus(
-            foc_dist.item() if isinstance(foc_dist, torch.Tensor) else foc_dist
-        )
-        psf = self.psf_rgb(points=points)
+        points = torch.stack((x, y, depth), -1).float()
+        psf = self.psf_rgb(points=points, ks=ks)
 
         # Render image with per-pixel PSF convolution
         if high_res:

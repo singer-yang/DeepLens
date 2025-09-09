@@ -202,11 +202,7 @@ class PSFNet_MLPConv(nn.Module):
         )
 
     def forward(self, x):
-        assert x[:, 0].abs().max() <= 1.1, "r should be in [-1, 1]"
-        assert x[:, 1].max() <= 0, "z should be <= 0"
-
-        latent = self.mlp(x)
-        psf = self.decoder(latent)
+        psf = self.decoder(self.mlp(x))
         return psf
 
 
