@@ -5,7 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Represent the PSF of a lens with a neural network. Surrogate model can accelerate the calculation of PSF compared to ray tracing.
+"""Represent the spatiallly varying PSF of a lens with a neural network. Surrogate model can accelerate the calculation of PSF compared to ray tracing.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, Mohammed Elhoseiny and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.
@@ -15,35 +15,51 @@ import os
 from datetime import datetime
 
 from deeplens.psfnet import PSFNetLens
-from deeplens.utils import set_logger, set_seed
+from deeplens.utils import set_logger
 
 result_dir = "./results/" + datetime.now().strftime("%m%d-%H%M%S") + "-PSFNet"
 os.makedirs(result_dir, exist_ok=True)
 set_logger(result_dir)
-set_seed(0)
 
 if __name__ == "__main__":
     # Init PSFNetLens
-    psfnet = PSFNetLens(
+    # Input (B, 3): (fov, depth, foc_dist)
+    # Output (B, 3, ks, ks): RGB PSF on y-axis at (fov, depth, foc_dist)
+    psfnet_lens = PSFNetLens(
+        in_chan=3,
+        psf_chan=3,
         lens_path="./lenses/camera/ef50mm_f1.8.json",
         model_name="mlpconv3",
-        sensor_res=(3000, 3000),
         kernel_size=128,
+        sensor_res=(3000, 3000),
     )
-    psfnet.lens.analysis(save_name=f"{result_dir}/lens")
-    psfnet.lens.write_lens_json(f"{result_dir}/lens.json")
+    psfnet_lens.lens.analysis(save_name=f"{result_dir}/lens")
+    psfnet_lens.lens.write_lens_json(f"{result_dir}/lens.json")
+    psfnet_lens.load_net("./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth")
 
-    # Train PSFNetLens
-    psfnet.load_net("./results/0901-174251-PSFNet/PSFNet_last.pth")
-    psfnet.train_psfnet(
-        iters=50000,
-        bs=256,
-        lr=1e-4,
+    # Draw example PSF map
+    psfnet_lens.refocus(-1200)
+    psfnet_lens.draw_psf_map(
+        save_name="./psf_map_net.png",
+        grid=(11, 11),
+        ks=64,
+        depth=-1500,
+        log_scale=False,
+    )
+    psfnet_lens.lens.draw_psf_map(
+        save_name="./psf_map_lens.png",
+        grid=(11, 11),
+        ks=64,
+        depth=-1500,
+        log_scale=False,
+    )
+
+    # Training
+    psfnet_lens.train_psfnet(
+        iters=10000,
         evaluate_every=100,
-        concentration_factor=4.0,
+        bs=128,
+        lr=5e-5,
         result_dir=result_dir,
     )
-
-    # Evaluate PSFNetLens
-    psfnet.evaluate_psf(result_dir=result_dir)
     print("Finish PSF net fitting.")
