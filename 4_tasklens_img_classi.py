@@ -1,15 +1,16 @@
-"""
-Task-driven lens design for image classification.
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
+"""Task-driven lens design for image classification.
 
 We design a lens with from scratch with only image-classification loss. This makes sure no classical lens design objective (spot size, PSF...) is used in the task-driven lens design. By doing this, we can explore "unseen" lens design space to find a lens that is optimal for a specific task, because we totally get rid of classical lens design!
 
 Technical Paper:
     Xinge Yang, Yunfeng Nie, Fu Qiang and Wolfgang Heidrich, "Image Quality Is Not All You Want: Task-Driven Lens Design for Image Classification" Arxiv preprint 2023.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import logging
@@ -22,12 +23,12 @@ import timm
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-import wandb
 import yaml
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
+import wandb
 from deeplens import GeoLens
 from deeplens.optics.psf import conv_psf
 from deeplens.utils import set_logger, set_seed
@@ -211,7 +212,7 @@ def validate(lens, net, epoch, args, val_loader):
         wandb.log({"classi_acc": acc})
 
 
-def train(args, lens:GeoLens, net):
+def train(args, lens: GeoLens, net):
     device = args["device"]
     result_dir = args["result_dir"]
     bs = args["train"]["bs"]
@@ -228,7 +229,7 @@ def train(args, lens:GeoLens, net):
     epochs = args["train"]["epochs"]
 
     # ==> Optimizer and scheduler
-    lens_optim = lens.get_optimizer(lr=lens_lrs)
+    lens_optim = lens.get_optimizer(lrs=lens_lrs)
     lens_sche = get_cosine_schedule_with_warmup(
         lens_optim, num_warmup_steps=500, num_training_steps=batchs * epochs
     )
@@ -252,7 +253,7 @@ def train(args, lens:GeoLens, net):
             net.eval()
             lens.correct_shape()
             lens.write_lens_json(f"{result_dir}/epoch{epoch}.json")
-            lens.analysis(f"{result_dir}/epoch{epoch}", render=False)
+            lens.analysis(f"{result_dir}/epoch{epoch}")
             validate(lens, net, epoch, args, val_loader)
 
         # =============================
@@ -317,9 +318,9 @@ def train(args, lens:GeoLens, net):
                 )
                 lens.correct_shape()
                 lens.write_lens_json(f"{result_dir}/epoch{epoch}_batch{ii}.json")
-                lens.analysis(f"{result_dir}/epoch{epoch}_batch{ii}", render=False)
+                lens.analysis(f"{result_dir}/epoch{epoch}_batch{ii}")
 
-        logging.info(f"Epoch{epoch+1} finishs.")
+        logging.info(f"Epoch{epoch + 1} finishs.")
 
 
 if __name__ == "__main__":
@@ -330,8 +331,8 @@ if __name__ == "__main__":
     lens.set_target_fov_fnum(
         hfov=args["lens"]["target_hfov"], fnum=args["lens"]["target_fnum"]
     )
-    lens.write_lens_json(f'{args["result_dir"]}/epoch0.json')
-    lens.analysis(f'{args["result_dir"]}/epoch0', render=False, zmx_format=True)
+    lens.write_lens_json(f"{args['result_dir']}/epoch0.json")
+    lens.analysis(f"{args['result_dir']}/epoch0", render=False)
 
     # Network
     net = get_network(args)
