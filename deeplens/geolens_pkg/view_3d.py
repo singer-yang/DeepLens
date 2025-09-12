@@ -14,22 +14,11 @@ from pyvista import Plotter, PolyData, merge
 
 from deeplens.optics import Ray
 from deeplens.optics.basics import DEFAULT_WAVE
-from deeplens.optics.geometric_surface import Aperture
 
-# ====================================================
-# Mesh classes
-#
-# (1) LineMesh
-#     (1.1) Curve
-#     (1.2) LineSeg
-#     (1.3) Circle
-#
-# (2) FaceMesh
-#     (2.1) RectangleMesh
-#     (2.2) ApertureMesh
-#     (2.3) HeightMapAngular
-# ====================================================
-
+# ==========================================================
+# Mesh class
+# (Surface mesh defined in the corresponding surface class)
+# ==========================================================
 
 class CrossPoly:
     def __init__(self):
@@ -80,61 +69,52 @@ class LineMesh(CrossPoly):
 
 
 class Curve(LineMesh):
+    """A curve mesh with vertices and lines. Currently used for ray meshes."""
+    
     def __init__(self, vertices: np.ndarray, is_loop: bool = None):
         n_vertices = vertices.shape[0]
         super().__init__(n_vertices, is_loop)
         self.vertices = vertices
 
 
-# class LineSeg(LineMesh):
-#     def __init__(self, origin: np.ndarray, direction: np.ndarray, length: float):
-#         self.origin = origin
-#         self.direction = direction
-#         self.length = length
-#         super().__init__(2, is_loop=False)
+class Circle(LineMesh):
+    """A circle mesh with normal direction and radius. The normal direciton is defined right-hand rule. Currently not used."""
+    
+    def __init__(self, n_vertices, origin, direction, radius):
+        self.direction = direction
+        self.radius = radius
+        self.origin = origin
+        super().__init__(n_vertices, is_loop=True)
 
-#     def create_data(self):
-#         self.vertices[0] = self.origin
-#         self.vertices[1] = self.origin + self.direction * self.length
+    def create_data(self):
+        # Normalize the direction vector
+        direction = np.array(self.direction, dtype=np.float32)
+        direction = direction / np.linalg.norm(direction)
 
+        # Find a vector that is not parallel to the direction
+        if np.abs(direction[0]) < 0.9:
+            v1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        else:
+            v1 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
-# class Circle(LineMesh):
-#     def __init__(self, n_vertices, origin, direction, radius):
-#         """A circle mesh with normal direction and radius. The normal direciton is defined right-hand rule."""
-#         self.direction = direction
-#         self.radius = radius
-#         self.origin = origin
-#         super().__init__(n_vertices, is_loop=True)
+        # Use cross product to get perpendicular vectors
+        u = np.cross(direction, v1)
+        u = u / np.linalg.norm(u)
+        v = np.cross(direction, u)
+        v = v / np.linalg.norm(v)
 
-#     def create_data(self):
-#         # Normalize the direction vector
-#         direction = np.array(self.direction, dtype=np.float32)
-#         direction = direction / np.linalg.norm(direction)
-
-#         # Find a vector that is not parallel to the direction
-#         if np.abs(direction[0]) < 0.9:
-#             v1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-#         else:
-#             v1 = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-
-#         # Use cross product to get perpendicular vectors
-#         u = np.cross(direction, v1)
-#         u = u / np.linalg.norm(u)
-#         v = np.cross(direction, u)
-#         v = v / np.linalg.norm(v)
-
-#         # Generate points on the circle
-#         origin = np.array(self.origin, dtype=np.float32)
-#         for i in range(self.n_vertices):
-#             angle = 2 * np.pi * i / self.n_vertices
-#             x = self.radius * (u[0] * np.cos(angle) + v[0] * np.sin(angle))
-#             y = self.radius * (u[1] * np.cos(angle) + v[1] * np.sin(angle))
-#             z = self.radius * (u[2] * np.cos(angle) + v[2] * np.sin(angle))
-#             self.vertices[i] = origin + np.array([x, y, z])
+        # Generate points on the circle
+        origin = np.array(self.origin, dtype=np.float32)
+        for i in range(self.n_vertices):
+            angle = 2 * np.pi * i / self.n_vertices
+            x = self.radius * (u[0] * np.cos(angle) + v[0] * np.sin(angle))
+            y = self.radius * (u[1] * np.cos(angle) + v[1] * np.sin(angle))
+            z = self.radius * (u[2] * np.cos(angle) + v[2] * np.sin(angle))
+            self.vertices[i] = origin + np.array([x, y, z])
 
 
 class FaceMesh(CrossPoly):
-    """A face mesh with vertices and faces."""
+    """A face mesh with vertices and faces. Currently used for bridge meshes."""
 
     def __init__(self, n_vertices: int, n_faces: int):
         self.n_vertices = n_vertices
@@ -167,6 +147,8 @@ class FaceMesh(CrossPoly):
 
 
 class RectangleMesh(FaceMesh):
+    """A rectangle mesh with vertices and faces. Currently used for sensor meshes."""
+    
     def __init__(
         self,
         center: np.ndarray,
@@ -211,102 +193,6 @@ class RectangleMesh(FaceMesh):
 
         self.faces[0] = [0, 1, 2]
         self.faces[1] = [0, 2, 3]
-
-
-# ApertureMesh class removed - apertures now use their own get_mesh() method
-
-
-# class HeightMapAngular(FaceMesh):
-#     """
-#     Triangulate a height map on a circular base with angular sampling
-#     """
-
-#     def __init__(self, radius: float, n_rings: int, n_arms: int, height_func: callable, normal_direction: int = 1):
-#         assert n_rings > 0 and n_arms > 2, "Invalid number of rings or arms"
-#         assert radius > 0, "Invalid radius"
-#         assert callable(height_func), "Invalid height function"
-#         assert normal_direction in [-1, 1], "Normal direction must be 1 (+z) or -1 (-z)"
-
-#         self.radius = radius
-#         self.n_rings = n_rings
-#         self.n_arms = n_arms
-#         self.height_func = height_func
-#         self.normal_direction = normal_direction  # 1 for +z, -1 for -z
-
-#         # Calculate correct grid parameters
-#         n_vertices = n_rings * n_arms + 1  # central + verteces on rings
-#         n_faces = n_arms * (2 * n_rings - 1)  # central + outer triangle
-
-#         super().__init__(n_vertices=n_vertices, n_faces=n_faces)
-
-#     def create_data(self):
-#         # Generate vertices
-#         self._generate_vertices()
-#         # Generate faces
-#         self._generate_faces()
-
-#     def _generate_vertices(self):
-#         # Center vertex
-#         self.vertices[0] = [0.0, 0.0, self.height_func(0.0, 0.0)]
-
-#         # Generate ring vertices
-#         for i_ring in range(1, self.n_rings + 1):
-#             r = self.radius * i_ring / self.n_rings
-
-#             for j_arm in range(self.n_arms):
-#                 theta = 2 * np.pi * j_arm / self.n_arms
-#                 x = r * np.cos(theta)
-#                 y = r * np.sin(theta)
-#                 z = self.height_func(x, y)
-
-#                 idx = 1 + (i_ring - 1) * self.n_arms + j_arm
-#                 self.vertices[idx] = [x, y, z]
-
-#     def _generate_faces(self):
-#         # Generate central triangles
-#         for j in range(self.n_arms):
-#             if self.normal_direction == 1:
-#                 self.faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
-#             else:
-#                 # Flip winding order for opposite normal direction
-#                 self.faces[j] = [0, 1 + (j + 1) % self.n_arms, 1 + j]
-
-#         # Generate radial quads
-#         face_idx = self.n_arms  # index start after central
-
-#         for i_ring in range(1, self.n_rings):
-#             for j_arm in range(self.n_arms):
-#                 # Get indices for current ring
-#                 a = 1 + (i_ring - 1) * self.n_arms + j_arm
-#                 b = 1 + (i_ring - 1) * self.n_arms + (j_arm + 1) % self.n_arms
-
-#                 # Get indices for next ring
-#                 c = 1 + i_ring * self.n_arms + j_arm
-#                 d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
-
-#                 # Create two triangles per quad
-#                 if self.normal_direction == 1:
-#                     self.faces[face_idx] = [a, c, b]
-#                     self.faces[face_idx + 1] = [b, c, d]
-#                 else:
-#                     # Flip winding order for opposite normal direction
-#                     self.faces[face_idx] = [a, b, c]
-#                     self.faces[face_idx + 1] = [b, d, c]
-#                 face_idx += 2
-
-#     def create_rim(self):
-#         """
-#         store the outer most verteces as a LineMesh
-#         """
-#         # if self.n_rings == 0:
-#         #     self.rim = np.array([0], dtype=np.uint32)
-#         # else:
-#         #     start_idx = 1 + (self.n_rings-1)*self.n_arms
-#         #     self.rim = start_idx + np.arange(self.n_arms)
-#         #     # rim is closed
-#         #     self.rim = np.append(self.rim, start_idx)
-#         start_idx = 1 + (self.n_rings - 1) * self.n_arms
-#         self.rim = Curve(self.vertices[start_idx:], is_loop=True)
 
 
 # ====================================================
@@ -387,47 +273,10 @@ def bridge(
     return face_mesh
 
 
-# def group_linemesh(meshes: List[PolyData]) -> PolyData:
-#     """
-#     Combine multiple line-based PolyData objects into a single PolyData.
-
-#     This function merges multiple PolyData objects containing lines into one
-#     cohesive PolyData object while preserving the line connectivity information.
-#     The vertex indices in the line connectivity arrays are adjusted to account
-#     for the combined vertex array.
-
-#     Args:
-#         meshes: List of PolyData objects to be combined
-
-#     Returns:
-#         A single PolyData object containing all vertices and lines
-#     """
-#     if not meshes:
-#         return None
-
-#     # Calculate vertex count offsets
-#     n_vertices = [mesh.n_points for mesh in meshes]
-#     vertex_offsets = np.cumsum([0] + n_vertices[:-1])
-
-#     # Combine all vertices
-#     combined_vertices = np.vstack([mesh.points for mesh in meshes])
-
-#     def offset_vertex(x: np.ndarray, offset):
-#         x = x.reshape(-1, 3)
-#         x[:, 1:] += offset
-#         return x
-
-#     # Combine all lines with adjusted vertices
-#     combined_lines = np.vstack(
-#         [offset_vertex(mesh.lines, vertex_offsets[i]) for i, mesh in enumerate(meshes)]
-#     )
-#     return PolyData(combined_vertices, lines=combined_lines)
-
-
-
 # ====================================================
 # Ray visualization
 # ====================================================
+
 def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
     """Convert a list of Curve objects to a list of PolyData objects.
 
@@ -438,6 +287,7 @@ def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
         List of PolyData objects
     """
     return [c.get_polydata() for c in meshes]
+
 
 def geolens_ray_poly(
     lens,
@@ -585,13 +435,12 @@ def curve_from_trace(lens, ray: Ray, delete_vignetting=True):
     return rays_curve
 
 
-
 # ====================================================
 # Mesh visualization
 # ====================================================
 
-
 class GeoLensVis3D:
+    """GeoLens utility class for visualizing the lens geometry and rays in 3D."""
     
     @staticmethod
     def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0):
@@ -605,6 +454,7 @@ class GeoLensVis3D:
         """
         poly = mesh.get_polydata() # PolyData object
         plotter.add_mesh(poly, color=color, opacity=opacity)
+
 
     def create_mesh(
         self,
