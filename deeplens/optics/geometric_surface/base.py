@@ -577,18 +577,23 @@ class Surface(DeepObj):
         # Center vertex
         vertices[0] = [0.0, 0.0, self.surface_with_offset(0.0, 0.0)]
         
-        # Generate ring vertices
-        for i_ring in range(1, n_rings + 1):
-            r = self.r * i_ring / n_rings
-            
-            for j_arm in range(n_arms):
-                theta = 2 * np.pi * j_arm / n_arms
-                x = r * np.cos(theta)
-                y = r * np.sin(theta)
-                z = self.surface_with_offset(x, y)
-                
-                idx = 1 + (i_ring - 1) * n_arms + j_arm
-                vertices[idx] = [x, y, z]
+        # Create meshgrid and flatten
+        rings_mesh, arms_mesh = np.meshgrid(
+            np.linspace(1, self.r, n_rings), 
+            np.linspace(0, 2 * np.pi, n_arms), 
+            indexing='ij')
+        rings_flat = rings_mesh.flatten()
+        arms_flat = arms_mesh.flatten()
+
+        # Calculate x, y, z coordinates
+        x_values = rings_flat * np.cos(arms_flat)
+        y_values = rings_flat * np.sin(arms_flat)
+        z_values = self.surface_with_offset(x_values, y_values)
+        
+        # Fill vertices array
+        vertices[1:, 0] = x_values
+        vertices[1:, 1] = y_values  
+        vertices[1:, 2] = z_values
         
         return vertices
     
@@ -598,7 +603,7 @@ class Surface(DeepObj):
         faces = np.zeros((n_faces, 3), dtype=np.uint32)
         normal_direction = -1 if self.mat2.name != "air" else 1
         
-        # Generate central triangles
+        # Create central triangles
         for j in range(n_arms):
             if normal_direction == 1:
                 faces[j] = [0, 1 + j, 1 + (j + 1) % n_arms]
@@ -606,12 +611,12 @@ class Surface(DeepObj):
                 # Flip winding order for opposite normal direction
                 faces[j] = [0, 1 + (j + 1) % n_arms, 1 + j]
         
-        # Generate radial quads (2 triangles each)
+        # Create radial quads (2 triangles each)
         face_idx = n_arms
         
         for i_ring in range(1, n_rings):
             for j_arm in range(n_arms):
-                # Get indices for current ring
+                # Get indices for current ring vertices
                 a = 1 + (i_ring - 1) * n_arms + j_arm
                 b = 1 + (i_ring - 1) * n_arms + (j_arm + 1) % n_arms
                 
