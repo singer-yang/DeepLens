@@ -28,6 +28,7 @@ from deeplens.geolens_pkg.eval import GeoLensEval
 from deeplens.geolens_pkg.io import GeoLensIO
 from deeplens.geolens_pkg.optim import GeoLensOptim
 from deeplens.geolens_pkg.vis import GeoLensVis
+from deeplens.geolens_pkg.view_3d import GeoLensVis3D
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
@@ -67,7 +68,7 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensVis3D):
     def __init__(
         self,
         filename=None,

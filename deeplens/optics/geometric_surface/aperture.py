@@ -89,6 +89,23 @@ class Aperture(Surface):
         line = ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.5)
 
         return line
+
+    def create_mesh(self, n_rings=32, n_arms=128, color=[0.0, 0.0, 0.0]):
+        """Create triangulated surface mesh.
+        
+        Args:
+            n_rings (int): Number of concentric rings for sampling.
+            n_arms (int): Number of angular divisions.
+            color (List[float]): The color of the mesh.
+        
+        Returns:
+            self: The surface with mesh data.
+        """
+        self.vertices = self._create_vertices(n_rings, n_arms)
+        self.faces = self._create_faces(n_rings, n_arms)
+        self.rim = self._create_rim(n_rings, n_arms)
+        self.mesh_color = color
+        return self
     
     def _create_vertices(self, n_rings, n_arms):
         """Generate vertices for two-ring aperture (inner and outer rings)."""
