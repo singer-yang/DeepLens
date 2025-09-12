@@ -554,83 +554,73 @@ class Surface(DeepObj):
 
         return surf
 
-    def get_mesh(self, n_rings=32, n_arms=128):
-        """Generate a triangulated mesh for the surface using angular sampling.
+    def create_mesh(self, n_rings=32, n_arms=128):
+        """Create triangulated surface mesh.
         
         Args:
             n_rings (int): Number of concentric rings for sampling.
             n_arms (int): Number of angular divisions.
         
         Returns:
-            self: The surface with generated mesh data.
+            self: The surface with mesh data.
         """
-        # Store mesh parameters
-        self.n_rings = n_rings
-        self.n_arms = n_arms
-        
-        # Normal direction: -1 if next material is not air, 1 if next material is air
-        self.normal_direction = -1 if self.mat2.name != "air" else 1
-        
-        # Calculate mesh dimensions
-        self.n_vertices = n_rings * n_arms + 1  # center + ring vertices
-        self.n_faces = n_arms * (2 * n_rings - 1)  # center triangles + ring quads
-        
-        # Generate mesh data
-        self.vertices = self._generate_vertices()
-        self.faces = self._generate_faces()
-        self.rim = self._create_rim()
-        
+        self.vertices = self._create_vertices(n_rings, n_arms)
+        self.faces = self._create_faces(n_rings, n_arms)
+        self.rim = self._create_rim(n_rings, n_arms)
         return self
     
-    def _generate_vertices(self):
-        """Generate vertices in radial pattern. Vertices will be used to plot the surface in PyVista."""
-        vertices = np.zeros((self.n_vertices, 3), dtype=np.float32)
+    def _create_vertices(self, n_rings, n_arms):
+        """Create vertices in radial pattern. Vertices will be used to plot the surface in PyVista."""
+        n_vertices = n_rings * n_arms + 1
+        vertices = np.zeros((n_vertices, 3), dtype=np.float32)
         
         # Center vertex
         vertices[0] = [0.0, 0.0, self.surface_with_offset(0.0, 0.0)]
         
         # Generate ring vertices
-        for i_ring in range(1, self.n_rings + 1):
-            r = self.r * i_ring / self.n_rings
+        for i_ring in range(1, n_rings + 1):
+            r = self.r * i_ring / n_rings
             
-            for j_arm in range(self.n_arms):
-                theta = 2 * np.pi * j_arm / self.n_arms
+            for j_arm in range(n_arms):
+                theta = 2 * np.pi * j_arm / n_arms
                 x = r * np.cos(theta)
                 y = r * np.sin(theta)
                 z = self.surface_with_offset(x, y)
                 
-                idx = 1 + (i_ring - 1) * self.n_arms + j_arm
+                idx = 1 + (i_ring - 1) * n_arms + j_arm
                 vertices[idx] = [x, y, z]
         
         return vertices
     
-    def _generate_faces(self):
-        """Generate triangular faces. Faces will be used to plot the surface in PyVista."""
-        faces = np.zeros((self.n_faces, 3), dtype=np.uint32)
+    def _create_faces(self, n_rings, n_arms):
+        """Create triangular faces. Faces will be used to plot the surface in PyVista."""
+        n_faces = n_arms * (2 * n_rings - 1)
+        faces = np.zeros((n_faces, 3), dtype=np.uint32)
+        normal_direction = -1 if self.mat2.name != "air" else 1
         
         # Generate central triangles
-        for j in range(self.n_arms):
-            if self.normal_direction == 1:
-                faces[j] = [0, 1 + j, 1 + (j + 1) % self.n_arms]
+        for j in range(n_arms):
+            if normal_direction == 1:
+                faces[j] = [0, 1 + j, 1 + (j + 1) % n_arms]
             else:
                 # Flip winding order for opposite normal direction
-                faces[j] = [0, 1 + (j + 1) % self.n_arms, 1 + j]
+                faces[j] = [0, 1 + (j + 1) % n_arms, 1 + j]
         
         # Generate radial quads (2 triangles each)
-        face_idx = self.n_arms
+        face_idx = n_arms
         
-        for i_ring in range(1, self.n_rings):
-            for j_arm in range(self.n_arms):
+        for i_ring in range(1, n_rings):
+            for j_arm in range(n_arms):
                 # Get indices for current ring
-                a = 1 + (i_ring - 1) * self.n_arms + j_arm
-                b = 1 + (i_ring - 1) * self.n_arms + (j_arm + 1) % self.n_arms
+                a = 1 + (i_ring - 1) * n_arms + j_arm
+                b = 1 + (i_ring - 1) * n_arms + (j_arm + 1) % n_arms
                 
                 # Get indices for next ring
-                c = 1 + i_ring * self.n_arms + j_arm
-                d = 1 + i_ring * self.n_arms + (j_arm + 1) % self.n_arms
+                c = 1 + i_ring * n_arms + j_arm
+                d = 1 + i_ring * n_arms + (j_arm + 1) % n_arms
                 
                 # Create two triangles per quad
-                if self.normal_direction == 1:
+                if normal_direction == 1:
                     faces[face_idx] = [a, c, b]
                     faces[face_idx + 1] = [b, c, d]
                 else:
@@ -641,14 +631,14 @@ class Surface(DeepObj):
         
         return faces
     
-    def _create_rim(self):
+    def _create_rim(self, n_rings, n_arms):
         """Create rim (outer edge) vertices. Rims will be used to bridge two surfaces."""
-        if self.n_rings == 0:
+        if n_rings == 0:
             return RimCurve(self.vertices[[0]], is_loop=False)
         
         # Get outer ring vertices
-        start_idx = 1 + (self.n_rings - 1) * self.n_arms
-        rim_vertices = self.vertices[start_idx:start_idx + self.n_arms]
+        start_idx = 1 + (n_rings - 1) * n_arms
+        rim_vertices = self.vertices[start_idx:start_idx + n_arms]
         return RimCurve(rim_vertices, is_loop=True)
     
     def get_poly_data(self):
@@ -658,7 +648,7 @@ class Surface(DeepObj):
             # Format faces for PyVista (add face vertex count)
             face_vertex_n = 3  # 3 vertices per triangle
             formatted_faces = np.hstack([
-                face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), 
+                face_vertex_n * np.ones((self.faces.shape[0], 1), dtype=np.uint32), 
                 self.faces
             ])
             return PolyData(self.vertices, formatted_faces)

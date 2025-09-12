@@ -620,15 +620,13 @@ def generate_poly(
     # Generate the surface meshes
     for i, surf in enumerate(lens.surfaces):
         if isinstance(surf, Aperture):
-            aperture_mesh = surf.get_mesh(n_arms=mesh_arms)
+            aperture_mesh = surf.create_mesh(n_arms=mesh_arms)
             aper_poly.append(aperture_mesh)
 
         else:
             if i < n_surf - 1 and surf.mat2.name != "air":
                 bridge_idx.append([i, i + 1])
-
-            # Use the surface's own get_mesh method
-            surf_poly[i] = surf.get_mesh(n_rings=mesh_rings, n_arms=mesh_arms)
+            surf_poly[i] = surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms)
 
     # Generate the bridge meshes
     for i, pair in enumerate(bridge_idx):
