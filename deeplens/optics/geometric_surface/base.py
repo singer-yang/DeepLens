@@ -645,18 +645,18 @@ class Surface(DeepObj):
         start_idx = 1 + (n_rings - 1) * n_arms
         rim_vertices = self.vertices[start_idx:start_idx + n_arms]
         return RimCurve(rim_vertices, is_loop=True)
-    
-    def get_poly_data(self):
+        
+    def get_polydata(self):
         """Get PyVista PolyData object from previously generated vertices and faces."""
         try:
             from pyvista import PolyData
-            # Format faces for PyVista (add face vertex count)
-            face_vertex_n = 3  # 3 vertices per triangle
+            face_vertex_n = 3  # vertices per triangle
             formatted_faces = np.hstack([
                 face_vertex_n * np.ones((self.faces.shape[0], 1), dtype=np.uint32), 
                 self.faces
             ])
             return PolyData(self.vertices, formatted_faces)
+        
         except ImportError:
             raise ImportError("PyVista is required for get_poly_data()")
 
