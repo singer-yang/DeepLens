@@ -18,7 +18,7 @@ from deeplens.optics.basics import DEFAULT_WAVE
 from deeplens.optics.geometric_surface import Aperture
 
 # ====================================================
-# Polydata classes
+# Mesh classes
 #
 # (1) LineMesh
 #     (1.1) Curve
@@ -36,7 +36,7 @@ class CrossPoly:
     def __init__(self):
         pass
 
-    def get_poly_data(self) -> PolyData:
+    def get_polydata(self) -> PolyData:
         pass
 
     def get_obj_data(self):
@@ -50,10 +50,8 @@ class CrossPoly:
             color: List[float]. The color of the mesh.
             opacity: float. The opacity of the mesh.
         """
-        poly = self.get_poly_data()
-        # Shade each points
-        n_v = poly.n_points
-        poly["colors"] = np.vstack([color] * n_v)
+        poly = self.get_polydata()
+        poly["colors"] = np.vstack([color] * poly.n_points)
         plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
 
 
@@ -74,7 +72,7 @@ class LineMesh(CrossPoly):
         self.n_vertices = self.vertices.shape[0]
         return None
 
-    def get_poly_data(self):
+    def get_polydata(self):
         n_line = 0 if self.is_loop else -1
         n_line += self.n_vertices
         line = [[2, i, (i + 1) % self.n_vertices] for i in range(n_line)]
@@ -158,7 +156,10 @@ class FaceMesh(CrossPoly):
     def create_rim(self):
         pass
 
-    def get_poly_data(self) -> PolyData:
+    def get_mesh(self):
+        return self.get_polydata()
+
+    def get_polydata(self) -> PolyData:
         face_vertex_n = 3  # 3 vertices per face
         face = np.hstack(
             [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
@@ -310,23 +311,21 @@ class RectangleMesh(FaceMesh):
 
 
 # ====================================================
-# Polydata utils
+# Mesh utils
 # ====================================================
-
 
 def bridge(
     l_a: LineMesh,
     l_b: LineMesh,
 ) -> FaceMesh:
-    """
-    Bridge two curves/loops with triangulated faces.
-    ## Parameters
-    - l_a : np.ndarray, shape (n_a, 3).
-        The first curve/loop.
-    - l_b : np.ndarray, shape (n_b, 3).
-        The second curve/loop.
-    ## Returns
-    - FaceMesh. Return the triangulated faces.
+    """Bridge two curves with triangulated faces.
+    
+    Args:
+        l_a : np.ndarray, shape (n_a, 3). The first curve.
+        l_b : np.ndarray, shape (n_b, 3). The second curve.
+    
+    Returns:
+        face_mesh (FaceMesh): FaceMesh. Triangulated faces.
     """
     # Check if both lines are loops or both are open
     if l_a.is_loop ^ l_b.is_loop:
@@ -389,6 +388,47 @@ def bridge(
     return face_mesh
 
 
+# def group_linemesh(meshes: List[PolyData]) -> PolyData:
+#     """
+#     Combine multiple line-based PolyData objects into a single PolyData.
+
+#     This function merges multiple PolyData objects containing lines into one
+#     cohesive PolyData object while preserving the line connectivity information.
+#     The vertex indices in the line connectivity arrays are adjusted to account
+#     for the combined vertex array.
+
+#     Args:
+#         meshes: List of PolyData objects to be combined
+
+#     Returns:
+#         A single PolyData object containing all vertices and lines
+#     """
+#     if not meshes:
+#         return None
+
+#     # Calculate vertex count offsets
+#     n_vertices = [mesh.n_points for mesh in meshes]
+#     vertex_offsets = np.cumsum([0] + n_vertices[:-1])
+
+#     # Combine all vertices
+#     combined_vertices = np.vstack([mesh.points for mesh in meshes])
+
+#     def offset_vertex(x: np.ndarray, offset):
+#         x = x.reshape(-1, 3)
+#         x[:, 1:] += offset
+#         return x
+
+#     # Combine all lines with adjusted vertices
+#     combined_lines = np.vstack(
+#         [offset_vertex(mesh.lines, vertex_offsets[i]) for i, mesh in enumerate(meshes)]
+#     )
+#     return PolyData(combined_vertices, lines=combined_lines)
+
+
+
+# ====================================================
+# Ray visualization
+# ====================================================
 def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
     """Convert a list of Curve objects to a list of PolyData objects.
 
@@ -398,254 +438,7 @@ def curve_list_to_polydata(meshes: List[Curve]) -> List[PolyData]:
     Returns:
         List of PolyData objects
     """
-    return [c.get_poly_data() for c in meshes]
-
-
-def group_linemesh(meshes: List[PolyData]) -> PolyData:
-    """
-    Combine multiple line-based PolyData objects into a single PolyData.
-
-    This function merges multiple PolyData objects containing lines into one
-    cohesive PolyData object while preserving the line connectivity information.
-    The vertex indices in the line connectivity arrays are adjusted to account
-    for the combined vertex array.
-
-    ## Parameters:
-
-    - meshes: List of PolyData objects to be combined
-
-    ## Returns:
-
-    - A single PolyData object containing all vertices and lines
-    """
-    if not meshes:
-        return None
-
-    # Calculate vertex count offsets
-    n_vertices = [mesh.n_points for mesh in meshes]
-    vertex_offsets = np.cumsum([0] + n_vertices[:-1])
-
-    # Combine all vertices
-    combined_vertices = np.vstack([mesh.points for mesh in meshes])
-
-    def offset_vertex(x: np.ndarray, offset):
-        x = x.reshape(-1, 3)
-        x[:, 1:] += offset
-        return x
-
-    # Combine all lines with adjusted vertices
-    combined_lines = np.vstack(
-        [offset_vertex(mesh.lines, vertex_offsets[i]) for i, mesh in enumerate(meshes)]
-    )
-    return PolyData(combined_vertices, lines=combined_lines)
-
-
-# ====================================================
-# Polygon visualization
-# ====================================================
-
-
-def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0):
-    """Draw a mesh to the plotter.
-
-    Args:
-        plotter: Plotter
-        mesh: CrossPoly
-        color: List[float]. The color of the mesh.
-        opacity: float. The opacity of the mesh (0.0 = transparent, 1.0 = opaque).
-    """
-    poly = mesh.get_poly_data()
-    # shade each points
-    n_v = poly.n_points
-    poly["colors"] = np.vstack([color] * n_v)
-    plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
-
-
-def draw_lens_3d(
-    lens: GeoLens,
-    save_dir: str = None,
-    mesh_rings: int = 32,
-    mesh_arms: int = 128,
-    surface_color: List[float] = [0.06, 0.3, 0.6],
-    show_rays: bool = True,
-    fovs: List[float] = [0.0],
-    fov_phis: List[float] = [0.0],
-    ray_rings: int = 6,
-    ray_arms: int = 8,
-):
-    """Draw lens 3D layout with rays using pyvista.
-
-    Args:
-        lens (GeoLens): The lens object.
-        save_dir (str): The directory to save the image.
-        mesh_rings (int): The number of rings in the mesh.
-        mesh_arms (int): The number of arms in the mesh.
-        surface_color (List[float]): The color of the surfaces.
-        show_rays (bool): Whether to show the rays.
-        fovs (List[float]): The FoV angles to be sampled, unit: degree.
-        fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
-        ray_rings (int): The number of pupil rings to be sampled.
-        ray_arms (int): The number of pupil arms to be sampled.
-    """
-    plotter = Plotter(window_size=(3840, 2160), off_screen=True)
-    plotter.camera.up = [0, 1, 0]
-    unit = lens.d_sensor.item()
-    plotter.camera.position = [-2 * unit, unit, -unit / 2]
-    plotter.camera.focal_point = [0, 0, unit / 2]
-
-    # Generate Gelens surfaces & bridges meshes
-    surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
-        lens, mesh_rings, mesh_arms
-    )
-
-    # Render the surfaces
-    surf_color_rgb = np.array(surface_color) * 255
-    surf_color_rgb = surf_color_rgb.astype(np.uint8)
-
-    for surf in surf_poly:
-        if surf is not None:
-            draw_mesh(plotter, surf, color=surf_color_rgb, opacity=0.5)
-
-    for bridge in bridge_poly:
-        draw_mesh(plotter, bridge, color=surf_color_rgb, opacity=0.5)
-
-    for aper in aper_poly:
-        draw_mesh(plotter, aper, color=[128, 128, 128], opacity=0.1)
-
-    draw_mesh(plotter, sensor_poly, color=[128, 128, 128], opacity=1.0)
-
-    # Render the rays
-    if show_rays:
-        rays_curve = geolens_ray_poly(
-            lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
-        )
-        rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
-        rays_poly_fov = [merge(r) for r in rays_poly_list]
-        for r in rays_poly_fov:
-            plotter.add_mesh(r)
-
-    # Save images
-    if save_dir is not None:
-        os.makedirs(save_dir, exist_ok=True)
-        plotter.screenshot(os.path.join(save_dir, "lens_3d_vis.png"), return_img=False)
-
-
-def save_lens_obj(
-    lens: GeoLens,
-    save_dir: str,
-    mesh_rings: int = 32,
-    mesh_arms: int = 128,
-    save_rays: bool = False,
-    fovs: List[float] = [0.0],
-    fov_phis: List[float] = [0.0],
-    ray_rings: int = 6,
-    ray_arms: int = 8,
-):
-    """Save lens geometry and rays as .obj files using pyvista.
-    
-    Args:
-        lens (GeoLens): The lens object.
-        save_dir (str): The directory to save the image.
-        mesh_rings (int): The number of rings in the mesh.
-        mesh_arms (int): The number of arms in the mesh.
-        save_rays (bool): Whether to save the rays.
-        fovs (List[float]): The FoV angles to be sampled, unit: degree.
-        fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
-        ray_rings (int): The number of pupil rings to be sampled.
-        ray_arms (int): The number of pupil arms to be sampled.
-    """
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Generate Gelens surfaces & bridges meshes
-    surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
-        lens, mesh_rings, mesh_arms
-    )
-
-    # Merge and save meshes
-    surf_poly_data = [surf.get_poly_data() for surf in surf_poly if surf is not None]
-    bridge_poly_data = [
-        bridge.get_poly_data() for bridge in bridge_poly if bridge is not None
-    ]
-
-    # Merge surfaces and bridges into lens elements
-    lens_elements_data = surf_poly_data + bridge_poly_data
-    merged_lens_elements = merge(lens_elements_data)
-
-    merged_aper_poly = merge(
-        [aper.get_poly_data() for aper in aper_poly if aper is not None]
-    )
-    merged_sensor_poly = sensor_poly.get_poly_data()
-
-    merged_lens_elements.save(os.path.join(save_dir, "lens_elements.obj"))
-    merged_aper_poly.save(os.path.join(save_dir, "lens_aper.obj"))
-    merged_sensor_poly.save(os.path.join(save_dir, "lens_sensor.obj"))
-
-    # Generate and save rays
-    if save_rays:
-        rays_curve = geolens_ray_poly(
-            lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
-        )
-        rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
-        rays_poly_fov = [merge(r) for r in rays_poly_list]
-        for i, r in enumerate(rays_poly_fov):
-            r.save(os.path.join(save_dir, f"lens_rays_fov_{i}.obj"))
-
-
-def generate_poly(
-    lens: GeoLens,
-    mesh_rings: int = 32,
-    mesh_arms: int = 128,
-) -> List[CrossPoly]:
-    """Generate the lens/bridge/sensor/aperture meshes. The meshes are generated using the height map method.
-
-    Args:
-        lens (GeoLens): The lens object.
-        mesh_rings (int): The number of rings in the mesh.
-        mesh_arms (int): The number of arms in the mesh.
-
-    Returns:
-        surf_poly (List[Surface]): The surface meshes.
-        bridge_poly (List[FaceMesh]): The bridge meshes. (NOT support wrap around for now)
-        sensor_poly (RectangleMesh): The sensor meshes. (only support rectangular sensor for now)
-        aper_poly (List[ApertureMesh]): The aperture meshes.
-    """
-    n_surf = len(lens.surfaces)
-
-    surf_poly = [None for _ in range(n_surf)]
-    bridge_idx = []
-    bridge_poly = []
-    aper_poly = []
-    sensor_poly = None
-
-    # Generate the surface meshes
-    for i, surf in enumerate(lens.surfaces):
-        if isinstance(surf, Aperture):
-            aperture_mesh = surf.create_mesh(n_arms=mesh_arms)
-            aper_poly.append(aperture_mesh)
-
-        else:
-            if i < n_surf - 1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i + 1])
-            surf_poly[i] = surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms)
-
-    # Generate the bridge meshes
-    for i, pair in enumerate(bridge_idx):
-        a_idx, b_idx = pair
-        a = surf_poly[a_idx]
-        b = surf_poly[b_idx]
-        bridge_mesh = bridge(a.rim, b.rim)
-        bridge_poly.append(bridge_mesh)
-
-    # Generate the sensor mesh
-    sensor_d = lens.d_sensor.item()
-    sensor_r = lens.r_sensor
-    h, w = sensor_r * 1.4142, sensor_r * 1.4142
-    sensor_poly = RectangleMesh(
-        np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
-    )
-
-    return surf_poly, bridge_poly, sensor_poly, aper_poly
-
+    return [c.get_polydata() for c in meshes]
 
 def geolens_ray_poly(
     lens: GeoLens,
@@ -659,21 +452,16 @@ def geolens_ray_poly(
     Hx, Hy = fov * cos(fov_phi), fov * sin(fov_phi).\\
     Px, Py are sampled using Zemax like rings & arms method.\\
         
-    ## Parameters
-    - lens: GeoLens
-        The lens object.
-    - fovs: List[float]
-        FoV angles to be sampled, unit: degree.
-    - fov_phis: List[float]
-        FoV azimuthal angles to be sampled, unit: degree.
-    - n_rings: int
-        Number of pupil rings to be sampled.
-    - n_arms: int
-        Number of pupil arms to be sampled.
+    Args:
+        lens: GeoLens. The lens object.
+        fovs: List[float]. FoV angles to be sampled, unit: degree.
+        fov_phis: List[float]. FoV azimuthal angles to be sampled, unit: degree.
+        n_rings: int. Number of pupil rings to be sampled.
+        n_arms: int. Number of pupil arms to be sampled.
     
-    ## Returns
-    - rays_poly: List[List[Curve]]
-        Traced ray represented by curves. Each FoV coord is a List[Curve].
+    Returns:
+        rays_poly: List[List[Curve]]. Traced ray represented by curves. Each FoV coord is a List[Curve].
+        (num_fovs, num_fov_phis, num_rays, 3)
     """
     rays_poly = []
 
@@ -739,7 +527,7 @@ def sample_parallel_3D(
     rho2 = rho2[1:]  # remove the central spot
     phi2 = torch.linspace(0, 2 * np.pi, arms + 1)
     phi2 = phi2[:-1]
-    RHO2, PHI2 = torch.meshgrid(rho2, phi2)
+    RHO2, PHI2 = torch.meshgrid(rho2, phi2, indexing="ij")
     X2, Y2 = RHO2 * torch.cos(PHI2), RHO2 * torch.sin(PHI2)
     x2, y2 = torch.flatten(X2), torch.flatten(Y2)
 
@@ -796,3 +584,210 @@ def curve_from_trace(lens: GeoLens, ray: Ray, delete_vignetting=True):
         curve = Curve(record, False)
         rays_curve.append(curve)
     return rays_curve
+
+
+
+# ====================================================
+# Mesh visualization
+# ====================================================
+
+def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0):
+    """Draw a mesh to the plotter.
+
+    Args:
+        plotter: Plotter
+        mesh: CrossPoly
+        color: List[float]. The color of the mesh.
+        opacity: float. The opacity of the mesh (0.0 = transparent, 1.0 = opaque).
+    """
+    poly = mesh.get_polydata() # PolyData object
+    poly["colors"] = np.vstack([color] * poly.n_points)
+    
+    plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
+
+
+def generate_poly(
+    lens: GeoLens,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+):
+    """Create all lens/bridge/sensor/aperture meshes.
+
+    Args:
+        lens (GeoLens): The lens object.
+        mesh_rings (int): The number of rings in the mesh.
+        mesh_arms (int): The number of arms in the mesh.
+
+    Returns:
+        surf_poly (List[Surface]): The surface meshes.
+        bridge_poly (List[FaceMesh]): The bridge meshes. (NOT support wrap around for now)
+        sensor_poly (RectangleMesh): The sensor meshes. (only support rectangular sensor for now)
+        aper_poly (List[ApertureMesh]): The aperture meshes.
+    """
+    n_surf = len(lens.surfaces)
+
+    surf_poly = [None for _ in range(n_surf)]
+    bridge_idx = []
+    bridge_poly = []
+    aper_poly = []
+    sensor_poly = None
+
+    # Generate the surface meshes
+    for i, surf in enumerate(lens.surfaces):
+        if isinstance(surf, Aperture):
+            aperture_mesh = surf.create_mesh(n_arms=mesh_arms)
+            aper_poly.append(aperture_mesh)
+
+        else:
+            if i < n_surf - 1 and surf.mat2.name != "air":
+                bridge_idx.append([i, i + 1])
+            surf_poly[i] = surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms)
+
+    # Generate the bridge meshes
+    for i, pair in enumerate(bridge_idx):
+        a_idx, b_idx = pair
+        a = surf_poly[a_idx]
+        b = surf_poly[b_idx]
+        bridge_mesh = bridge(a.rim, b.rim)
+        bridge_poly.append(bridge_mesh)
+
+    # Generate the sensor mesh
+    sensor_d = lens.d_sensor.item()
+    sensor_r = lens.r_sensor
+    h, w = sensor_r * 1.4142, sensor_r * 1.4142
+    sensor_poly = RectangleMesh(
+        np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
+    )
+
+    return surf_poly, bridge_poly, sensor_poly, aper_poly
+
+
+def draw_lens_3d(
+    lens: GeoLens,
+    save_dir: str = None,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+    surface_color: List[float] = [0.06, 0.3, 0.6],
+    draw_rays: bool = True,
+    fovs: List[float] = [0.0],
+    fov_phis: List[float] = [0.0],
+    ray_rings: int = 6,
+    ray_arms: int = 8,
+):
+    """Draw lens 3D layout with rays using pyvista.
+
+    Args:
+        lens (GeoLens): The lens object.
+        save_dir (str): The directory to save the image.
+        mesh_rings (int): The number of rings in the mesh.
+        mesh_arms (int): The number of arms in the mesh.
+        surface_color (List[float]): The color of the surfaces.
+        draw_rays (bool): Whether to show the rays.
+        fovs (List[float]): The FoV angles to be sampled, unit: degree.
+        fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
+        ray_rings (int): The number of pupil rings to be sampled.
+        ray_arms (int): The number of pupil arms to be sampled.
+    """
+    surf_color = (np.array(surface_color) * 255).astype(np.uint8)
+
+    # Initialize the plotter
+    plotter = Plotter(window_size=(3840, 2160), off_screen=True)
+    plotter.camera.up = [0, 1, 0]
+    unit = lens.d_sensor.item()
+    plotter.camera.position = [-2 * unit, unit, -unit / 2]
+    plotter.camera.focal_point = [0, 0, unit / 2]
+    
+    # Generate Gelens surfaces & bridges meshes
+    surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
+        lens, mesh_rings, mesh_arms
+    )
+
+    # Draw surfaces
+    for surf in surf_poly:
+        if surf is not None:
+            draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
+
+    for bridge in bridge_poly:
+        draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
+
+    for aper in aper_poly:
+        draw_mesh(plotter, aper, color=[128, 128, 128], opacity=0.1)
+
+    draw_mesh(plotter, sensor_poly, color=[128, 128, 128], opacity=1.0)
+
+    # Render the rays
+    if draw_rays:
+        rays_curve = geolens_ray_poly(
+            lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
+        )
+        rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
+        rays_poly_fov = [merge(r) for r in rays_poly_list]
+        for r in rays_poly_fov:
+            plotter.add_mesh(r)
+
+    # Save images
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        plotter.screenshot(os.path.join(save_dir, "lens_layout3d.png"), return_img=False)
+
+
+def save_lens_obj(
+    lens: GeoLens,
+    save_dir: str,
+    mesh_rings: int = 32,
+    mesh_arms: int = 128,
+    save_rays: bool = False,
+    fovs: List[float] = [0.0],
+    fov_phis: List[float] = [0.0],
+    ray_rings: int = 6,
+    ray_arms: int = 8,
+):
+    """Save lens geometry and rays as .obj files using pyvista.
+    
+    Args:
+        lens (GeoLens): The lens object.
+        save_dir (str): The directory to save the image.
+        mesh_rings (int): The number of rings in the mesh.
+        mesh_arms (int): The number of arms in the mesh.
+        save_rays (bool): Whether to save the rays.
+        fovs (List[float]): The FoV angles to be sampled, unit: degree.
+        fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
+        ray_rings (int): The number of pupil rings to be sampled.
+        ray_arms (int): The number of pupil arms to be sampled.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Generate Gelens surfaces & bridges meshes
+    surf_poly, bridge_poly, sensor_poly, aper_poly = generate_poly(
+        lens, mesh_rings, mesh_arms
+    )
+
+    # Merge and save meshes
+    surf_poly_data = [surf.get_polydata() for surf in surf_poly if surf is not None]
+    bridge_poly_data = [
+        bridge.get_polydata() for bridge in bridge_poly if bridge is not None
+    ]
+
+    # Merge surfaces and bridges into lens elements
+    lens_elements_data = surf_poly_data + bridge_poly_data
+    merged_lens_elements = merge(lens_elements_data)
+
+    merged_aper_poly = merge(
+        [aper.get_polydata() for aper in aper_poly if aper is not None]
+    )
+    merged_sensor_poly = sensor_poly.get_polydata()
+
+    merged_lens_elements.save(os.path.join(save_dir, "lens_elements.obj"))
+    merged_aper_poly.save(os.path.join(save_dir, "lens_aper.obj"))
+    merged_sensor_poly.save(os.path.join(save_dir, "lens_sensor.obj"))
+
+    # Generate and save rays
+    if save_rays:
+        rays_curve = geolens_ray_poly(
+            lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
+        )
+        rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
+        rays_poly_fov = [merge(r) for r in rays_poly_list]
+        for i, r in enumerate(rays_poly_fov):
+            r.save(os.path.join(save_dir, f"lens_rays_fov_{i}.obj"))
+
