@@ -18,6 +18,7 @@ import torch
 
 from deeplens.lens import Lens
 from deeplens.optics.basics import DEPTH, EPSILON
+from deeplens.optics.psf import conv_psf_depth_interp
 
 
 class ParaxialLens(Lens):
@@ -244,6 +245,13 @@ class ParaxialLens(Lens):
 
         return psf_l, psf_r
 
+    def psf_rgb_dp(self, points, ks=51):
+        """Compute RGB dual-pixel PSF."""
+        psf_l, psf_r = self.psf_dp(points, ks=ks)
+        psf_l = psf_l.unsqueeze(1).repeat(1, 3, 1, 1)
+        psf_r = psf_r.unsqueeze(1).repeat(1, 3, 1, 1)
+        return psf_l, psf_r
+
     def psf_map_dp(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
         """Compute dual-pixel PSF map."""
         points = torch.tensor([[0, 0, depth]], device=self.device)
@@ -251,6 +259,44 @@ class ParaxialLens(Lens):
         psf_map_l = psf_l.unsqueeze(0).unsqueeze(0).repeat(grid[0], grid[1], 1, 1, 1)
         psf_map_r = psf_r.unsqueeze(0).unsqueeze(0).repeat(grid[0], grid[1], 1, 1, 1)
         return psf_map_l, psf_map_r
+
+    def render_rgbd_dp(self, rgb_img, depth):
+        """Render RGBD image with dual-pixel PSF.
+        
+        Args:
+            rgb_img (tensor): [B, 3, H, W]
+            depth (tensor): [B, 1, H, W]
+
+        Returns:
+            img_left (tensor): [B, 3, H, W]
+            img_right (tensor): [B, 3, H, W]
+        """
+        # Convert depth to negative values
+        if (depth > 0).any():
+            depth = - depth
+        
+        depth_min = depth.min()
+        depth_max = depth.max()
+        num_depth = 10
+        psf_center = (0.0, 0.0)
+        psf_ks = 101
+
+        # Calculate dual-pixel PSF at reference depths
+        depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
+        points = torch.stack(
+            [
+                torch.full_like(depths_ref, psf_center[0]),
+                torch.full_like(depths_ref, psf_center[1]),
+                depths_ref,
+            ],
+            dim=-1,
+        )
+        psfs_left, psfs_right = self.psf_rgb_dp(points=points, ks=psf_ks) # shape [num_depth, 3, ks, ks]
+        
+        # Render dual-pixel image with PSF convolution and depth interpolation
+        img_left = conv_psf_depth_interp(rgb_img, depth, psfs_left, depths_ref)
+        img_right = conv_psf_depth_interp(rgb_img, depth, psfs_right, depths_ref)
+        return img_left, img_right
 
 
 if __name__ == "__main__":
