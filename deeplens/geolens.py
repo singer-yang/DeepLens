@@ -1218,15 +1218,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     # ====================================================================================
     # Classical optical design
     # ====================================================================================
-    def analysis_rms(self, depth=float("inf")):
-        """Compute RMS spot size and radius for on-axis and off-axis fields.
+    def analysis_spot(self, num_field=3, depth=float("inf")):
+        """Compute sensor plane ray spot RMS error and radius.
 
         Args:
+            num_field (int, optional): Number of fields. Defaults to 3.
             depth (float, optional): Depth of the point source. Defaults to float("inf").
         """
-        num_field = 3
-        rms_error_fields = []
         rms_radius_fields = []
+        geo_radius_fields = []
         for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
             # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
             ray = self.sample_radial_rays(
@@ -1240,25 +1240,38 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
             # Calculate RMS spot size and radius for different FoVs
             ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.valid.unsqueeze(-1)
-            rms_error = ((ray_xy_norm**2).sum(-1).sqrt() * ray.valid).sum(-1) / (
+            spot_rms = ((ray_xy_norm**2).sum(-1).sqrt() * ray.valid).sum(-1) / (
                 ray.valid.sum(-1) + EPSILON
             )
-            rms_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
+            spot_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
 
             # Append to list
-            rms_error_fields.append(rms_error)
-            rms_radius_fields.append(rms_radius)
+            rms_radius_fields.append(spot_rms)
+            geo_radius_fields.append(spot_radius)
 
-        # Average over wavelengths
-        avg_rms_error_um = torch.stack(rms_error_fields).mean(dim=0) * 1000.0
-        avg_rms_radius_um = torch.stack(rms_radius_fields).mean(dim=0) * 1000.0
+        # Average over wavelengths, shape [num_field]
+        avg_rms_radius_um = torch.stack(rms_radius_fields, dim=0).mean(dim=0) * 1000.0
+        avg_geo_radius_um = torch.stack(geo_radius_fields, dim=0).mean(dim=0) * 1000.0
 
+        # Print results
         print(
-            f"RMS average error (chief ray): center {avg_rms_error_um[0]:.3f} um, middle {avg_rms_error_um[1]:.3f} um, off-axis {avg_rms_error_um[-1]:.3f} um"
+            f"RMS radius: FoV 0.0 {avg_rms_radius_um[0]:.3f} um, FoV 0.5 {avg_rms_radius_um[num_field//2]:.3f} um, FoV 1.0 {avg_rms_radius_um[-1]:.3f} um"
         )
         print(
-            f"RMS maximum radius (chief ray): center {avg_rms_radius_um[0]:.3f} um, middle {avg_rms_radius_um[1]:.3f} um, off-axis {avg_rms_radius_um[-1]:.3f} um"
+            f"Geo radius: FoV 0.0 {avg_geo_radius_um[0]:.3f} um, FoV 0.5 {avg_geo_radius_um[num_field//2]:.3f} um, FoV 1.0 {avg_geo_radius_um[-1]:.3f} um"
         )
+
+        # Save to dict
+        rms_results = {}
+        fov_ls = torch.linspace(0, 1, num_field)
+        for i in range(num_field):
+            fov = round(fov_ls[i].item(), 2)
+            rms_results[f"fov{fov}"] = {
+                "rms": round(avg_rms_radius_um[i].item(), 4),
+                "radius": round(avg_geo_radius_um[i].item(), 4),
+            }
+
+        return rms_results
 
     # ====================================================================================
     # Geometrical optics calculation
@@ -1969,6 +1982,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # Compute the maximum ray height for each surface
         ray_r_record = (ray_o_record[..., :2] ** 2).sum(-1).sqrt()
         surf_r_max = ray_r_record.max(dim=0)[0][1:-1]
+        # FIXME: sometimes fov 0 spans larger region than full fov. Especially for microscope.
         for i in surface_range:
             # Determine and update surface height
             if surf_r_max[i] > 0:
@@ -2083,7 +2097,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             self.draw_mtf(depth_list=[depth], save_name=f"{save_name}_mtf.png")
 
         # Calculate RMS error
-        self.analysis_rms(depth=depth)
+        self.analysis_spot(depth=depth)
 
         # Render an image, compute PSNR and SSIM
         if render:
