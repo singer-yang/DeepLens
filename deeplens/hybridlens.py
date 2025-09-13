@@ -5,11 +5,11 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""A hybrid refractive-diffractive lens consisting of a geolens and a DOE in the back. Hybrid ray-tracing-wave-propagation is used for differentiable simulation.
+"""Ray-wave model for hybrid refractive-diffractive lens. 
 
-This differentiable hybrid lens model can similate:
-    1. Aberration of the refractive lens
-    2. DOE phase modulation
+Hybrid lens consists of a geolens and a DOE in the back. Differentiable ray-wave model is used for optical simulation: first calculate the complex wavefield at DOE plane by coherent ray tracing, then propagate the wavefield to sensor plane by angular spectrum method.
+
+This hybrid lens model can simulate: (1) Aberration of the refractive lens, (2) DOE phase modulation
 
 Technical Paper:
     Xinge Yang, Matheus Souza, Kunyi Wang, Praneeth Chakravarthula, Qiang Fu, Wolfgang Heidrich, "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model," Siggraph Asia 2024.
