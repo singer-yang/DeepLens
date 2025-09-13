@@ -17,12 +17,12 @@ import numpy as np
 import torch
 
 from deeplens.lens import Lens
-from deeplens.optics.basics import DEPTH
+from deeplens.optics.basics import DEPTH, EPSILON
 
 
 class ParaxialLens(Lens):
     def __init__(self, foclen, fnum, sensor_size, sensor_res, device="cpu"):
-        super(ParaxialLens, self).__init__()
+        super(ParaxialLens, self).__init__(device=device)
 
         # Lens parameters
         self.foclen = foclen  # Focal length [mm]
@@ -35,6 +35,7 @@ class ParaxialLens(Lens):
 
         self.d_far = -20000.0
         self.d_close = -200.0
+        self.refocus(foc_dist=-20000)
 
     def refocus(self, foc_dist):
         """Refocus the lens to the given focus distance."""
@@ -56,8 +57,7 @@ class ParaxialLens(Lens):
         Returns:
             psf (torch.Tensor): PSF kernels. Shape [ks, ks] or [N, ks, ks].
         """
-        device = self.device
-        points = points.to(device)
+        points = points.to(self.device)
 
         # Handle single point vs multiple points
         if len(points.shape) == 1:
@@ -85,7 +85,7 @@ class ParaxialLens(Lens):
             torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
             indexing="xy",
         )
-        x, y = x.to(device), y.to(device)
+        x, y = x.to(self.device), y.to(self.device)
         distance_sq = x**2 + y**2
 
         # Create PSF
@@ -105,7 +105,7 @@ class ParaxialLens(Lens):
         psf = psf * psf_mask
 
         # Normalize PSF to sum to 1
-        psf = psf / (psf.sum(dim=(-1, -2), keepdim=True) + 1e-8)
+        psf = psf / (psf.sum(dim=(-1, -2), keepdim=True) + EPSILON)
 
         if single_point:
             psf = psf.squeeze(0)
@@ -124,9 +124,7 @@ class ParaxialLens(Lens):
         Reference:
             [1] https://en.wikipedia.org/wiki/Circle_of_confusion
         """
-        foc_dist = torch.tensor(
-            self.foc_dist, device=depth.device, dtype=depth.dtype
-        ).abs()
+        foc_dist = torch.tensor(self.foc_dist, device=self.device, dtype=depth.dtype).abs()
         foclen = self.foclen
         fnum = self.fnum
 
@@ -199,14 +197,12 @@ class ParaxialLens(Lens):
         Returns:
             tuple: (left_psf, right_psf) where each PSF tensor has shape [N, ks, ks].
         """
-        # Extract depth information
-        depth = points[:, 2]  # Shape [N]
+        N = points.shape[0]
+        depth = points[:, 2]
 
-        # Get the base PSF using the existing psf() function
+        # Get the base PSF
         psf_base = self.psf(points, ks=ks, psf_type="gaussian")
         device = psf_base.device
-
-        N = psf_base.shape[0]
 
         # Create left and right masks for dual pixel simulation
         l_mask = torch.ones((ks, ks), device=device)
@@ -222,7 +218,7 @@ class ParaxialLens(Lens):
         r_mask = r_mask.unsqueeze(0).repeat(N, 1, 1)
 
         # Determine focus positions
-        depth = depth.to(device)  # Ensure depth is on the correct device
+        depth = depth.to(device)
         foc_dist = torch.tensor(self.foc_dist, device=device, dtype=depth.dtype)
         near_focus_pos = depth > foc_dist  # Shape [N]
 
@@ -241,9 +237,9 @@ class ParaxialLens(Lens):
                 psf_l[i] = psf_l[i] * r_mask[i]  # Swap masks for far focus
                 psf_r[i] = psf_r[i] * l_mask[i]
 
-        # Normalize PSFs separately
-        psf_l = psf_l / (psf_l.sum(dim=(-1, -2), keepdim=True) + 1e-8)
-        psf_r = psf_r / (psf_r.sum(dim=(-1, -2), keepdim=True) + 1e-8)
+        # Normalize PSFs
+        psf_l = psf_l / (psf_l.sum(dim=(-1, -2), keepdim=True) + EPSILON)
+        psf_r = psf_r / (psf_r.sum(dim=(-1, -2), keepdim=True) + EPSILON)
 
         return psf_l, psf_r
 
