@@ -39,6 +39,7 @@ class ParaxialLens(Lens):
 
     def refocus(self, foc_dist):
         """Refocus the lens to the given focus distance."""
+        assert foc_dist < self.foclen, "Focus distance is too close."
         self.foc_dist = foc_dist
 
     # ===========================================
