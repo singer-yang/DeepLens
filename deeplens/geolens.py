@@ -5,7 +5,9 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""A geometric lens consisting of refractive surfaces, simulate with ray tracing. May contain diffractive surfaces, but still use ray tracing to simulate.
+"""Ray tracing geometric lens model. 
+
+Differentiable ray tracing is used to simulate the light propagation through the geometric lens. Usually geometric lens only consists of refractive/reflective surfaces, but it can also contain diffractive surfaces, which are simplified as local grating (the same as Zemax).
 
 For image simulation:
     1. Ray tracing based rendering
@@ -999,6 +1001,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
             points = torch.tensor(points)
+        
         if len(points.shape) == 1:
             single_point = True
             points = points.unsqueeze(0)
