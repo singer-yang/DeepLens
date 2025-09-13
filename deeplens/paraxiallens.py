@@ -5,9 +5,9 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Paraxial ABCD matrix geometric lens model.
+"""Paraxial geometric lens model.
 
-Paraxial lens can model defocus (Circle of confusion) but not aberration. It is used in some renderers like Blender, Photoshop, etc.
+Paraxial lens model can simulate defocus (Circle of Confusion) but not optical aberrations. This model is commonly used in software such as Blender.
 
 Reference:
     [1] https://en.wikipedia.org/wiki/Circle_of_confusion
@@ -18,18 +18,14 @@ import torch
 
 from deeplens.lens import Lens
 from deeplens.optics.basics import DEPTH
-from deeplens.optics.psf import conv_psf_pixel
 
 
-# ==================================================================
-# Paraxial lens
-# ==================================================================
 class ParaxialLens(Lens):
     def __init__(self, foclen, fnum, sensor_size, sensor_res, device="cpu"):
         super(ParaxialLens, self).__init__()
 
         # Lens parameters
-        self.foclen = foclen
+        self.foclen = foclen  # Focal length [mm]
         self.fnum = fnum
 
         # Sensor size and resolution
@@ -44,17 +40,9 @@ class ParaxialLens(Lens):
         """Refocus the lens to the given focus distance."""
         self.foc_dist = foc_dist
 
-    def psf_rgb(self, points, ks=51, **kwargs):
-        """Compute RGB PSF."""
-        psf = self.psf(points, ks=ks, psf_type="gaussian", **kwargs)
-        return psf.unsqueeze(1).repeat(1, 3, 1, 1)
-
-    def psf_map(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
-        """Compute monochrome PSF map."""
-        points = torch.tensor([[0, 0, depth]], device=self.device)
-        psf = self.psf(points=points, ks=ks, psf_type="gaussian", **kwargs)
-        psf_map = psf.unsqueeze(0).unsqueeze(0).repeat(grid[0], grid[1], 1, 1, 1)
-        return psf_map
+    # ===========================================
+    # PSF-related functions
+    # ===========================================
 
     def psf(self, points, ks=51, psf_type="gaussian", **kwargs):
         """PSF is modeled as a 2D uniform circular disk with diameter CoC.
@@ -183,57 +171,17 @@ class ParaxialLens(Lens):
 
         return dof
 
-    def render(self, img, depth, foc_dist, high_res=False, psf_ks=51):
-        """Render image with aif image and PSF.
+    def psf_rgb(self, points, ks=51, **kwargs):
+        """Compute RGB PSF."""
+        psf = self.psf(points, ks=ks, psf_type="gaussian", **kwargs)
+        return psf.unsqueeze(1).repeat(1, 3, 1, 1)
 
-        Args:
-            img: [N, C, H, W]
-            depth: [N, 1, H, W]
-            foc_dist: [N]
-
-        Raises:
-            Exception: Untested.
-
-        Returns:
-            render (torch.Tensor): Rendered image. Shape [N, C, H, W].
-        """
-        ks = psf_ks
-        device = img.device
-
-        if len(img.shape) == 3:
-            raise Exception("Untested.")
-
-        elif len(img.shape) == 4:
-            N, C, H, W = img.shape
-
-            # [N] to [N, 1, H, W]
-            foc_dist = (
-                foc_dist.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W)
-            )
-
-            psf = torch.zeros((N, H, W, ks, ks), device=device)
-            x, y = torch.meshgrid(
-                torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
-                torch.linspace(-ks / 2 + 1 / 2, ks / 2 - 1 / 2, ks),
-                indexing="xy",
-            )
-            x, y = x.to(device), y.to(device)
-
-            coc_pixel = self.coc(depth, foc_dist)
-            # Shape expands to [N, H, W, ks, ks]
-            coc_pixel = (
-                coc_pixel.squeeze(1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, ks, ks)
-            )
-            coc_pixel_radius = coc_pixel / 2
-            psf = torch.exp(-(x**2 + y**2) / 2 / coc_pixel_radius**2) / (
-                2 * np.pi * coc_pixel_radius**2
-            )
-            psf_mask = x**2 + y**2 < coc_pixel_radius**2
-            psf = psf * psf_mask
-            psf = psf / psf.sum((-1, -2)).unsqueeze(-1).unsqueeze(-1)
-
-            render = conv_psf_pixel(img, psf)
-            return render
+    def psf_map(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
+        """Compute monochrome PSF map."""
+        points = torch.tensor([[0, 0, depth]], device=self.device)
+        psf = self.psf(points=points, ks=ks, psf_type="gaussian", **kwargs)
+        psf_map = psf.unsqueeze(0).unsqueeze(0).repeat(grid[0], grid[1], 1, 1, 1)
+        return psf_map
 
     # =============================================
     # Dual-pixel PSF
