@@ -311,22 +311,22 @@ class Aspheric(Surface):
     # =======================================
 
     @torch.no_grad()
-    def perturb(self, tolerance):
+    def perturb(self, tolerance_params=None):
         """Perturb the surface with some tolerance.
         
         Args:
-            tolerance (dict): Tolerance for surface parameters.
+            tolerance_params (dict): Tolerance for surface parameters.
 
         References:
             [1] https://www.edmundoptics.com/capabilities/precision-optics/capabilities/aspheric-lenses/
             [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/all-about-aspheric-lenses/?srsltid=AfmBOoon8AUXVALojol2s5K20gQk7W1qUisc6cE4WzZp3ATFY5T1pK8q
         """
-        super().perturb(tolerance)
-        self.c_error = float(np.random.randn() * tolerance.get("c", 0.001))
-        self.k_error = float(np.random.randn() * tolerance.get("k", 0.001))
+        super().perturb(tolerance_params)
+        self.c_error = float(np.random.randn() * tolerance_params.get("c", 0.001))
+        self.k_error = float(np.random.randn() * tolerance_params.get("k", 0.001))
         for i in range(1, self.ai_degree + 1):
             exec(
-                f"self.ai{2 * i}_error = float(np.random.randn() * tolerance.get('ai{2 * i}', 0.001))"
+                f"self.ai{2 * i}_error = float(np.random.randn() * tolerance_params.get('ai{2 * i}', 0.001))"
             )
 
     def perturb_clear(self):

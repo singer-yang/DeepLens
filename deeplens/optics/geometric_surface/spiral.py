@@ -117,11 +117,11 @@ class Spiral(Surface):
     # =========================================
     # Manufacturing
     # =========================================
-    def perturb(self, tolerance):
+    def perturb(self, tolerance_params):
         """Perturb the surface."""
-        super().perturb(tolerance)
-        self.c1_offset = np.random.randn() * tolerance.get("c1", 0.001)
-        self.c2_offset = np.random.randn() * tolerance.get("c2", 0.001)
+        super().perturb(tolerance_params)
+        self.c1_offset = np.random.randn() * tolerance_params.get("c1", 0.001)
+        self.c2_offset = np.random.randn() * tolerance_params.get("c2", 0.001)
 
     # =========================================
     # IO
