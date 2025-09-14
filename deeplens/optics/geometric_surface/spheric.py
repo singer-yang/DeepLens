@@ -118,7 +118,7 @@ class Spheric(Surface):
             tolerance_params (dict): Tolerance for surface parameters.
         """
         super().init_tolerance(tolerance_params)
-        self.c_tole = tolerance_params.get("c_tole", 0.001)
+        self.c_tole = tolerance_params.get("c_tole", 0.0001)
 
     def sample_tolerance(self):
         """Randomly perturb surface parameters to simulate manufacturing errors."""
@@ -130,10 +130,10 @@ class Spheric(Surface):
         super().zero_tolerance()
         self.c_error = 0.0
 
-    def tolerance_score(self):
+    def sensitivity_score(self):
         """Tolerance squared sum."""
         score = 0.0
-        score += super().tolerance_score()
+        score += super().sensitivity_score()
         score += self.c_tole**2 * self.c.grad**2
         return score
 

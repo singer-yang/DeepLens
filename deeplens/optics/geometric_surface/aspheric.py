@@ -357,10 +357,10 @@ class Aspheric(Surface):
         self.c_error = 0.0
         self.k_error = 0.0
     
-    def tolerance_score(self):
+    def sensitivity_score(self):
         """Tolerance squared sum."""
         score = 0.0
-        score += super().tolerance_score()
+        score += super().sensitivity_score()
         score += self.c_tole**2 * self.c.grad**2
         score += self.k_tole**2 * self.k.grad**2
         return score
