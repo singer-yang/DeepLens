@@ -1326,31 +1326,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return eff_foclen
 
     @torch.no_grad()
-    def calc_bfl(self, wvln=DEFAULT_WAVE):
+    def calc_bfl(self):
         """Compute back focal length (BFL).
 
-        BFL: Distance from the second principal point to focal plane.
-
-        FIXME: this definition is not correct.
+        Reference:
+            [1] https://rafcamera.com/info/imaging-theory/back-focal-length
         """
-        # Forward ray tracing
-        ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, num_rays=SPP_CALC, wvln=wvln)
-        inc_ray = ray.clone()
-        out_ray, _ = self.trace(ray)
-
-        # Principal point
-        t = (out_ray.o[..., 0] - inc_ray.o[..., 0]) / out_ray.d[..., 0]
-        z_principal = out_ray.o[..., 2] - out_ray.d[..., 2] * t
-
-        # Focal point
-        t = -out_ray.o[..., 0] / out_ray.d[..., 0]
-        z_focus = out_ray.o[..., 2] + out_ray.d[..., 2] * t
-
-        # Back focal length
-        bfl = z_focus - z_principal
-        bfl = float(np.nanmean(bfl[ray.valid > 0].cpu().numpy()))
-
-        return bfl
+        return self.d_sensor.item() - self.surfaces[-1].d.item()
 
     @torch.no_grad()
     def calc_eqfl(self):
