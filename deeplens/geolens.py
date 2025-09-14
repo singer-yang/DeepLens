@@ -30,6 +30,7 @@ from deeplens.geolens_pkg.eval import GeoLensEval
 from deeplens.geolens_pkg.io import GeoLensIO
 from deeplens.geolens_pkg.optim import GeoLensOptim
 from deeplens.geolens_pkg.vis import GeoLensVis
+from deeplens.geolens_pkg.tolerance import GeoLensTolerance
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
@@ -69,7 +70,7 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTolerance):
     def __init__(
         self,
         filename=None,
@@ -288,7 +289,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         ray_o = ray_o.to(self.device)
 
         # Sample points on the pupil
-        pupilz, pupilr = self.get_entrance_pupil(scale_pupil=scale_pupil)
+        pupilz, pupilr = self.get_entrance_pupil()
+        pupilr *= scale_pupil
         ray_o2 = self.sample_circle(
             r=pupilr, z=pupilz, shape=(*ray_o.shape[:-1], num_rays)
         )
@@ -333,8 +335,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         Sample parallel rays in object space for geometric optics calculations.
 
         Args:
-            fov_x (float or list): Field angle(s) in the x–z plane (degrees). Default: [0.0].
-            fov_y (float or list): Field angle(s) in the y–z plane (degrees). Default: [0.0].
+            fov_x (float or list): Field angle(s) in the xz plane (degrees). Default: [0.0].
+            fov_y (float or list): Field angle(s) in the yz plane (degrees). Default: [0.0].
             num_rays (int): Number of rays per field point. Default: SPP_CALC.
             wvln (float): Wavelength of rays. Default: DEFAULT_WAVE.
             entrance_pupil (bool): If True, sample origins on entrance pupil; otherwise, on surface 0. Default: True.
@@ -956,8 +958,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             psf_center: [..., 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
-            # Shrink the pupil and calculate centroid ray as the chief ray.
-            ray = self.sample_from_points(point, num_rays=SPP_CALC, scale_pupil=0.2)
+            # Shrink the pupil and calculate centroid ray as the chief ray
+            ray = self.sample_from_points(point, scale_pupil=0.2, spp=SPP_CALC)
             ray = self.trace2sensor(ray)
             assert (ray.valid == 1).any(), "No sampled rays is valid."
             valid = ray.valid.unsqueeze(-1)
@@ -1460,7 +1462,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
         # If calculation failed, use pinhole camera model to compute fov
         if torch.isnan(hfov):
-            hfov = float(np.arctan(self.r_sensor / self.foclen))
+            hfov = float(round(np.arctan(self.r_sensor / self.foclen), 4))
             print(f"Computing fov failed, set fov to {hfov}.")
         else:
             hfov = hfov.item()
@@ -1740,10 +1742,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
             [3] Zemax LLC, *OpticStudio User Manual*, Version 19.4, Document No. 2311, 2019.
         """
         if self.aper_idx is None or hasattr(self, "aper_idx") is False:
-            print("No aperture, use the first surface as entrance pupil.")
+            print("No aperture stop, use the first surface as entrance pupil.")
             return self.surfaces[0].d.item(), self.surfaces[0].r
 
-        # Sample rays from aperture stop
+        # Sample rays from edge of aperture stop
         aper_idx = self.aper_idx
         aper_z = self.surfaces[aper_idx].d.item()
         aper_r = self.surfaces[aper_idx].r
@@ -1775,7 +1777,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
         # Handle the case where no intersection points are found or small entrance pupil
         if len(intersection_points) == 0:
-            print("Calculate entrance pupil failed, use the first surface.")
+            print("Calculate entrance pupil failed, use the first surface as entrance pupil.")
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
@@ -1787,7 +1789,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
             if avg_pupilr < EPSILON:
                 print(
-                    "Zero or negative entrance pupil is detected, use the first surface."
+                    "Zero or negative entrance pupil is detected, use the first surface as entrance pupil."
                 )
                 avg_pupilr = self.surfaces[0].r
                 avg_pupilz = self.surfaces[0].d.item()
@@ -1941,56 +1943,55 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
     @torch.no_grad()
     def prune_surf(self, expand_factor=None):
-        """Prune surfaces to the minimum height that allows all valid rays to go through.
+        """Prune surfaces to allow all valid rays to go through.
 
         Args:
-            expand_factor (float): extra height to reserve.
-                - For cellphone lens, we usually use 0.1mm or 0.05 * r_sensor.
-                - For camera lens, we usually use 0.5mm or 0.1 * r_sensor.
-            surface_range (list): surface range to prune.
+            expand_factor (float): height expansion factor.
+                - For cellphone lens, we usually expand by 5%
+                - For camera lens, we usually expand by 20%.
         """
         # Settings
         surface_range = self.find_diff_surf()
-
+        
+        # Set expansion factor
         if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
-
-            # # Reset lens to maximum height(sensor radius)
-            # for i in surface_range:
-            #     # self.surfaces[i].r = self.r_sensor
-            #     self.surfaces[i].r = max(self.r_sensor, self.surfaces[self.aper_idx].r)
         else:
-            expand_factor = 0.4 if expand_factor is None else expand_factor
+            expand_factor = 0.25 if expand_factor is None else expand_factor
 
-        # Sample maximum fov rays to cut valid surface height
+        # Expand surface height
+        for i in surface_range:
+            self.surfaces[i].r = self.surfaces[i].r * (1 + expand_factor)
+
+        # Sample and trace rays to compute the maximum valid region
         if self.hfov is not None:
             fov_deg = self.hfov * 180 / torch.pi
         else:
-            fov_deg = (
-                float(np.arctan(self.r_sensor / self.d_sensor.item())) * 180 / torch.pi
-            )
+            fov = np.arctan(self.r_sensor / self.foclen)
+            fov_deg = float(fov) * 180 / torch.pi
+            print(f"Using fov_deg: {fov_deg} during surface pruning.")
 
-        # Trace rays to compute the maximum valid region of the lens, shape of ray: [num_rays, 3]
-        ray = self.sample_parallel(fov_x=[0.0], fov_y=[fov_deg], num_rays=SPP_CALC)
-        ray = ray.squeeze(0).squeeze(0)
+        fov_y = [f * fov_deg / 10 for f in range(0, 11)]
+        ray = self.sample_parallel(fov_x=[0.0], fov_y=fov_y, num_rays=SPP_CALC)
         _, ray_o_record = self.trace2sensor(ray=ray, record=True)
 
         # Ray record, shape [num_rays, num_surfaces + 2, 3]
         ray_o_record = torch.stack(ray_o_record, dim=-2)
         ray_o_record = torch.nan_to_num(ray_o_record, 0.0)
+        ray_o_record = ray_o_record.reshape(-1, ray_o_record.shape[-2], 3)
 
         # Compute the maximum ray height for each surface
         ray_r_record = (ray_o_record[..., :2] ** 2).sum(-1).sqrt()
         surf_r_max = ray_r_record.max(dim=0)[0][1:-1]
-        # FIXME: sometimes fov 0 spans larger region than full fov. Especially for microscope.
+        
+        # Update surface height
         for i in surface_range:
-            # Determine and update surface height
             if surf_r_max[i] > 0:
                 max_height_expand = surf_r_max[i].item() * (1 + expand_factor)
                 max_height_allowed = self.surfaces[i].max_height()
                 self.surfaces[i].update_r(min(max_height_expand, max_height_allowed))
             else:
-                print(f"No valid rays for Surf {i}, do not prune.")
+                print(f"No valid rays for Surf {i}, set to maximum height.")
                 max_height_expand = self.surfaces[i].r * (1 + expand_factor)
                 max_height_value_range = self.surfaces[i].max_height()
                 self.surfaces[i].update_r(min(max_height_expand, max_height_value_range))
@@ -2035,17 +2036,29 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
     # Tolerance analysis
     # ====================================================================================
     @torch.no_grad()
-    def perturb(self):
-        """Randomly perturb all lens surfaces to simulate manufacturing errors.
+    def perturb(self, tolerance_params=None):
+        """Sample a random perturbation for all lens surfaces to simulate manufacturing errors.
 
-        Including:
-            (1) surface position, thickness, curvature, and other coefficients.
-            (2) surface rotation, tilt, and decenter.
-
-        Called for accurate image simulation, together with sensor noise, vignetting, etc.
+            TODO: should consider refocus() after each surface perturbation.
         """
+        if tolerance_params is None:
+            tolerance_params = {}
+
+        # Perturb each surface
         for i in range(len(self.surfaces)):
-            self.surfaces[i].perturb()
+            self.surfaces[i].perturb(tolerance_params=tolerance_params)
+
+        # Refocus the lens
+        self.refocus()
+
+    @torch.no_grad()
+    def perturb_clear(self):
+        """Clear perturbation for all lens surfaces."""
+        for i in range(len(self.surfaces)):
+            self.surfaces[i].perturb_clear()
+        
+        # Refocus the lens
+        self.refocus()
 
     @torch.no_grad()
     def match_materials(self, mat_table="CDGM"):
