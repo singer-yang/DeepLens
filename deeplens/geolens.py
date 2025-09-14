@@ -2013,49 +2013,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             print("Surface shape corrected.")
         return shape_changed
 
-    # ====================================================================================
-    # Tolerance analysis
-    # ====================================================================================
-    def init_tolerance(self, tolerance_params=None):
-        """Initialize tolerance parameters for the lens."""
-        if tolerance_params is None:
-            tolerance_params = {}
-
-        for i in range(len(self.surfaces)):
-            self.surfaces[i].init_tolerance(tolerance_params=tolerance_params)
-    
-    @torch.no_grad()
-    def sample_tolerance(self, tolerance_params=None):
-        """Sample a random manufacturing error for the lens."""
-        if tolerance_params is None:
-            tolerance_params = {}
-
-        # Randomly perturb all surfaces
-        for i in range(len(self.surfaces)):
-            self.surfaces[i].sample_tolerance(tolerance_params=tolerance_params)
-
-        # Refocus the lens
-        self.refocus()
-
-    @torch.no_grad()
-    def zero_tolerance(self):
-        """Clear manufacturing error for the lens."""
-        for i in range(len(self.surfaces)):
-            self.surfaces[i].zero_tolerance()
-        
-        # Refocus the lens
-        self.refocus()
-
     @torch.no_grad()
     def match_materials(self, mat_table="CDGM"):
         """Match material"""
         for surf in self.surfaces:
             surf.mat2.match_material(mat_table=mat_table)
-
-    @torch.no_grad()
-    def analysis_tolerance(self):
-        """Analyze tolerance"""
-        pass
 
     # ====================================================================================
     # Visualization and numerical analysis

@@ -13,6 +13,33 @@ from tqdm import tqdm
 class GeoLensTolerance:
     """Tolerance analysis for geometric lens."""
 
+    def init_tolerance(self, tolerance_params=None):
+        """Initialize tolerance parameters for the lens."""
+        if tolerance_params is None:
+            tolerance_params = {}
+
+        for i in range(len(self.surfaces)):
+            self.surfaces[i].init_tolerance(tolerance_params=tolerance_params)
+    
+    @torch.no_grad()
+    def sample_tolerance(self):
+        """Sample a random manufacturing error for the lens."""
+        # Randomly perturb all surfaces
+        for i in range(len(self.surfaces)):
+            self.surfaces[i].sample_tolerance()
+
+        # Refocus the lens
+        self.refocus()
+
+    @torch.no_grad()
+    def zero_tolerance(self):
+        """Clear manufacturing error for the lens."""
+        for i in range(len(self.surfaces)):
+            self.surfaces[i].zero_tolerance()
+        
+        # Refocus the lens
+        self.refocus()
+
     def tolerancing_sensitivity(self, tolerance_params=None):
         """Use sensitivity analysis (1st order gradient) to compute the tolerance score.
         
