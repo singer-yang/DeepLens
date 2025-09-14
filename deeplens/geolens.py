@@ -29,21 +29,20 @@ from torchvision.utils import save_image
 from deeplens.geolens_pkg.eval import GeoLensEval
 from deeplens.geolens_pkg.io import GeoLensIO
 from deeplens.geolens_pkg.optim import GeoLensOptim
-from deeplens.geolens_pkg.vis import GeoLensVis
 from deeplens.geolens_pkg.tolerance import GeoLensTolerance
+from deeplens.geolens_pkg.vis import GeoLensVis
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
-    DEPTH,
-    DELTA,
     DELTA_PARAXIAL,
+    DEPTH,
     EPSILON,
     PSF_KS,
     SPP_CALC,
     SPP_COHERENT,
+    SPP_PARAXIAL,
     SPP_PSF,
     SPP_RENDER,
-    SPP_PARAXIAL,
     WAVE_RGB,
 )
 from deeplens.optics.geometric_surface import (
@@ -2019,14 +2018,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # ====================================================================================
     @torch.no_grad()
     def perturb(self, tolerance_params=None):
-        """Sample a random perturbation for all lens surfaces to simulate manufacturing errors.
-
-            TODO: should consider refocus() after each surface perturbation.
-        """
+        """Sample a random manufacturing error for the lens."""
         if tolerance_params is None:
             tolerance_params = {}
 
-        # Perturb each surface
+        # Randomly perturb all surfaces
         for i in range(len(self.surfaces)):
             self.surfaces[i].perturb(tolerance_params=tolerance_params)
 
@@ -2035,7 +2031,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     @torch.no_grad()
     def perturb_clear(self):
-        """Clear perturbation for all lens surfaces."""
+        """Clear manufacturing error for the lens."""
         for i in range(len(self.surfaces)):
             self.surfaces[i].perturb_clear()
         
