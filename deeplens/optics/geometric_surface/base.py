@@ -545,7 +545,7 @@ class Surface(DeepObj):
         self.mat2_V_error = 0.0
         self.tolerancing = False
 
-    def tolerance_score(self):
+    def sensitivity_score(self):
         """Tolerance squared sum.
         
         Reference:
