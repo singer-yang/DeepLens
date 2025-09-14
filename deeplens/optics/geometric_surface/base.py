@@ -1,6 +1,6 @@
 """Base class for geometric surfaces.
 
-Surface can refract, and reflect rays. Some surfaces can also diffract rays according to local grating approximation.
+Surface can refract, and reflect rays. Some surfaces can also diffract rays according to a local grating approximation.
 """
 
 import numpy as np
@@ -11,9 +11,9 @@ from deeplens.optics.basics import DeepObj
 from deeplens.optics.materials import Material
 
 # Newton's method parameters
-NEWTONS_MAXITER = 10  # [int] maximum number of Newton iterations
-NEWTONS_TOLERANCE = 50.0 * 1e-6  # [mm], Newton method solution threshold
-NEWTONS_STEP_BOUND = 5.0  # [mm], maximum step size in each Newton iteration
+# NEWTONS_MAXITER = 10  # [int] maximum number of Newton iterations
+# NEWTONS_TOLERANCE = 50.0 * 1e-6  # [mm], Newton method solution threshold
+# NEWTONS_STEP_BOUND = 5.0  # [mm], maximum step size in each Newton iteration
 EPSILON = 1e-12  # [float], small value to avoid division by zero
 
 class Surface(DeepObj):
@@ -30,8 +30,13 @@ class Surface(DeepObj):
             self.h = float(r * np.sqrt(2))
             self.w = float(r * np.sqrt(2))
 
-        # Next aterial
+        # Next material
         self.mat2 = Material(mat2)
+
+        # Newton method parameters
+        self.newton_maxiter = 10 # [int], maximum number of Newton iterations
+        self.newton_convergence = 50.0 * 1e-6 # [mm], Newton method solution threshold
+        self.newton_step_bound = 5.0 # [mm], maximum step size in each Newton iteration
 
         self.device = device if device is not None else torch.device("cpu")
         self.to(self.device)
@@ -95,6 +100,10 @@ class Surface(DeepObj):
             t (tensor): intersection time.
             valid (tensor): valid mask.
         """
+        newton_maxiter = self.newton_maxiter
+        newton_convergence = self.newton_convergence
+        newton_step_bound = self.newton_step_bound
+
         # Tolerance
         if hasattr(self, "d_offset"):
             d_surf = self.d + self.d_offset
@@ -109,9 +118,14 @@ class Surface(DeepObj):
 
             it = 0
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
-            while (torch.abs(ft) > NEWTONS_TOLERANCE).any() and (
-                it < NEWTONS_MAXITER
-            ):
+            # while (torch.abs(ft) > newton_tolerance).any() and (
+            #     it < newton_maxiter
+            # ):
+            while it < newton_maxiter:
+                # Converged before maximum number of iterations
+                if (torch.abs(ft) < newton_convergence).all():
+                    break
+
                 it += 1
 
                 new_o = ray.o + ray.d * t.unsqueeze(-1)
@@ -124,8 +138,8 @@ class Surface(DeepObj):
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
                     ft / (dfdt + EPSILON),
-                    -NEWTONS_STEP_BOUND,
-                    NEWTONS_STEP_BOUND,
+                    -newton_step_bound,
+                    newton_step_bound,
                 )
 
         # 2. One more Newton iteration (differentiable) to gain gradients
@@ -137,7 +151,7 @@ class Surface(DeepObj):
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
         dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
-        t = t - torch.clamp(ft / (dfdt + EPSILON), -NEWTONS_STEP_BOUND, NEWTONS_STEP_BOUND)
+        t = t - torch.clamp(ft / (dfdt + EPSILON), -newton_step_bound, newton_step_bound)
 
         # 4. Determine valid solutions
         with torch.no_grad():
@@ -147,7 +161,7 @@ class Surface(DeepObj):
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
-            valid = valid & (torch.abs(ft) < NEWTONS_TOLERANCE)
+            valid = valid & (torch.abs(ft) < newton_convergence)
 
         return t, valid
 
@@ -452,23 +466,49 @@ class Surface(DeepObj):
         self.r = r
 
     # =========================================
-    # Manufacturing
+    # Tolerancing
     # =========================================
     @torch.no_grad()
     def perturb(self, tolerance):
-        """Randomly perturb surface parameters to simulate manufacturing errors.
-
-        Reference:
-            [1] Surface precision +0.000/-0.010 mm is regarded as high quality by Edmund Optics.
-            [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-specifications/?srsltid=AfmBOorBa-0zaOcOhdQpUjmytthZc07oFlmPW_2AgaiNHHQwobcAzWII
+        """Sample one example of surface manufacturing errors.
 
         Args:
-            tolerance (dict): Tolerance for surface parameters.
+            tolerance (dict): Tolerance for surface parameters. Example:
+                {
+                    "r_error": 0.05, # [mm]
+                    "d_error": 0.05, # [mm]
+                    "decenter": 0.1, # [mm]
+                    "tilt": 0.1, # [arcmin]
+                    "mat2_n_error": 0.001,
+                    "mat2_V_error": 0.01, # [%]
+                }
+
+        References:
+            [1] https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-specifications/?srsltid=AfmBOorBa-0zaOcOhdQpUjmytthZc07oFlmPW_2AgaiNHHQwobcAzWII
+            [2] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
+            [3] https://wp.optics.arizona.edu/jsasian/wp-content/uploads/sites/33/2016/03/L17_OPTI517_Lens-_Tolerancing.pdf
         """
-        self.r_offset = float(
-            self.r * torch.randn(1).item() * tolerance.get("r", 0.001)
-        )
-        self.d_offset = float(torch.randn(1).item() * tolerance.get("d", 0.001))
+        self.r_error = float(np.random.uniform(-tolerance.get("r_error", 0.05), 0)) # [mm]
+        self.d_error = float(np.random.randn() * tolerance.get("d_error", 0.05)) # [mm]
+        self.center_error = float(np.random.randn() * tolerance.get("center_error", 0.1)) # [mm]
+
+        self.decenter = float(np.random.randn() * tolerance.get("decenter", 0.1)) # [mm]
+        self.tilt = float(np.random.randn() * tolerance.get("tilt", 0.1)) # [arcmin]
+        self.tilt = self.tilt / 60.0 * np.pi / 180.0 # [rad]
+
+        self.mat2_n_error = float(np.random.randn() * tolerance.get("mat2_n_error", 0.001))
+        self.mat2_V_error = float(np.random.randn() * tolerance.get("mat2_V_error", 0.01)) * self.mat2.V
+
+
+    def perturb_clear(self):
+        """Clear perturbation."""
+        self.r_error = 0.0
+        self.d_error = 0.0
+        self.center_error = 0.0
+        self.decenter = 0.0
+        self.tilt = 0.0
+        self.mat2_n_error = 0.0
+        self.mat2_V_error = 0.0
 
     # =========================================
     # Visualization
@@ -487,6 +527,7 @@ class Surface(DeepObj):
 
     def draw_widget3D(self, ax, color="lightblue", res=128):
         """Draw the surface in a 3D plot."""
+        raise Exception("draw_widget3D() is deprecated.")
         if self.is_square:
             x = torch.linspace(-self.r, self.r, res, device=self.device)
             y = torch.linspace(-self.r, self.r, res, device=self.device)
