@@ -1255,10 +1255,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
 
         # Print results
         print(
-            f"RMS radius: FoV 0.0 {avg_rms_radius_um[0]:.3f} um, FoV 0.5 {avg_rms_radius_um[num_field//2]:.3f} um, FoV 1.0 {avg_rms_radius_um[-1]:.3f} um"
+            f"RMS radius: FoV (0.0) {avg_rms_radius_um[0]:.3f} um, FoV (0.5) {avg_rms_radius_um[num_field//2]:.3f} um, FoV (1.0) {avg_rms_radius_um[-1]:.3f} um"
         )
         print(
-            f"Geo radius: FoV 0.0 {avg_geo_radius_um[0]:.3f} um, FoV 0.5 {avg_geo_radius_um[num_field//2]:.3f} um, FoV 1.0 {avg_geo_radius_um[-1]:.3f} um"
+            f"Geo radius: FoV (0.0) {avg_geo_radius_um[0]:.3f} um, FoV (0.5) {avg_geo_radius_um[num_field//2]:.3f} um, FoV (1.0) {avg_geo_radius_um[-1]:.3f} um"
         )
 
         # Save to dict
@@ -2032,7 +2032,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO):
         return shape_changed
 
     # ====================================================================================
-    # Manufacturing and tolerance analysis
+    # Tolerance analysis
     # ====================================================================================
     @torch.no_grad()
     def perturb(self):

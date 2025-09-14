@@ -54,6 +54,7 @@ class Aspheric(Surface):
             self.ai = None
             self.ai_degree = 0
 
+        self.perturb_clear()
         self.to(device)
 
     @classmethod
@@ -304,17 +305,37 @@ class Aspheric(Surface):
 
         return params
 
+
+    # =======================================
+    # Perturbation
+    # =======================================
+
     @torch.no_grad()
     def perturb(self, tolerance):
-        """Perturb the surface with some tolerance."""
-        self.r_offset = float(self.r * np.random.randn() * tolerance.get("r", 0.001))
-        self.c_offset = float(self.c * np.random.randn() * tolerance.get("c", 0.001))
-        self.d_offset = float(np.random.randn() * tolerance.get("d", 0.001))
-        self.k_offset = float(np.random.randn() * tolerance.get("k", 0.001))
+        """Perturb the surface with some tolerance.
+        
+        Args:
+            tolerance (dict): Tolerance for surface parameters.
+
+        References:
+            [1] https://www.edmundoptics.com/capabilities/precision-optics/capabilities/aspheric-lenses/
+            [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/all-about-aspheric-lenses/?srsltid=AfmBOoon8AUXVALojol2s5K20gQk7W1qUisc6cE4WzZp3ATFY5T1pK8q
+        """
+        super().perturb(tolerance)
+        self.c_error = float(np.random.randn() * tolerance.get("c", 0.001))
+        self.k_error = float(np.random.randn() * tolerance.get("k", 0.001))
         for i in range(1, self.ai_degree + 1):
             exec(
-                f"self.ai{2 * i}_offset = float(np.random.randn() * tolerance.get('ai{2 * i}', 0.001))"
+                f"self.ai{2 * i}_error = float(np.random.randn() * tolerance.get('ai{2 * i}', 0.001))"
             )
+
+    def perturb_clear(self):
+        """Clear perturbation."""
+        super().perturb_clear()
+        self.c_error = 0.0
+        self.k_error = 0.0
+        for i in range(1, self.ai_degree + 1):
+            exec(f"self.ai{2 * i}_error = 0.0")
 
     # =======================================
     # IO
