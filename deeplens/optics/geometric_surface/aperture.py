@@ -11,6 +11,8 @@ class Aperture(Surface):
         """Aperture surface."""
         Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
         self.diffraction = diffraction
+        
+        self.tolerancing = False
         self.to(device)
 
     @classmethod
