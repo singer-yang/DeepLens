@@ -241,17 +241,26 @@ class AsphericNorm(Surface):
     # Perturbation
     # =======================================
     @torch.no_grad()
-    def perturb(self, tolerance):
+    def perturb(self, tolerance_params=None):
         """Perturb the surface with some tolerance."""
-        self.r_offset = float(self.r * np.random.randn() * tolerance.get("r", 0.001))
-        self.c_offset = float(self.c * np.random.randn() * tolerance.get("c", 0.001))
-        self.d_offset = float(np.random.randn() * tolerance.get("d", 0.001))
-        self.k_offset = float(np.random.randn() * tolerance.get("k", 0.001))
+        super().perturb(tolerance_params)
+        self.c_error = float(np.random.randn() * tolerance_params.get("c", 0.001))
+        self.k_error = float(np.random.randn() * tolerance_params.get("k", 0.001))
         for i in range(1, self.ai_degree + 1):
             p_name = f"norm_ai{2 * i}"
-            offset_name = f"{p_name}_offset"
-            offset_val = float(np.random.randn() * tolerance.get(p_name, 0.001))
-            setattr(self, offset_name, offset_val)
+            error_name = f"{p_name}_error"
+            error_val = float(np.random.randn() * tolerance_params.get(p_name, 0.001))
+            setattr(self, error_name, error_val)
+
+    def perturb_clear(self):
+        """Clear perturbation."""
+        super().perturb_clear()
+        self.c_error = 0.0
+        self.k_error = 0.0
+        for i in range(1, self.ai_degree + 1):
+            p_name = f"norm_ai{2 * i}"
+            error_name = f"{p_name}_error"
+            setattr(self, error_name, 0.0)
 
     # =======================================
     # IO

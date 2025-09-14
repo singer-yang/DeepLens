@@ -469,7 +469,7 @@ class Surface(DeepObj):
     # Tolerancing
     # =========================================
     @torch.no_grad()
-    def perturb(self, tolerance):
+    def perturb(self, tolerance_params=None):
         """Sample one example of surface manufacturing errors.
 
         Args:
@@ -488,16 +488,16 @@ class Surface(DeepObj):
             [2] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
             [3] https://wp.optics.arizona.edu/jsasian/wp-content/uploads/sites/33/2016/03/L17_OPTI517_Lens-_Tolerancing.pdf
         """
-        self.r_error = float(np.random.uniform(-tolerance.get("r_error", 0.05), 0)) # [mm]
-        self.d_error = float(np.random.randn() * tolerance.get("d_error", 0.05)) # [mm]
-        self.center_error = float(np.random.randn() * tolerance.get("center_error", 0.1)) # [mm]
+        self.r_error = float(np.random.uniform(-tolerance_params.get("r_error", 0.05), 0)) # [mm]
+        self.d_error = float(np.random.randn() * tolerance_params.get("d_error", 0.05)) # [mm]
+        self.center_error = float(np.random.randn() * tolerance_params.get("center_error", 0.1)) # [mm]
 
-        self.decenter = float(np.random.randn() * tolerance.get("decenter", 0.1)) # [mm]
-        self.tilt = float(np.random.randn() * tolerance.get("tilt", 0.1)) # [arcmin]
+        self.decenter = float(np.random.randn() * tolerance_params.get("decenter", 0.1)) # [mm]
+        self.tilt = float(np.random.randn() * tolerance_params.get("tilt", 0.1)) # [arcmin]
         self.tilt = self.tilt / 60.0 * np.pi / 180.0 # [rad]
 
-        self.mat2_n_error = float(np.random.randn() * tolerance.get("mat2_n_error", 0.001))
-        self.mat2_V_error = float(np.random.randn() * tolerance.get("mat2_V_error", 0.01)) * self.mat2.V
+        self.mat2_n_error = float(np.random.randn() * tolerance_params.get("mat2_n_error", 0.001))
+        self.mat2_V_error = float(np.random.randn() * tolerance_params.get("mat2_V_error", 0.01)) * self.mat2.V
 
 
     def perturb_clear(self):

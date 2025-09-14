@@ -92,14 +92,14 @@ class Spheric(Surface):
     # =========================================
     # Tolerancing
     # =========================================
-    def perturb(self, tolerance):
+    def perturb(self, tolerance_params=None):
         """Randomly perturb surface parameters to simulate manufacturing errors.
         
         Args:
-            tolerance (dict): Tolerance for surface parameters.
+            tolerance_params (dict): Tolerance for surface parameters.
         """
-        super().perturb(tolerance)
-        self.c_error = float(np.random.randn() * tolerance.get("c_error", 0.001))
+        super().perturb(tolerance_params)
+        self.c_error = float(np.random.randn() * tolerance_params.get("c_error", 0.001))
 
     def perturb_clear(self):
         """Clear perturbation."""
