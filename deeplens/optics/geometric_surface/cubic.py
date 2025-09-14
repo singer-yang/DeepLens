@@ -144,21 +144,22 @@ class Cubic(Surface):
     # =========================================
     def perturb(self, tolerance_params):
         """Perturb the surface"""
-        self.r_offset = np.random.randn() * tolerance_params.get("r", 0.001)
-        if self.d != 0:
-            self.d_offset = np.random.randn() * tolerance_params.get("d", 0.0005)
+        super().perturb(tolerance_params)
+        self.r_error = np.random.randn() * tolerance_params.get("r_tole", 0.001)
+        if self.d.item() != 0:
+            self.d_error = np.random.randn() * tolerance_params.get("d_tole", 0.0005)
 
         if self.b_degree == 1:
-            self.b3_offset = np.random.randn() * tolerance_params.get("b3", 0.001)
+            self.b3_error = np.random.randn() * tolerance_params.get("b3_tole", 0.001)
         elif self.b_degree == 2:
-            self.b3_offset = np.random.randn() * tolerance_params.get("b3", 0.001)
-            self.b5_offset = np.random.randn() * tolerance_params.get("b5", 0.001)
+            self.b3_error = np.random.randn() * tolerance_params.get("b3_tole", 0.001)
+            self.b5_error = np.random.randn() * tolerance_params.get("b5_tole", 0.001)
         elif self.b_degree == 3:
-            self.b3_offset = np.random.randn() * tolerance_params.get("b3", 0.001)
-            self.b5_offset = np.random.randn() * tolerance_params.get("b5", 0.001)
-            self.b7_offset = np.random.randn() * tolerance_params.get("b7", 0.001)
+            self.b3_error = np.random.randn() * tolerance_params.get("b3_tole", 0.001)
+            self.b5_error = np.random.randn() * tolerance_params.get("b5_tole", 0.001)
+            self.b7_error = np.random.randn() * tolerance_params.get("b7_tole", 0.001)
 
-        self.rotate_angle = np.random.randn() * tolerance_params.get("angle", 0.01)
+        self.rotate_angle_error = np.random.randn() * tolerance_params.get("angle_tole", 0.01)
 
 
     # =========================================

@@ -8,10 +8,10 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 class Spheric(Surface):
     def __init__(self, c, r, d, mat2, device="cpu"):
-        super(Spheric, self).__init__(r, d, mat2, is_square=False, device=device)
+        super(Spheric, self).__init__(r=r, d=d, mat2=mat2, is_square=False, device=device)
         self.c = torch.tensor(c)
 
-        self.perturb_clear()
+        self.tolerancing = False
         self.to(device)
 
     @classmethod
@@ -25,7 +25,10 @@ class Spheric(Surface):
     def _sag(self, x, y):
         """Compute surfaces sag z = r**2 * c / (1 - sqrt(1 - r**2 * c**2))"""
         # Tolerance
-        c = self.c + self.c_error
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
 
         # Compute surface sag
         r2 = x**2 + y**2
@@ -35,7 +38,10 @@ class Spheric(Surface):
     def _dfdxy(self, x, y):
         """Compute surface sag derivatives to x and y: dz / dx, dz / dy."""
         # Tolerance
-        c = self.c + self.c_error
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
 
         # Compute surface sag derivatives
         r2 = x**2 + y**2
@@ -60,7 +66,10 @@ class Spheric(Surface):
             d2f_dy2 (tensor): ∂²f / ∂y²
         """
         # Tolerance
-        c = self.c + self.c_error
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
         
         # Compute surface sag derivatives
         r2 = x**2 + y**2
@@ -81,30 +90,52 @@ class Spheric(Surface):
 
     def is_within_data_range(self, x, y):
         """Invalid when shape is non-defined."""
-        valid = (x**2 + y**2) < 1 / self.c**2
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
+        
+        valid = (x**2 + y**2) < 1 / c**2
         return valid
 
     def max_height(self):
         """Maximum valid height."""
-        max_height = torch.sqrt(1 / self.c**2).item() - 0.01
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
+        
+        max_height = torch.sqrt(1 / c**2).item() - 0.001
         return max_height
 
     # =========================================
     # Tolerancing
     # =========================================
-    def perturb(self, tolerance_params=None):
-        """Randomly perturb surface parameters to simulate manufacturing errors.
+    def init_tolerance(self, tolerance_params=None):
+        """Initialize tolerance parameters for the surface.
         
         Args:
             tolerance_params (dict): Tolerance for surface parameters.
         """
-        super().perturb(tolerance_params)
-        self.c_error = float(np.random.randn() * tolerance_params.get("c_error", 0.001))
+        super().init_tolerance(tolerance_params)
+        self.c_tole = tolerance_params.get("c_tole", 0.001)
 
-    def perturb_clear(self):
-        """Clear perturbation."""
-        super().perturb_clear()
+    def sample_tolerance(self):
+        """Randomly perturb surface parameters to simulate manufacturing errors."""
+        super().sample_tolerance()
+        self.c_error = float(np.random.randn() * self.c_tole)
+
+    def zero_tolerance(self):
+        """Zero tolerance."""
+        super().zero_tolerance()
         self.c_error = 0.0
+
+    def tolerance_score(self):
+        """Tolerance squared sum."""
+        score = 0.0
+        score += super().tolerance_score()
+        score += self.c_tole**2 * self.c.grad**2
+        return score
 
     # =========================================
     # Optimization
