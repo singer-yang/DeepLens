@@ -2186,8 +2186,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         with open(filename, "r") as f:
             data = json.load(f)
             d = 0.0
-            for surf_dict in data["surfaces"]:
+            for idx, surf_dict in enumerate(data["surfaces"]):
                 surf_dict["d"] = d
+                surf_dict["surf_idx"] = idx
 
                 if surf_dict["type"] == "Aperture":
                     s = Aperture.init_from_dict(surf_dict)
@@ -2257,9 +2258,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         data["(sensor_size)"] = [round(i, 4) for i in self.sensor_size]
         data["surfaces"] = []
         for i, s in enumerate(self.surfaces):
-            surf_dict = {"idx": i + 1}
-            surf_dict.update(s.surf_dict())
-
+            surf_dict = s.surf_dict()
             if i < len(self.surfaces) - 1:
                 surf_dict["d_next"] = round(
                     self.surfaces[i + 1].d.item() - self.surfaces[i].d.item(), 4

@@ -40,6 +40,11 @@ class GeoLensTolerance:
         # Refocus the lens
         self.refocus()
 
+
+    # =======================================
+    # Tolerancing
+    # =======================================
+    
     def tolerancing_sensitivity(self, tolerance_params=None):
         """Use sensitivity analysis (1st order gradient) to compute the tolerance score.
         
@@ -54,14 +59,17 @@ class GeoLensTolerance:
         loss = self.loss_rms()
         loss.backward()
 
-        # Calculate tolerancing score
-        tolerancing_score = 0.0
+        # Calculate sensitivity results
+        sensitivity_results = {}
         for i in range(len(self.surfaces)):
-            tolerancing_score += self.surfaces[i].sensitivity_score()
-
+            sensitivity_results.update(self.surfaces[i].sensitivity_score())
+        
         # Toleranced loss
+        tolerancing_score = sum(v for k, v in sensitivity_results.items() if k.endswith("_score"))
         loss_rss = torch.sqrt(loss**2 + tolerancing_score).item()
-        return loss_rss
+        sensitivity_results['loss_nominal'] = round(loss.item(), 6)
+        sensitivity_results['loss_rss'] = round(loss_rss, 6)
+        return sensitivity_results
 
     def tolerancing_monte_carlo(self, trials=1000, tolerance_params=None):
         """Use Monte Carlo simulation to compute the tolerance.

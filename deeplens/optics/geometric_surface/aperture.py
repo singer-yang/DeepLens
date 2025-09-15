@@ -7,9 +7,9 @@ from deeplens.optics.geometric_surface.base import Surface
 
 
 class Aperture(Surface):
-    def __init__(self, r, d, diffraction=False, device="cpu"):
+    def __init__(self, r, d, diffraction=False, surf_idx=None, device="cpu"):
         """Aperture surface."""
-        Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
+        Surface.__init__(self, r, d, mat2="air", is_square=False, surf_idx=surf_idx, device=device)
         self.diffraction = diffraction
         
         self.tolerancing = False
@@ -21,7 +21,9 @@ class Aperture(Surface):
             diffraction = surf_dict["diffraction"]
         else:
             diffraction = False
-        return cls(surf_dict["r"], surf_dict["d"], diffraction)
+        
+        surf_idx = surf_dict.get("surf_idx", None)
+        return cls(surf_dict["r"], surf_dict["d"], diffraction, surf_idx=surf_idx)
 
     def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
         """Compute output ray after intersection and refraction."""
