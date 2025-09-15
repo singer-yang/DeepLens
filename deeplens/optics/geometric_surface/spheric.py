@@ -7,8 +7,8 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class Spheric(Surface):
-    def __init__(self, c, r, d, mat2, device="cpu"):
-        super(Spheric, self).__init__(r=r, d=d, mat2=mat2, is_square=False, device=device)
+    def __init__(self, c, r, d, mat2, surf_idx=None, device="cpu"):
+        super(Spheric, self).__init__(r=r, d=d, mat2=mat2, is_square=False, surf_idx=surf_idx, device=device)
         self.c = torch.tensor(c)
 
         self.tolerancing = False
@@ -20,7 +20,9 @@ class Spheric(Surface):
             c = 1 / surf_dict["roc"]
         else:
             c = surf_dict["c"]
-        return cls(c, surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
+
+        surf_idx = surf_dict.get("surf_idx", None)
+        return cls(c, surf_dict["r"], surf_dict["d"], surf_dict["mat2"], surf_idx=surf_idx)
 
     def _sag(self, x, y):
         """Compute surfaces sag z = r**2 * c / (1 - sqrt(1 - r**2 * c**2))"""
@@ -132,10 +134,12 @@ class Spheric(Surface):
 
     def sensitivity_score(self):
         """Tolerance squared sum."""
-        score = 0.0
-        score += super().sensitivity_score()
-        score += self.c_tole**2 * self.c.grad**2
-        return score
+        score_dict = super().sensitivity_score()
+        score_dict.update({
+            f"surf{self.surf_idx}_c_grad": round(self.c.grad.item(), 6),
+            f"surf{self.surf_idx}_c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
+        })
+        return score_dict
 
     # =========================================
     # Optimization
@@ -161,6 +165,7 @@ class Spheric(Surface):
         """Return surface parameters."""
         roc = 1 / self.c.item() if self.c.item() != 0 else 0.0
         surf_dict = {
+            "idx": self.surf_idx,
             "type": "Spheric",
             "r": round(self.r, 4),
             "(c)": round(self.c.item(), 4),

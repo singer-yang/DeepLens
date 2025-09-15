@@ -14,8 +14,9 @@ EPSILON = 1e-12  # [float], small value to avoid division by zero
 
 
 class Surface(DeepObj):
-    def __init__(self, r, d, mat2, is_square=False, device="cpu"):
+    def __init__(self, r, d, mat2, is_square=False, surf_idx=None, device="cpu"):
         super(Surface, self).__init__()
+        self.surf_idx = surf_idx
 
         # Surface
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
@@ -551,9 +552,12 @@ class Surface(DeepObj):
         Reference:
             [1] Page 10 from: https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
         """
-        score = 0.0
-        score += self.d_tole**2 * self.d.grad**2
-        return score
+        score_dict = {}
+        score_dict.update({
+            f"surf{self.surf_idx}_d_grad": round(self.d.grad.item(), 6),
+            f"surf{self.surf_idx}_d_score": round((self.d_tole**2 * self.d.grad**2).item(), 6),
+        })
+        return score_dict
 
     # =====================================================================
     # Visualization
