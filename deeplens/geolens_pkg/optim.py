@@ -86,7 +86,7 @@ class GeoLensOptim:
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
 
-    def loss_reg(self, w_focus=1.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=5.0):
+    def loss_reg(self, w_focus=2.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=5.0):
         """An empirical regularization loss for lens design.
 
         By default we should use weight 0.1 * self.loss_reg() in the total loss.
@@ -257,38 +257,32 @@ class GeoLensOptim:
         # Loss, minimize loss_max and maximize loss_min
         return loss_max - loss_min
 
-    def loss_ray_angle(self, target=0.5, depth=DEPTH):
-        """Loss function designed to penalize large incident angle rays.
+    def loss_ray_angle(self, target=0.5):
+        """Loss function to penalize large incident angle rays.
 
         Oblique angle is defined as the cosine of the angle between the ray and the normal vector of the surface.
 
         Args:
             target (float, optional): target of ray angle. Defaults to 0.5.
-            depth (float, optional): depth of the lens. Defaults to DEPTH.
         """
         # Sample grid rays, shape [num_grid, num_grid, num_rays, 3]
-        ray = self.sample_grid_rays(num_grid=GEO_GRID, depth=depth, sample_more_off_axis=True)
+        ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, sample_more_off_axis=True)
         ray = self.trace2sensor(ray)
 
-        # Loss (we want to maximize ray angle term)
-        mask = ray.obliq < target
-        if mask.any():
-            loss = ray.obliq[mask].mean()
-        else:
-            loss = torch.tensor(0.0, device=self.device)
-
-        # We want to maximize ray angle term
-        return -loss
+        # Loss on ray oblique angle
+        loss_angle = torch.where(ray.obliq < target, ray.obliq, torch.tensor(0.0, device=self.device))
+        loss = -loss_angle.mean()
+        return loss
 
     def loss_chief_ray_angle(self):
-        """Chief ray angle loss function."""
+        """Loss function to penalize large chief ray angle."""
         max_angle_deg = self.chief_ray_angle_max
 
-        # Ray tracing
-        ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25)
+        # Ray tracing to sensor
+        ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25, sample_more_off_axis=True)
         ray = self.trace2sensor(ray)
 
-        # Calculate chief ray angle
+        # Calculate ray angle for all rays
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
         cos_cra = torch.where(
@@ -297,9 +291,8 @@ class GeoLensOptim:
             torch.tensor(cos_cra_ref, device=self.device),
         )
 
-        # Loss
+        # Loss on all unsatisfied rays
         loss = -cos_cra.mean()
-
         return loss
 
     # ================================================================
@@ -312,9 +305,7 @@ class GeoLensOptim:
         num_rays=SPP_PSF,
         sample_more_off_axis=False,
     ):
-        """Compute average RMS errors. Baseline RMS loss function.
-
-        Compared to the loss function developed in the paper, this loss function doesnot have a weight mask.
+        """Loss function to compute RGB spot error RMS.
 
         Args:
             num_grid (int, optional): Number of grid points. Defaults to GEO_GRID.
@@ -328,8 +319,8 @@ class GeoLensOptim:
         all_rms_errors = []
         for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
             ray = self.sample_grid_rays(
-                num_grid=num_grid,
                 depth=depth,
+                num_grid=num_grid,
                 num_rays=num_rays,
                 wvln=wvln,
                 sample_more_off_axis=sample_more_off_axis,
@@ -342,7 +333,7 @@ class GeoLensOptim:
 
             ray = self.trace2sensor(ray)
 
-            # # Green light point center for reference
+            # # Green light centroid for reference
             # if i == 0:
             #     with torch.no_grad():
             #         ray_center_green = ray.centroid()
@@ -355,51 +346,6 @@ class GeoLensOptim:
         avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
         return avg_rms_error
 
-    def loss_rms_infinite(self, num_grid=GEO_GRID, depth=DEPTH, num_rays=SPP_CALC):
-        """Compute RGB RMS error per pixel using Zernike polynomials.
-
-        Args:
-            num_fields: Number of fields. Defaults to 3.
-            depth: object space depth. Defaults to DEPTH.
-        """
-        # calculate fov_x and fov_y
-        [H, W] = self.sensor_res
-        tan_fov_y = np.sqrt(np.tan(self.hfov) ** 2 / (1 + W**2 / H**2))
-        tan_fov_x = np.sqrt(np.tan(self.hfov) ** 2 - tan_fov_y**2)
-        fov_y = np.rad2deg(np.arctan(tan_fov_y))
-        fov_x = np.rad2deg(np.arctan(tan_fov_x))
-        fov_y = torch.linspace(0.0, fov_y, num_grid).tolist()
-        fov_x = torch.linspace(0.0, fov_x, num_grid).tolist()
-
-        # calculate RMS error
-        all_rms_errors = []
-        all_rms_radii = []
-        for i, wvln in enumerate([WAVE_RGB[1], WAVE_RGB[0], WAVE_RGB[2]]):
-            # Ray tracing
-            ray = self.sample_parallel(fov_x=fov_x, fov_y=fov_y, num_rays=num_rays, wvln=wvln, depth=depth)
-            ray = self.trace2sensor(ray)
-
-            # Green light point center for reference
-            if i == 0:
-                pointc_green = (ray.o[..., :2] * ray.valid.unsqueeze(-1)).sum(-2) / ray.valid.sum(-1).add(EPSILON).unsqueeze(-1)  # shape [1, num_fields, 2]
-                pointc_green = pointc_green.unsqueeze(-2).repeat(1, 1, SPP_PSF, 1)  # shape [num_fields, num_fields, num_rays, 2]
-
-            # Calculate RMS error for different FoVs
-            o2_norm = (ray.o[..., :2] - pointc_green) * ray.valid.unsqueeze(-1)
-
-            # error
-            rms_error = torch.mean((((o2_norm**2).sum(-1) * ray.valid).sum(-1) / (ray.valid.sum(-1) + EPSILON)).sqrt())
-
-            # radius
-            rms_radius = torch.mean(((o2_norm**2).sum(-1) * ray.valid).sqrt().max(dim=-1).values)
-            all_rms_errors.append(rms_error)
-            all_rms_radii.append(rms_radius)
-
-        # Calculate and print average across wavelengths
-        avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
-        avg_rms_radius = torch.stack(all_rms_radii).mean(dim=0)
-
-        return avg_rms_error
 
     # def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
     #     """Loss function designed on the MTF. We want to maximize MTF values."""
@@ -503,7 +449,6 @@ class GeoLensOptim:
         num_ring = 10
         num_arm = 10
         spp = 1024
-        sample_rays_per_iter = 5 * test_per_iter if centroid else test_per_iter
 
         # Result directory and logger
         if result_dir is None:
@@ -533,10 +478,7 @@ class GeoLensOptim:
 
                     self.write_lens_json(f"{result_dir}/iter{i}.json")
                     self.analysis(f"{result_dir}/iter{i}")
-
-            # ===> Sample new rays and calculate center
-            if i % sample_rays_per_iter == 0:
-                with torch.no_grad():
+            
                     # Sample rays
                     self.update_float_setting()
                     rays_backup = []
@@ -571,6 +513,10 @@ class GeoLensOptim:
                         weight_mask /= ray_valid.sum(-1) + EPSILON
                         weight_mask /= weight_mask.mean()
 
+                        # # Drop out (10% of weight mask)
+                        # dropout_mask = torch.rand_like(weight_mask) < 0.1
+                        # weight_mask = weight_mask * (~dropout_mask)
+
                 # Loss on RMS error
                 l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
                 l_rms /= ray_valid.sum(-1) + EPSILON
@@ -580,6 +526,7 @@ class GeoLensOptim:
                 l_rms_weighted /= weight_mask.sum() + EPSILON
                 loss_rms_ls.append(l_rms_weighted)
 
+            # RMS loss for all wavelengths
             loss_rms = sum(loss_rms_ls) / len(loss_rms_ls)
 
             # Total loss
