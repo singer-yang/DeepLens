@@ -650,6 +650,7 @@ class Surface(DeepObj):
     # =====================================================================
     def surf_dict(self):
         surf_dict = {
+            "idx": self.surf_idx,
             "type": self.__class__.__name__,
             "r": round(self.r, 4),
             "(d)": round(self.d.item(), 4),
