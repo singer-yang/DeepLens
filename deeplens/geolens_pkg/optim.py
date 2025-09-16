@@ -73,8 +73,8 @@ class GeoLensOptim:
             self.sag_max = 2.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
-            self.d_to_t_max = 10.0
-            self.tmax_to_tmin_max = 5.0
+            self.diam2thick_max = 10.0
+            self.tmax2tmin_max = 5.0
 
             # Chief ray angle constraints
             self.chief_ray_angle_max = 30.0
@@ -82,15 +82,15 @@ class GeoLensOptim:
             self.is_cellphone = False
 
             # Self-intersection constraints
-            self.dist_min_center = 0.1
-            self.dist_max_center = 50.0  # float("inf")
             self.dist_min_edge = 0.1
             self.dist_max_edge = 50.0  # float("inf")
+            self.dist_min_center = 0.1
+            self.dist_max_center = 50.0  # float("inf")
             
-            self.thickness_min_center = 0.3
-            self.thickness_max_center = 50.0  # float("inf")
-            self.thickness_min_edge = 0.3
-            self.thickness_max_edge = 50.0  # float("inf")
+            self.thickness_min_edge = 1.5
+            self.thickness_max_edge = 10.0
+            self.thickness_min_center = 2.5
+            self.thickness_max_center = 10.0
             
             self.flange_min = 0.5
             self.flange_max = 50.0  # float("inf")
@@ -99,8 +99,8 @@ class GeoLensOptim:
             self.sag_max = 10.0
             self.grad_max = 1.0
             self.grad2_max = 100.0
-            self.d_to_t_max = 10.0
-            self.tmax_to_tmin_max = 5.0
+            self.diam2thick_max = 10.0
+            self.tmax2tmin_max = 5.0
 
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
@@ -161,8 +161,8 @@ class GeoLensOptim:
         sag_max_allowed = self.sag_max
         grad_max_allowed = self.grad_max
         grad2_max_allowed = self.grad2_max
-        d_to_t_max = self.d_to_t_max
-        tmax_to_tmin_max = self.tmax_to_tmin_max
+        diam2thick_max = self.diam2thick_max
+        tmax2tmin_max = self.tmax2tmin_max
 
         loss = torch.tensor(0.0, device=self.device)
         loss_d_to_t = torch.tensor(0.0, device=self.device)
@@ -197,7 +197,7 @@ class GeoLensOptim:
 
                 # Penalize diameter to thickness ratio
                 d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
-                if d_to_t > d_to_t_max:
+                if d_to_t > diam2thick_max:
                     loss_d_to_t += d_to_t
 
                 # Penalize thick_max to thick_min ratio
@@ -209,7 +209,7 @@ class GeoLensOptim:
                 else:
                     tmax_to_tmin = thick_edge / thick_center
 
-                if tmax_to_tmin > tmax_to_tmin_max:
+                if tmax_to_tmin > tmax2tmin_max:
                     loss_tmax_to_tmin += tmax_to_tmin
 
         return loss + loss_d_to_t + loss_tmax_to_tmin
