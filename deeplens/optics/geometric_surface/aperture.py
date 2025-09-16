@@ -106,6 +106,7 @@ class Aperture(Surface):
     def surf_dict(self):
         """Dict of surface parameters."""
         surf_dict = {
+            "idx": self.surf_idx,
             "type": "Aperture",
             "r": round(self.r, 4),
             "(d)": round(self.d.item(), 4),
