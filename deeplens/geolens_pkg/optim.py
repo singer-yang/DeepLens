@@ -7,10 +7,10 @@
 
 """Optimization and constraint functions for GeoLens.
 
-Differentiable lens design is typically better than conventional optimization methods for several reasons:
-    1. AutoDiff calculates more accurate gradients, which is important for complex optical systems.
-    2. First-order optimization methods are more stable than second-order methods (e.g., Levenberg-Marquardt).
-    3. Efficient definition of loss functions on lens design constraints.
+Differentiable lens design has several advantages over conventional lens design:
+    1. AutoDiff gradient calculation is faster and numerically more stable, which is important for complex optical systems.
+    2. First-order optimization with momentum (e.g., Adam) is typically more stable than second-order optimization, and also has promising convergence speed.
+    3. Efficient definition of loss functions can prevent the lens from violating constraints.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
@@ -38,21 +38,34 @@ from deeplens.utils import set_logger
 
 
 class GeoLensOptim:
-    """This class contains the optimization functions for the geometric lens design."""
+    """This class contains the optimization-related functions for the geometric lens design."""
 
     # ================================================================
     # Lens design constraints
     # ================================================================
-    def init_constraints(self):
-        """Initialize constraints for the lens design. Unit [mm]."""
+    def init_constraints(self, constraint_params=None):
+        """Initialize constraints for the lens design.
+        
+        Args:
+            constraint_params (dict): Constraint parameters.
+        """
+        if constraint_params is None:
+            constraint_params = {}
+
         if self.r_sensor < 12.0:
             self.is_cellphone = True
 
             # Self intersection constraints
-            self.dist_min = 0.05
-            self.dist_max = 1.0
-            self.thickness_min = 0.25
-            self.thickness_max = 2.0
+            self.dist_min_edge = 0.05
+            self.dist_max_edge = 1.0
+            self.dist_min_center = 0.05
+            self.dist_max_center = 0.5
+            
+            self.thickness_min_edge = 0.1
+            self.thickness_max_edge = 2.0
+            self.thickness_min_center = 0.25
+            self.thickness_max_center = 3.0
+            
             self.flange_min = 0.25
             self.flange_max = 3.0
 
@@ -64,15 +77,21 @@ class GeoLensOptim:
             self.tmax_to_tmin_max = 5.0
 
             # Chief ray angle constraints
-            self.chief_ray_angle_max = 20.0
+            self.chief_ray_angle_max = 30.0
         else:
             self.is_cellphone = False
 
             # Self-intersection constraints
-            self.dist_min = 0.1
-            self.dist_max = 50.0  # float("inf")
-            self.thickness_min = 0.3
-            self.thickness_max = 50.0  # float("inf")
+            self.dist_min_center = 0.1
+            self.dist_max_center = 50.0  # float("inf")
+            self.dist_min_edge = 0.1
+            self.dist_max_edge = 50.0  # float("inf")
+            
+            self.thickness_min_center = 0.3
+            self.thickness_max_center = 50.0  # float("inf")
+            self.thickness_min_edge = 0.3
+            self.thickness_max_edge = 50.0  # float("inf")
+            
             self.flange_min = 0.5
             self.flange_max = 50.0  # float("inf")
 
@@ -133,11 +152,11 @@ class GeoLensOptim:
 
     def loss_surface(self):
         """Penalize surface shape:
-        1. Penalize maximum sag
-        2. Penalize diameter to thickness ratio
-        3. Penalize thick_max to thick_min ratio
-        4. Penalize diameter to thickness ratio
-        5. Penalize maximum to minimum thickness ratio
+            1. Penalize maximum sag
+            2. Penalize diameter to thickness ratio
+            3. Penalize thick_max to thick_min ratio
+            4. Penalize diameter to thickness ratio
+            5. Penalize maximum to minimum thickness ratio
         """
         sag_max_allowed = self.sag_max
         grad_max_allowed = self.grad_max
@@ -201,53 +220,78 @@ class GeoLensOptim:
         Loss is designed by the distance to the next surfaces.
         """
         # Constraints
-        space_min_allowed = self.dist_min
-        space_max_allowed = self.dist_max
-        thickness_min_allowed = self.thickness_min
-        thickness_max_allowed = self.thickness_max
+        space_lower_center = self.dist_min_center
+        space_upper_center = self.dist_max_center
+        space_lower_edge = self.dist_min_edge
+        space_upper_edge = self.dist_max_edge
+        thick_lower_center = self.thickness_min_center
+        thick_upper_center = self.thickness_max_center
+        thick_lower_edge = self.thickness_min_edge
+        thick_upper_edge = self.thickness_max_edge
         flange_min_allowed = self.flange_min
         flange_max_allowed = self.flange_max
 
+        # Loss
         loss_min = torch.tensor(0.0, device=self.device)
         loss_max = torch.tensor(0.0, device=self.device)
 
         # Distance between surfaces
         for i in range(len(self.surfaces) - 1):
-            # Sample points on the two surfaces
+            # Sample evaluation points on the two surfaces
             current_surf = self.surfaces[i]
             next_surf = self.surfaces[i + 1]
-            r = torch.linspace(0.0, 1.0, 20).to(self.device) * current_surf.r
-            z_front = current_surf.surface_with_offset(r, 0.0)
-            z_next = next_surf.surface_with_offset(r, 0.0)
+            
+            r_center = torch.tensor(0.0).to(self.device) * current_surf.r
+            z_prev_center = current_surf.surface_with_offset(r_center, 0.0, valid_check=False)
+            z_next_center = next_surf.surface_with_offset(r_center, 0.0, valid_check=False)
+            
+            r_edge = torch.linspace(0.5, 1.0, 10).to(self.device) * current_surf.r
+            z_prev_edge = current_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
+            z_next_edge = next_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
 
             # Air gap
             if self.surfaces[i].mat2.name == "air":
-                # Constrain minimum distance between surfaces
-                dist_min = torch.min(z_next - z_front)
-                if dist_min < space_min_allowed:
-                    loss_min += dist_min
+                # Center air gap
+                dist_center = z_next_center - z_prev_center
+                if dist_center < space_lower_center:
+                    loss_min += dist_center
 
-                # Constrain maximum center distance between surfaces
-                dist_max = z_next[0] - z_front[0]
-                if dist_max > space_max_allowed:
-                    loss_max += dist_max
+                if dist_center > space_upper_center:
+                    loss_max += dist_center
+
+                # Edge air gap
+                dist_edge_min = torch.min(z_next_edge - z_prev_edge)
+                if dist_edge_min < space_lower_edge:
+                    loss_min += dist_edge_min
+                
+                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
+                if dist_edge_max > space_upper_edge:
+                    loss_max += dist_edge_max
 
             # Lens thickness
             else:
-                # Constrain minimum distance of elements
-                dist_min = torch.min(z_next - z_front)
-                if dist_min < thickness_min_allowed:
-                    loss_min += dist_min
+                # Center thickness
+                dist_center = z_next_center - z_prev_center
+                if dist_center < thick_lower_center:
+                    loss_min += dist_center
 
-                # Constrain maximum distance of elements
-                dist_max = torch.max(z_next - z_front)
-                if dist_max > thickness_max_allowed:
-                    loss_max += dist_max
+                if dist_center > thick_upper_center:
+                    loss_max += dist_center
+
+                # Edge thickness
+                dist_edge_min = torch.min(z_next_edge - z_prev_edge)
+                if dist_edge_min < thick_lower_edge:
+                    loss_min += dist_edge_min
+
+                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
+                if dist_edge_max > thick_upper_edge:
+                    loss_max += dist_edge_max
 
         # Distance to sensor (flange)
         last_surf = self.surfaces[-1]
         r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
+        
         flange = torch.min(z_last_surf)
         if flange < flange_min_allowed:
             loss_min += flange
