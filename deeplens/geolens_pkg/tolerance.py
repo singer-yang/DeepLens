@@ -50,11 +50,12 @@ class GeoLensTolerance:
         
         References:
             [1] Page 10 from: https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
+            [2] Fast sensitivity control method with differentiable optics. Optics Express 2025.
         """
         # Initialize tolerance
         self.init_tolerance(tolerance_params=tolerance_params)
         
-        # AutoDiff to compute the gradient
+        # AutoDiff to compute the gradient/sensitivity
         self.get_optimizer_params()
         loss = self.loss_rms()
         loss.backward()
@@ -64,7 +65,7 @@ class GeoLensTolerance:
         for i in range(len(self.surfaces)):
             sensitivity_results.update(self.surfaces[i].sensitivity_score())
         
-        # Toleranced loss
+        # Toleranced RSS (Root Sum Square) loss
         tolerancing_score = sum(v for k, v in sensitivity_results.items() if k.endswith("_score"))
         loss_rss = torch.sqrt(loss**2 + tolerancing_score).item()
         sensitivity_results['loss_nominal'] = round(loss.item(), 6)
