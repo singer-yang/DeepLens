@@ -46,7 +46,7 @@ class GeoLensVis:
         """
         # Sample points on the pupil
         if entrance_pupil:
-            pupilz, pupilr = self.calc_entrance_pupil()
+            pupilz, pupilr = self.get_entrance_pupil()
         else:
             pupilz, pupilr = 0, self.surfaces[0].r
 
