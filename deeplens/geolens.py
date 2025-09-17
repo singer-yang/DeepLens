@@ -1848,7 +1848,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
         else:
-            expand_factor = 0.20 if expand_factor is None else expand_factor
+            expand_factor = 0.10 if expand_factor is None else expand_factor
 
         # Expand surface height
         for i in surface_range:

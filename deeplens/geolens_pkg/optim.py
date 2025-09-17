@@ -62,9 +62,9 @@ class GeoLensOptim:
             self.dist_min_center = 0.05
             self.dist_max_center = 0.5
             
-            self.thickness_min_edge = 0.15
+            self.thickness_min_edge = 0.25
             self.thickness_max_edge = 2.0
-            self.thickness_min_center = 0.25
+            self.thickness_min_center = 0.4
             self.thickness_max_center = 3.0
             
             self.flange_min = 0.8
@@ -79,6 +79,7 @@ class GeoLensOptim:
 
             # Chief ray angle constraints
             self.chief_ray_angle_max = 30.0
+        
         else:
             self.is_cellphone = False
 
@@ -106,7 +107,7 @@ class GeoLensOptim:
             # Chief ray angle constraints
             self.chief_ray_angle_max = 20.0
 
-    def loss_reg(self, w_focus=2.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=5.0):
+    def loss_reg(self, w_focus=2.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=2.0):
         """An empirical regularization loss for lens design.
 
         By default we should use weight 0.1 * self.loss_reg() in the total loss.
@@ -141,7 +142,7 @@ class GeoLensOptim:
         loss = torch.tensor(0.0, device=self.device)
 
         # Ray tracing and calculate RMS error
-        ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, wvln=WAVE_RGB[1])
+        ray = self.sample_parallel(fov_x=0.0, fov_y=0.0, wvln=WAVE_RGB[1], num_rays=SPP_CALC)
         ray = self.trace2sensor(ray)
         rms_error = ray.rms_error()
 
@@ -308,23 +309,17 @@ class GeoLensOptim:
         accum_obliq_min = 0.5
 
         # Ray tracing to sensor
-        ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25, sample_more_off_axis=True)
+        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC)
         ray = self.trace2sensor(ray)
 
         # Loss on final output ray angle
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
-        cos_cra = torch.where(
-            cos_cra < cos_cra_ref,
-            cos_cra,
-            torch.tensor(0.0, device=self.device),
-        )
+        loss = torch.relu(cos_cra_ref - cos_cra).mean()
 
-        # Loss on accumulated oblique angle
-        obliq_accum = torch.where(ray.obliq < accum_obliq_min, ray.obliq, torch.tensor(0.0, device=self.device))
+        # Loss on accumulated oblique angle (currently not used)
+        # obliq_accum = torch.where(ray.obliq < accum_obliq_min, ray.obliq, torch.tensor(0.0, device=self.device))
 
-        # Loss on all unsatisfied rays
-        loss = - cos_cra.mean() - obliq_accum.mean()
         return loss
 
     # ================================================================
@@ -381,7 +376,7 @@ class GeoLensOptim:
     # ================================================================
     # Example optimization function
     # ================================================================
-    def sample_ring_arm_rays(self, num_ring=10, num_arm=10, spp=1000, depth=DEPTH, wvln=DEFAULT_WAVE, scale_pupil=1.0):
+    def sample_ring_arm_rays(self, num_ring=8, num_arm=8, spp=2048, depth=DEPTH, wvln=DEFAULT_WAVE, scale_pupil=1.0):
         """Sample rays from object space using a ring-arm pattern.
 
         This method distributes sampling points (origins of ray bundles) on a polar grid in the object plane,
@@ -440,7 +435,7 @@ class GeoLensOptim:
         depth = DEPTH
         num_ring = 8
         num_arm = 8
-        spp = 1024
+        spp = 4096
 
         # Result directory and logger
         if result_dir is None:
@@ -475,7 +470,7 @@ class GeoLensOptim:
                     self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
-                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.2)
+                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05)
                         rays_backup.append(ray)
 
                     # Calculate ray centers
