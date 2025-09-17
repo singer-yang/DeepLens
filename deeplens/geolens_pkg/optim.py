@@ -49,6 +49,7 @@ class GeoLensOptim:
         Args:
             constraint_params (dict): Constraint parameters.
         """
+        # In the future, we want to use constraint_params to set the constraints.
         if constraint_params is None:
             constraint_params = {}
 
@@ -57,17 +58,17 @@ class GeoLensOptim:
 
             # Self intersection constraints
             self.dist_min_edge = 0.05
-            self.dist_max_edge = 1.0
+            self.dist_max_edge = 2.0
             self.dist_min_center = 0.05
             self.dist_max_center = 0.5
             
-            self.thickness_min_edge = 0.1
+            self.thickness_min_edge = 0.15
             self.thickness_max_edge = 2.0
             self.thickness_min_center = 0.25
             self.thickness_max_center = 3.0
             
-            self.flange_min = 0.25
-            self.flange_max = 3.0
+            self.flange_min = 0.8
+            self.flange_max = 2.0
 
             # Surface curvature constraints
             self.sag_max = 2.0
@@ -92,7 +93,7 @@ class GeoLensOptim:
             self.thickness_min_center = 2.5
             self.thickness_max_center = 10.0
             
-            self.flange_min = 0.5
+            self.flange_min = 5.0
             self.flange_max = 50.0  # float("inf")
 
             # Surface curvature constraints
@@ -245,7 +246,7 @@ class GeoLensOptim:
             z_prev_center = current_surf.surface_with_offset(r_center, 0.0, valid_check=False)
             z_next_center = next_surf.surface_with_offset(r_center, 0.0, valid_check=False)
             
-            r_edge = torch.linspace(0.5, 1.0, 10).to(self.device) * current_surf.r
+            r_edge = torch.linspace(0.5, 1.0, 16).to(self.device) * current_surf.r
             z_prev_edge = current_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
             z_next_edge = next_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
 
@@ -289,7 +290,7 @@ class GeoLensOptim:
 
         # Distance to sensor (flange)
         last_surf = self.surfaces[-1]
-        r = torch.linspace(0.0, 1.0, 20).to(self.device) * last_surf.r
+        r = torch.linspace(0.0, 1.0, 32).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
         
         flange = torch.min(z_last_surf)
@@ -301,42 +302,29 @@ class GeoLensOptim:
         # Loss, minimize loss_max and maximize loss_min
         return loss_max - loss_min
 
-    def loss_ray_angle(self, target=0.5):
-        """Loss function to penalize large incident angle rays.
-
-        Oblique angle is defined as the cosine of the angle between the ray and the normal vector of the surface.
-
-        Args:
-            target (float, optional): target of ray angle. Defaults to 0.5.
-        """
-        # Sample grid rays, shape [num_grid, num_grid, num_rays, 3]
-        ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, sample_more_off_axis=True)
-        ray = self.trace2sensor(ray)
-
-        # Loss on ray oblique angle
-        loss_angle = torch.where(ray.obliq < target, ray.obliq, torch.tensor(0.0, device=self.device))
-        loss = -loss_angle.mean()
-        return loss
-
     def loss_chief_ray_angle(self):
         """Loss function to penalize large chief ray angle."""
         max_angle_deg = self.chief_ray_angle_max
+        accum_obliq_min = 0.5
 
         # Ray tracing to sensor
         ray = self.sample_grid_rays(num_grid=GEO_GRID, num_rays=SPP_CALC, scale_pupil=0.25, sample_more_off_axis=True)
         ray = self.trace2sensor(ray)
 
-        # Calculate ray angle for all rays
+        # Loss on final output ray angle
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
         cos_cra = torch.where(
             cos_cra < cos_cra_ref,
             cos_cra,
-            torch.tensor(cos_cra_ref, device=self.device),
+            torch.tensor(0.0, device=self.device),
         )
 
+        # Loss on accumulated oblique angle
+        obliq_accum = torch.where(ray.obliq < accum_obliq_min, ray.obliq, torch.tensor(0.0, device=self.device))
+
         # Loss on all unsatisfied rays
-        loss = -cos_cra.mean()
+        loss = - cos_cra.mean() - obliq_accum.mean()
         return loss
 
     # ================================================================
@@ -389,46 +377,6 @@ class GeoLensOptim:
         # Calculate average RMS error
         avg_rms_error = torch.stack(all_rms_errors).mean(dim=0)
         return avg_rms_error
-
-
-    # def loss_mtf(self, relative_fov=[0.0, 0.7, 1.0], depth=DEPTH, wvln=DEFAULT_WAVE):
-    #     """Loss function designed on the MTF. We want to maximize MTF values."""
-    #     loss = 0.0
-    #     for fov in relative_fov:
-    #         # ==> Calculate PSF
-    #         point = torch.tensor([fov, fov, depth])
-    #         psf = self.psf(points=point, wvln=wvln, ks=256)
-
-    #         # ==> Calculate MTF
-    #         x = torch.linspace(-1, 1, psf.shape[1]) * self.pixel_size * psf.shape[1] / 2
-    #         y = torch.linspace(-1, 1, psf.shape[0]) * self.pixel_size * psf.shape[0] / 2
-
-    #         # Extract 1D PSFs along the sagittal and tangential directions
-    #         center_x = psf.shape[1] // 2
-    #         center_y = psf.shape[0] // 2
-    #         sagittal_psf = psf[center_y, :]
-    #         tangential_psf = psf[:, center_x]
-
-    #         # Fourier Transform to get the MTFs
-    #         sagittal_mtf = torch.abs(torch.fft.fft(sagittal_psf))
-    #         tangential_mtf = torch.abs(torch.fft.fft(tangential_psf))
-
-    #         # Normalize the MTFs
-    #         sagittal_mtf /= sagittal_mtf.max().detach()
-    #         tangential_mtf /= tangential_mtf.max().detach()
-    #         delta_x = self.pixel_size
-
-    #         # Create frequency axis in cycles/mm
-    #         freq = np.fft.fftfreq(psf.shape[0], delta_x)
-
-    #         # Only keep the positive frequencies
-    #         positive_freq_idx = freq > 0
-
-    #         loss += torch.sum(
-    #             sagittal_mtf[positive_freq_idx] + tangential_mtf[positive_freq_idx]
-    #         ) / len(positive_freq_idx)
-
-    #     return -loss
 
     # ================================================================
     # Example optimization function
@@ -490,8 +438,8 @@ class GeoLensOptim:
         """
         # Experiment settings
         depth = DEPTH
-        num_ring = 10
-        num_arm = 10
+        num_ring = 8
+        num_arm = 8
         spp = 1024
 
         # Result directory and logger
@@ -527,7 +475,7 @@ class GeoLensOptim:
                     self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
-                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.0)
+                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.2)
                         rays_backup.append(ray)
 
                     # Calculate ray centers
