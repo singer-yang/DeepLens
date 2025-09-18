@@ -110,7 +110,8 @@ class Spiral(Surface):
         params.append({"params": [self.c2], "lr": lrs[2]})
 
         # We do not optimize material parameters for spiral surface.
-        assert optim_mat, "Material parameters are not optimized for spiral surface."
+        if optim_mat:
+            raise ValueError("Material parameters are not optimized for spiral surface.")
 
         return params
 
