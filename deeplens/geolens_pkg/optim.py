@@ -306,7 +306,7 @@ class GeoLensOptim:
     def loss_chief_ray_angle(self):
         """Loss function to penalize large chief ray angle."""
         max_angle_deg = self.chief_ray_angle_max
-        accum_obliq_min = 0.5
+        accum_obliq_min = 0.85
 
         # Ray tracing to sensor
         ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC)
@@ -315,12 +315,12 @@ class GeoLensOptim:
         # Loss on final output ray angle
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
-        loss = torch.relu(cos_cra_ref - cos_cra).mean()
+        loss_cra = torch.relu(cos_cra_ref - cos_cra).mean()
 
         # Loss on accumulated oblique angle (currently not used)
-        # obliq_accum = torch.where(ray.obliq < accum_obliq_min, ray.obliq, torch.tensor(0.0, device=self.device))
+        loss_obliq = torch.relu(accum_obliq_min - ray.obliq).mean()
 
-        return loss
+        return loss_cra + loss_obliq
 
     # ================================================================
     # Loss functions for image quality
@@ -376,7 +376,7 @@ class GeoLensOptim:
     # ================================================================
     # Example optimization function
     # ================================================================
-    def sample_ring_arm_rays(self, num_ring=8, num_arm=8, spp=2048, depth=DEPTH, wvln=DEFAULT_WAVE, scale_pupil=1.0):
+    def sample_ring_arm_rays(self, num_ring=8, num_arm=8, spp=2048, depth=DEPTH, wvln=DEFAULT_WAVE, scale_pupil=1.0, sample_more_off_axis=True):
         """Sample rays from object space using a ring-arm pattern.
 
         This method distributes sampling points (origins of ray bundles) on a polar grid in the object plane,
@@ -396,7 +396,16 @@ class GeoLensOptim:
         """
         # Create points on rings and arms
         max_fov_rad = self.hfov
-        ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
+        if sample_more_off_axis:
+            # Use beta distribution to sample more points near the edge (close to 1.0)
+            # Beta(0.5, 0.5) gives more samples at 0 and 1, Beta(0.5, 0.3) gives more samples near 1.0
+            beta_values = torch.linspace(0.0, 1.0, num_ring, device=self.device)
+            # Apply beta transformation to concentrate samples near 1.0
+            beta_transformed = beta_values ** 0.5  # Equivalent to Beta(0.5, 1.0) distribution
+            ring_fovs = max_fov_rad * beta_transformed
+        else:
+            ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
+        
         arm_angles = torch.linspace(0.0, 2 * np.pi, num_arm + 1, device=self.device)[:-1]
         ring_grid, arm_grid = torch.meshgrid(ring_fovs, arm_angles, indexing="ij")
         fov_x_rad = ring_grid * torch.cos(arm_grid)
@@ -425,15 +434,15 @@ class GeoLensOptim:
 
         Debug hints:
             *, Slowly and continuously update!
-            1, thickness (fov and ttl should match)
+            1, thickness (fov and ttl better match)
             2, alpha order (higher is better but more sensitive)
             3, learning rate and decay (prefer smaller lr and decay)
-            4, correct params range
+            4, reasonable parameters range
             5. nan can be introduced by torch.sqrt() function in the backward pass.
         """
         # Experiment settings
         depth = DEPTH
-        num_ring = 8
+        num_ring = 16
         num_arm = 8
         spp = 4096
 
@@ -445,6 +454,7 @@ class GeoLensOptim:
         if not logging.getLogger().hasHandlers():
             set_logger(result_dir)
         logging.info(f"lr:{lrs}, iterations:{iterations}, num_ring:{num_ring}, num_arm:{num_arm}, rays_per_fov:{spp}.")
+        logging.info("If Out-of-Memory, try to reduce num_ring, num_arm, and rays_per_fov.")
 
         # Optimizer and scheduler
         optimizer = self.get_optimizer(lrs, decay=decay, optim_mat=optim_mat)
@@ -470,7 +480,7 @@ class GeoLensOptim:
                     self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
-                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05)
+                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05, sample_more_off_axis=True)
                         rays_backup.append(ray)
 
                     # Calculate ray centers
