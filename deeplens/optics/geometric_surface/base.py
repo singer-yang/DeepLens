@@ -34,7 +34,8 @@ class Surface(DeepObj):
         # Newton method parameters
         self.newton_maxiter = 10  # [int], maximum number of Newton iterations
         self.newton_convergence = 50.0 * 1e-6  # [mm], Newton method solution threshold
-        self.newton_step_bound = 5.0  # [mm], maximum step size in each Newton iteration
+        self.newton_step_bound = self.r / 5  # [mm], maximum step size in each Newton iteration
+
 
         self.tolerancing = False
         self.device = device if device is not None else torch.device("cpu")
@@ -113,16 +114,15 @@ class Surface(DeepObj):
         else:
             d_surf = self.d
 
+        # Initial guess of t
+        # Note: Sometimes the shape of aspheric surface is too ambornal, 
+        # this step will hit the back surface region and cause error.
+        t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
+
         # 1. Non-differentiable Newton's iterations to find the intersection points
         with torch.no_grad():
             it = 0
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
-            
-            # Initial guess of t
-            # Note: Sometimes the shape of aspheric surface is too ambornal, 
-            # this step will hit the back surface region and cause error.
-            t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
-            
             while it < newton_maxiter:
                 # Converged
                 if (torch.abs(ft) < newton_convergence).all():
@@ -197,13 +197,11 @@ class Surface(DeepObj):
         # Square root term in Snell's law
         sr = torch.sqrt(1 - n**2 * (1 - cosi**2) * valid.unsqueeze(-1) + EPSILON)
 
-        # Update ray direction. Already normalized if both n and ray.d are normalized.
+        # Update ray direction and obliquity. d is already normalized if both n and ray.d are normalized.
         new_d = n * ray.d + (n * cosi - sr) * normal_vec
-        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
-
-        # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
         ray.obliq = torch.where(valid.unsqueeze(-1), new_obliq, ray.obliq)
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray valid mask
         ray.valid = ray.valid * valid
@@ -317,11 +315,10 @@ class Surface(DeepObj):
     def dfdxyz(self, x, y, valid=None):
         """Compute derivatives of surface function. Surface function: f(x, y, z): sag(x, y) - z = 0. This function is used in Newton's method and normal vector calculation.
 
-        Notes:
-            There are several methods to compute derivatives of surfaces:
-                [1] Analytical derivatives: This is the function implemented here. But the current implementation only works for surfaces which can be written as z = sag(x, y). For implicit surfaces, we need to compute derivatives (df/dx, df/dy, df/dz).
-                [2] Numerical derivatives: Use finite difference method to compute derivatives. This can be used for those very complex surfaces, for example, NURBS. But it may not be accurate when the surface is very steep.
-                [3] Automatic differentiation: Use torch.autograd to compute derivatives. This can work for almost all the surfaces and is accurate, but it requires an extra backward pass to compute the derivatives of the surface function.
+        There are several methods to compute derivatives of surfaces:
+            [1] Analytical derivatives: This is the function implemented here. But the current implementation only works for surfaces which can be written as z = sag(x, y). For implicit surfaces, we need to compute derivatives (df/dx, df/dy, df/dz).
+            [2] Numerical derivatives: Use finite difference method to compute derivatives. This can be used for those very complex surfaces, for example, NURBS. But it may not be accurate when the surface is very steep.
+            [3] Automatic differentiation: Use torch.autograd to compute derivatives. This can work for almost all the surfaces and is accurate, but it requires an extra backward pass to compute the derivatives of the surface function.
         """
         if valid is None:
             valid = self.is_valid(x, y)
