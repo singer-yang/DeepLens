@@ -160,9 +160,9 @@ class Surface(DeepObj):
 
         # 3. Determine valid solutions
         with torch.no_grad():
-            # Solution within the surface boundary and ray doesn't go back
+            # Solution within the surface boundary. Ray is allowed to go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.valid > 0) #& (t >= 0) TODO: validate this before publishing
+            valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
