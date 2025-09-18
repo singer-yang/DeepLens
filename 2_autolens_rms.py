@@ -87,9 +87,9 @@ def curriculum_design(
     """Optimize the lens by minimizing rms errors."""
     # Preparation
     depth = DEPTH
-    num_ring = 4
-    num_arm = 4
-    spp = 4096
+    num_ring = 8
+    num_arm = 8
+    spp = 2048
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
     aper_final = self.surfaces[self.aper_idx].r
@@ -237,9 +237,9 @@ if __name__ == "__main__":
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=3000,
-        test_per_iter=100,
-        optim_mat=False,
+        iterations=2000,
+        test_per_iter=50,
+        optim_mat=True,
         match_mat=False,
         shape_control=True,
         result_dir=args["result_dir"],
@@ -247,9 +247,9 @@ if __name__ == "__main__":
 
     # To obtain optimal optical performance, we typically need additional training iterations. This code uses strong lens design constraints with small learning rates, making optimization slow but steadily improving optical performance. For demonstration purposes, here we only train for 3000 steps.
     lens.optimize(
-        lrs=[float(lr) * 0.1 for lr in args["lrs"]],
+        lrs=[float(lr) * 0.5 for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=3000,
+        iterations=5000,
         test_per_iter=100,
         centroid=False,
         optim_mat=False,
