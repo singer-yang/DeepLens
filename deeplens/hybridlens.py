@@ -118,8 +118,7 @@ class HybridLens(Lens):
         # Geolens
         data["surfaces"] = []
         for i, s in enumerate(geolens.surfaces[:-1]):
-            surf_dict = {"idx": i + 1}
-            surf_dict.update(s.surf_dict())
+            surf_dict = s.surf_dict()
 
             # To exclude the last surface (DOE)
             if i < len(geolens.surfaces) - 2:

@@ -201,6 +201,8 @@ class GeoLensEval:
     def rms_map(self, num_grid=32, depth=DEPTH, wvln=DEFAULT_WAVE):
         """Calculate the RMS spot error map for a specific wavelength.
 
+        Currently this function is not used, but it can be used as the weight mask during optimization.
+
         Args:
             num_grid (int, optional): Resolution of the grid used for sampling fields/points. Defaults to 64.
             depth (float, optional): Depth of the point source. Defaults to DEPTH.
@@ -452,7 +454,8 @@ class GeoLensEval:
     # ================================================================
     # MTF
     # ================================================================
-    def psf2mtf(self, psf, pixel_size):
+    @staticmethod
+    def psf2mtf(psf, pixel_size):
         """Calculate MTF from PSF.
 
         Args:
@@ -487,8 +490,6 @@ class GeoLensEval:
 
         # Create frequency axis in cycles/mm
         freq = np.fft.fftfreq(psf.shape[0], pixel_size)
-
-        # Only keep the positive frequencies
         positive_freq_idx = freq > 0
 
         return (
@@ -517,67 +518,61 @@ class GeoLensEval:
             ks (int, optional): Kernel size for PSF calculation. Defaults to 256.
         """
         assert save_name.endswith(".png"), "save_name must end with .png"
-
-        num_fovs = len(relative_fov_list)
-        num_depths = len(depth_list)
-
-        if num_fovs == 0 or num_depths == 0:
-            print(
-                "Warning: relative_fov_list or depth_list is empty. No MTF plot generated."
-            )
-            return
+        pixel_size = self.pixel_size
+        nyquist_freq = 0.5 / pixel_size
 
         # Wavelength colors and labels
         red, green, blue = "#CC0000", "#006600", "#0066CC"
-        wavelength_colors = [red, green, blue]
-        wavelength_labels = ["R", "G", "B"]
+        wvln_colors = [red, green, blue]
+        wvln_labels = ["R", "G", "B"]
 
-        # Create figure and subplots
+        # Create figure and subplots (num_depths * num_fovs subplots)
+        num_fovs = len(relative_fov_list)
+        num_depths = len(depth_list)
         fig, axs = plt.subplots(
             num_depths, num_fovs, figsize=(num_fovs * 3, num_depths * 3), squeeze=False
         )
 
         # Iterate over depth and field of view
-        for depth_idx, current_depth in enumerate(depth_list):
-            for fov_idx, current_fov_relative in enumerate(relative_fov_list):
-                ax = axs[depth_idx, fov_idx]
-
-                # Calculate field of view and depth
-                fov_deg = round(current_fov_relative * self.hfov * 180 / np.pi, 1)
-                depth_str = (
-                    "inf" if current_depth == float("inf") else f"{current_depth}"
-                )
-
+        for depth_idx, depth in enumerate(depth_list):
+            for fov_idx, fov_relative in enumerate(relative_fov_list):
                 # Calculate rgb PSF
-                point = [0, -current_fov_relative, current_depth]
-                psf_rgb = self.psf_rgb(points=point, ks=ks)
+                point = [0, -fov_relative, depth]
+                psf_rgb = self.psf_rgb(points=point, ks=ks, recenter=True)
 
-                # Calculate MTF for each wavelength channel
-                for wvln_channel_idx, wvln_actual in enumerate(WAVE_RGB):
-                    # Calculate MTF from PSF
-                    psf = psf_rgb[wvln_channel_idx]
-                    freq, mtf_tan, mtf_sag = self.psf2mtf(psf, self.pixel_size)
+                # Calculate MTF curves for rgb wavelengths
+                for wvln_idx, wvln in enumerate(WAVE_RGB):
+                    # Calculate MTF curves from PSF
+                    psf = psf_rgb[wvln_idx]
+                    freq, mtf_tan, mtf_sag = self.psf2mtf(psf, pixel_size)
 
-                    # Plot MTF curve
-                    color = wavelength_colors[wvln_channel_idx % len(wavelength_colors)]
-                    wvln_short_label = wavelength_labels[
-                        wvln_channel_idx % len(wavelength_labels)
-                    ]
-                    wvln_nm = int(wvln_actual * 1000)
+                    # Plot MTF curves
+                    ax = axs[depth_idx, fov_idx]
+                    color = wvln_colors[wvln_idx % len(wvln_colors)]
+                    wvln_label = wvln_labels[wvln_idx % len(wvln_labels)]
+                    wvln_nm = int(wvln * 1000)
                     ax.plot(
                         freq,
                         mtf_tan,
                         color=color,
-                        label=f"{wvln_short_label}({wvln_nm}nm)-Tan",
+                        label=f"{wvln_label}({wvln_nm}nm)-Tan",
                     )
                     ax.plot(
                         freq,
                         mtf_sag,
                         color=color,
-                        label=f"{wvln_short_label}({wvln_nm}nm)-Sag",
+                        label=f"{wvln_label}({wvln_nm}nm)-Sag",
                         linestyle="--",
                     )
 
+                # Draw Nyquist frequency
+                ax.axvline(
+                    x=nyquist_freq, color="k", linestyle=":", linewidth=1.2, label="Nyquist"
+                )
+
+                # Set title and label for subplot
+                fov_deg = round(fov_relative * self.hfov * 180 / np.pi, 1)
+                depth_str = ("inf" if depth == float("inf") else f"{depth}")
                 ax.set_title(f"Depth: {depth_str}mm, FOV: {fov_deg}deg", fontsize=8)
                 ax.set_xlabel("Spatial Frequency [cycles/mm]", fontsize=8)
                 ax.set_ylabel("MTF", fontsize=8)
@@ -644,7 +639,7 @@ class GeoLensEval:
         pass
 
     # ================================================================
-    # Chief ray calculation
+    # Chief ray calculation and ray aiming
     # ================================================================
     @torch.no_grad()
     def calc_chief_ray(self, fov, plane="sagittal"):
