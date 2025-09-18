@@ -7,12 +7,11 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class Spheric(Surface):
-    def __init__(self, c, r, d, mat2, device="cpu"):
-        super(Spheric, self).__init__(r, d, mat2, is_square=False, device=device)
+    def __init__(self, c, r, d, mat2, surf_idx=None, device="cpu"):
+        super(Spheric, self).__init__(r=r, d=d, mat2=mat2, is_square=False, surf_idx=surf_idx, device=device)
         self.c = torch.tensor(c)
 
-        self.c_perturb = 0.0
-        self.d_perturb = 0.0
+        self.tolerancing = False
         self.to(device)
 
     @classmethod
@@ -21,20 +20,32 @@ class Spheric(Surface):
             c = 1 / surf_dict["roc"]
         else:
             c = surf_dict["c"]
-        return cls(c, surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
+
+        surf_idx = surf_dict.get("surf_idx", None)
+        return cls(c, surf_dict["r"], surf_dict["d"], surf_dict["mat2"], surf_idx=surf_idx)
 
     def _sag(self, x, y):
         """Compute surfaces sag z = r**2 * c / (1 - sqrt(1 - r**2 * c**2))"""
-        c = self.c + self.c_perturb
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
 
+        # Compute surface sag
         r2 = x**2 + y**2
         sag = c * r2 / (1 + torch.sqrt(1 - r2 * c**2))
         return sag
 
     def _dfdxy(self, x, y):
         """Compute surface sag derivatives to x and y: dz / dx, dz / dy."""
-        c = self.c + self.c_perturb
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
 
+        # Compute surface sag derivatives
         r2 = x**2 + y**2
         sf = torch.sqrt(1 - r2 * c**2 + EPSILON)
         dfdr2 = c / (2 * sf)
@@ -56,7 +67,13 @@ class Spheric(Surface):
             d2f_dxdy (tensor): ∂²f / ∂x∂y
             d2f_dy2 (tensor): ∂²f / ∂y²
         """
-        c = self.c + self.c_perturb
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
+        
+        # Compute surface sag derivatives
         r2 = x**2 + y**2
         sf = torch.sqrt(1 - r2 * c**2 + EPSILON)
 
@@ -75,25 +92,54 @@ class Spheric(Surface):
 
     def is_within_data_range(self, x, y):
         """Invalid when shape is non-defined."""
-        c = self.c + self.c_perturb
-
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
+        
         valid = (x**2 + y**2) < 1 / c**2
         return valid
 
     def max_height(self):
         """Maximum valid height."""
-        c = self.c + self.c_perturb
-
-        max_height = torch.sqrt(1 / c**2).item() - 0.01
+        if self.tolerancing:
+            c = self.c + self.c_error
+        else:
+            c = self.c
+        
+        max_height = torch.sqrt(1 / c**2).item() - 0.001
         return max_height
 
     # =========================================
-    # Manufacturing
+    # Tolerancing
     # =========================================
-    def perturb(self, tolerance):
+    def init_tolerance(self, tolerance_params=None):
+        """Initialize tolerance parameters for the surface.
+        
+        Args:
+            tolerance_params (dict): Tolerance for surface parameters.
+        """
+        super().init_tolerance(tolerance_params)
+        self.c_tole = tolerance_params.get("c_tole", 0.0001)
+
+    def sample_tolerance(self):
         """Randomly perturb surface parameters to simulate manufacturing errors."""
-        self.r_offset = np.random.randn() * tolerance.get("r", 0.001)
-        self.d_offset = np.random.randn() * tolerance.get("d", 0.001)
+        super().sample_tolerance()
+        self.c_error = float(np.random.randn() * self.c_tole)
+
+    def zero_tolerance(self):
+        """Zero tolerance."""
+        super().zero_tolerance()
+        self.c_error = 0.0
+
+    def sensitivity_score(self):
+        """Tolerance squared sum."""
+        score_dict = super().sensitivity_score()
+        score_dict.update({
+            f"surf{self.surf_idx}_c_grad": round(self.c.grad.item(), 6),
+            f"surf{self.surf_idx}_c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
+        })
+        return score_dict
 
     # =========================================
     # Optimization
@@ -119,6 +165,7 @@ class Spheric(Surface):
         """Return surface parameters."""
         roc = 1 / self.c.item() if self.c.item() != 0 else 0.0
         surf_dict = {
+            "idx": self.surf_idx,
             "type": "Spheric",
             "r": round(self.r, 4),
             "(c)": round(self.c.item(), 4),

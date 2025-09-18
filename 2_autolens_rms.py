@@ -89,7 +89,7 @@ def curriculum_design(
     depth = DEPTH
     num_ring = 8
     num_arm = 8
-    spp = 512
+    spp = 2048
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
     aper_final = self.surfaces[self.aper_idx].r
@@ -122,6 +122,7 @@ def curriculum_design(
                     aper_final,
                 )
                 self.surfaces[self.aper_idx].update_r(aper_r)
+                self.update_float_setting()
 
                 # Correct lens shape and evaluate current design
                 if i > 0:
@@ -136,8 +137,6 @@ def curriculum_design(
                 self.analysis(f"{result_dir}/iter{i}")
 
                 # Sample new rays and calculate target centers
-                self.update_float_setting()
-
                 rays_backup = []
                 for wv in WAVE_RGB:
                     ray = self.sample_ring_arm_rays(
@@ -146,6 +145,7 @@ def curriculum_design(
                         depth=depth,
                         spp=spp,
                         wvln=wv,
+                        scale_pupil=1.05,
                     )
                     rays_backup.append(ray)
 
@@ -172,6 +172,10 @@ def curriculum_design(
                     weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                     weight_mask /= ray_valid.sum(-1) + EPSILON
                     weight_mask /= weight_mask.mean()
+
+                    # Drop out (20% of weight mask)
+                    dropout_mask = torch.rand_like(weight_mask) < 0.2
+                    weight_mask = weight_mask * (~dropout_mask)
 
             # Loss on rms error, shape of [num_grid, num_grid]
             l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
@@ -233,9 +237,9 @@ if __name__ == "__main__":
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=3000,
-        test_per_iter=100,
-        optim_mat=False,
+        iterations=2000,
+        test_per_iter=50,
+        optim_mat=True,
         match_mat=False,
         shape_control=True,
         result_dir=args["result_dir"],
@@ -245,7 +249,7 @@ if __name__ == "__main__":
     lens.optimize(
         lrs=[float(lr) * 0.5 for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=3000,
+        iterations=5000,
         test_per_iter=100,
         centroid=False,
         optim_mat=False,
@@ -254,7 +258,7 @@ if __name__ == "__main__":
     )
 
     # =====> 3. Analyze final result
-    lens.prune_surf(expand_factor=0.1)
+    lens.prune_surf(expand_factor=0.05)
     lens.post_computation()
 
     logging.info(
