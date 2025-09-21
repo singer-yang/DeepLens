@@ -10,7 +10,7 @@ fov: 40.0
 fnum: 4.0
 flange: 18.0
 thickness: 120.0
-lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric"], ["Spheric", "Aspheric"], ["Spheric", "Aspheric"]]
+lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric", "Spheric"], ["Spheric", "Aspheric"], ["Spheric", "Aspheric"]]
 lrs: [1e-3, 1e-3, 1e-2, 1e-4]
 decay: 0.001
 
@@ -19,7 +19,37 @@ decay: 0.001
 # fov: 70.0
 # fnum: 2.0
 # flange: 1.0
-# thickness: 9.0
+# thickness: 8.0
 # lens_type: [["Aperture"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"]]
-# lrs: [1e-4, 1e-4, 1e-2, 1e-4]
+# lrs: [1e-3, 1e-3, 1e-2, 1e-3]
 # decay: 0.01
+
+# # lens target example 3 (camera lens)
+# foclen: 35.0
+# fov: 60.0
+# fnum: 2.0
+# flange: 18.0
+# thickness: 120.0
+# lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"]]
+# lrs: [1e-3, 5e-4, 0.0, 0.0]
+# decay: 0.001
+
+# # lens target example 4 (mobile lens)
+# foclen: 5.0
+# fov: 90.0
+# fnum: 2.0
+# flange: 1.5
+# thickness: 10.0
+# lens_type: [["Aperture"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"]]
+# lrs: [1e-3, 1e-3, 1e-2, 1e-3]
+# decay: 0.01
+
+# # lens target example 5 (camera lens)
+# foclen: 30.0
+# fov: 70.0
+# fnum: 2.8
+# flange: 18.0
+# thickness: 50.0
+# lens_type: [["Aspheric", "Aspheric"], ["Aperture"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"], ["Aspheric", "Aspheric"]]
+# lrs: [1e-3, 1e-3, 1e-2, 1e-4]
+# decay: 0.001

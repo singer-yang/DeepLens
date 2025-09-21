@@ -13,7 +13,7 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class AsphericNorm(Surface):
-    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, device="cpu"):
+    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, surf_idx=None, device="cpu"):
         """Initialize aspheric surface.
 
         Args:
@@ -25,12 +25,12 @@ class AsphericNorm(Surface):
             mat2 (Material): material of the second medium
             device (torch.device): device to store the tensor
         """
-        Surface.__init__(self, r, d, mat2, is_square=False, device=device)
+        Surface.__init__(self, r, d, mat2, is_square=False, surf_idx=surf_idx, device=device)
         self.norm_r = r if r > 2.0 else 2.0
         self.c = torch.tensor(c)
         self.k = torch.tensor(k)
         if ai is not None:
-            self.ai = torch.tensor(ai) # Store absolute ai
+            self.ai = torch.tensor(ai)  # Store absolute ai
             self.ai_degree = len(ai)
             # Create normalized coefficients for optimization and sag calculation
             for i, a in enumerate(ai):
@@ -42,6 +42,7 @@ class AsphericNorm(Surface):
             self.ai = None
             self.ai_degree = 0
 
+        self.tolerancing = False
         self.to(device)
 
     @classmethod
@@ -56,17 +57,25 @@ class AsphericNorm(Surface):
         else:
             ai = torch.rand(6) * 1e-30
 
+        surf_idx = surf_dict.get("surf_idx", None)
         return cls(
-            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"]
+            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"], surf_idx=surf_idx
         )
 
     def _sag(self, x, y):
         """Compute surface height."""
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+
+        # Calculate surface sag
         r2 = x**2 + y**2
-        total_surface = (
-            r2 * self.c / (1 + torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON))
-        )
-        
+        total_surface = r2 * c / (1 + torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON))
+
         # rho2 = r2 / self.norm_r**2
         # sag_aspheric = sum(norm_ai_{2i} * rho2**i) = sum(norm_ai_{2i} * (r2/self.norm_r**2)**i)
         # = sum (ai_{2i} * self.norm_r**(2i)) * (r2**i / self.norm_r**(2i)) = sum(ai_{2i} * r2**i)
@@ -74,17 +83,24 @@ class AsphericNorm(Surface):
         rho2 = r2 / (self.norm_r**2)
         for i in range(1, self.ai_degree + 1):
             norm_ai = getattr(self, f"norm_ai{2 * i}")
-            total_surface += norm_ai * rho2 ** i
+            total_surface += norm_ai * rho2**i
 
         return total_surface
 
     def _dfdxy(self, x, y):
         """Compute first-order height derivatives to x and y."""
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+
+        # Calculate surface height derivatives
         r2 = x**2 + y**2
-        sf = torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON)
-        dsdr2 = (
-            (1 + sf + (1 + self.k) * r2 * self.c**2 / 2 / sf) * self.c / (1 + sf) ** 2
-        )
+        sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
+        dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / 2 / sf) * c / (1 + sf) ** 2
 
         if self.ai_degree > 0:
             # d(sag_aspheric)/dr2 = d/dr2(sum(norm_ai_{2i} * (r2/self.norm_r**2)**i))
@@ -96,52 +112,17 @@ class AsphericNorm(Surface):
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
 
-    def _d2fdxy(self, x, y):
-        """Compute second-order derivatives of surface height with respect to x and y."""
-        r2 = x**2 + y**2
-        c = self.c
-        k = self.k
-        sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
-
-        # 1. Compute the full first derivative dsdr2
-        # Conic part
-        dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / (2 * sf)) * c / (1 + sf) ** 2
-        
-        # Aspheric part
-        if self.ai_degree > 0:
-            # d(sag_aspheric)/dr2 = d/dr2(sum(norm_ai_{2i} * (r2/self.norm_r**2)**i))
-            # = sum(norm_ai_{2i} * i * r2**(i-1) / self.norm_r**(2i))
-            for i in range(1, self.ai_degree + 1):
-                norm_ai = getattr(self, f"norm_ai{2 * i}")
-                dsdr2 += i * norm_ai * r2 ** (i - 1) / (self.norm_r ** (2 * i))
-
-        # 2. Compute the full second derivative ddsdr2_dr2
-        # This is the derivative of dsdr2 with respect to r2.
-        # Conic part's contribution to the second derivative.
-        # This formula correctly depends on the *full* dsdr2 value computed above.
-        ddsdr2_dr2 = (
-            (((1 + k) * c**2) / (2 * sf) + ((1 + k)**2 * r2 * c**4) / (4 * sf**3)) * c / (1 + sf)**2
-            - (2 * dsdr2 * ((1 + k) * c**2 / (2 * sf))) / (1 + sf)
-        )
-        
-        # Aspheric part's contribution to the second derivative
-        if self.ai_degree > 1:
-            # d/dr2 of aspheric part of dsdr2: sum(i * (i-1) * norm_ai_{2i} * r2**(i-2) / self.norm_r**(2i))
-            for i in range(2, self.ai_degree + 1):
-                norm_ai = getattr(self, f"norm_ai{2 * i}")
-                ddsdr2_dr2 += i * (i - 1) * norm_ai * r2 ** (i - 2) / (self.norm_r ** (2 * i))
-
-        # 3. Compute final second-order derivatives
-        d2f_dx2 = 2 * dsdr2 + 4 * x**2 * ddsdr2_dr2
-        d2f_dxdy = 4 * x * y * ddsdr2_dr2
-        d2f_dy2 = 2 * dsdr2 + 4 * y**2 * ddsdr2_dr2
-
-        return d2f_dx2, d2f_dxdy, d2f_dy2
-
     def is_within_data_range(self, x, y):
         """Invalid when shape is non-defined."""
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+
         if self.k > -1:
-            valid = (x**2 + y**2) < 1 / self.c**2 / (1 + self.k)
+            valid = (x**2 + y**2) < 1 / c**2 / (1 + k)
         else:
             valid = torch.ones_like(x, dtype=torch.bool)
 
@@ -149,34 +130,26 @@ class AsphericNorm(Surface):
 
     def max_height(self):
         """Maximum valid height."""
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+
         if self.k > -1:
-            max_height = torch.sqrt(1 / (self.k + 1) / (self.c**2)).item() - 0.01
+            max_height = torch.sqrt(1 / (k + 1) / (c**2)).item() - 0.01
         else:
             max_height = 100
 
         return max_height
 
-    
     # =======================================
     # Optimization
     # =======================================
-    def get_optim_param_count(self, optim_mat=False):
-        """Get number of optimizable parameters."""
-        count = 0
-        if self.c != 0:
-            count += 1
-        count += 1  # for d
-        if self.k != 0:
-            count += 1
-        
-        if self.ai is not None:
-            count += self.ai_degree
-
-        if optim_mat and self.mat2.get_name() != "air":
-            count += self.mat2.get_optim_param_count()
-        return count
-
-    def get_optimizer_params(self, lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.001, optim_mat=False):
+    def get_optimizer_params(
+        self, lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.001, optim_mat=False
+    ):
         """Get optimizer parameters for different parameters.
 
         Args:
@@ -209,7 +182,7 @@ class AsphericNorm(Surface):
         if self.ai is not None:
             if self.ai_degree > 0:
                 for i in range(1, self.ai_degree + 1):
-                    p_name = f"norm_ai{2*i}"
+                    p_name = f"norm_ai{2 * i}"
                     p = getattr(self, p_name)
                     p.requires_grad_(True)
                     params.append({"params": [p], "lr": lrs[param_idx]})
@@ -227,7 +200,7 @@ class AsphericNorm(Surface):
         r_new = r
         norm_r_old = self.norm_r
         norm_r_new = r_new if r_new > 2.0 else 2.0
-        
+
         # Update normalized ai
         for i in range(1, self.ai_degree + 1):
             norm_ai = getattr(self, f"norm_ai{2 * i}")
@@ -238,20 +211,39 @@ class AsphericNorm(Surface):
         self.norm_r = norm_r_new
 
     # =======================================
-    # Perturbation
+    # Tolerancing
     # =======================================
     @torch.no_grad()
-    def perturb(self, tolerance):
+    def init_tolerance(self, tolerance_params=None):
         """Perturb the surface with some tolerance."""
-        self.r_offset = float(self.r * np.random.randn() * tolerance.get("r", 0.001))
-        self.c_offset = float(self.c * np.random.randn() * tolerance.get("c", 0.001))
-        self.d_offset = float(np.random.randn() * tolerance.get("d", 0.001))
-        self.k_offset = float(np.random.randn() * tolerance.get("k", 0.001))
-        for i in range(1, self.ai_degree + 1):
-            p_name = f"norm_ai{2 * i}"
-            offset_name = f"{p_name}_offset"
-            offset_val = float(np.random.randn() * tolerance.get(p_name, 0.001))
-            setattr(self, offset_name, offset_val)
+        super().init_tolerance(tolerance_params)
+        self.c_tole = tolerance_params.get("c_tole", 0.0001)
+        self.k_tole = tolerance_params.get("k_tole", 0.001)
+
+    def sample_tolerance(self):
+        """Sample a random manufacturing error for the surface."""
+        super().sample_tolerance()
+        self.c_error = float(np.random.randn() * self.c_tole)
+        self.k_error = float(np.random.randn() * self.k_tole)
+
+    def zero_tolerance(self):
+        """Clear perturbation."""
+        super().zero_tolerance()
+        self.c_error = 0.0
+        self.k_error = 0.0
+
+    def sensitivity_score(self):
+        """Tolerance squared sum."""
+        score_dict = super().sensitivity_score()
+        score_dict.update({
+            f"surf{self.surf_idx}_c_grad": round(self.c.grad.item(), 6),
+            f"surf{self.surf_idx}_c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
+        })
+        score_dict.update({
+            f"surf{self.surf_idx}_k_grad": round(self.k.grad.item(), 6),
+            f"surf{self.surf_idx}_k_score": round((self.k_tole**2 * self.k.grad**2).item(), 6),
+        })
+        return score_dict
 
     # =======================================
     # IO
@@ -259,6 +251,7 @@ class AsphericNorm(Surface):
     def surf_dict(self):
         """Return a dict of surface."""
         surf_dict = {
+            "idx": self.surf_idx,
             "type": "Aspheric",
             "r": round(self.r, 4),
             "(c)": round(self.c.item(), 4),
@@ -274,7 +267,7 @@ class AsphericNorm(Surface):
                 norm_ai = getattr(self, p_name)
                 # abs_ai = norm_ai / norm_r^(2i)
                 abs_ai = norm_ai.item() / (self.norm_r ** (2 * i))
-                surf_dict[f'(ai{2 * i})'] = float(format(abs_ai, '.6e'))
+                surf_dict[f"(ai{2 * i})"] = float(format(abs_ai, ".6e"))
                 surf_dict["ai"].append(float(format(abs_ai, ".6e")))
 
         return surf_dict
@@ -287,14 +280,14 @@ class AsphericNorm(Surface):
         assert self.ai is not None or self.k != 0, (
             "Spheric surface is re-implemented in Spheric class."
         )
-        
+
         # Get absolute ai values for Zemax file
         abs_ai = []
         if self.ai_degree > 0:
             for i in range(1, self.ai_degree + 1):
                 norm_ai = getattr(self, f"norm_ai{2 * i}")
                 abs_ai.append(norm_ai.item() / (self.norm_r ** (2 * i)))
-        
+
         # Pad with zeros if necessary for Zemax PARM format
         while len(abs_ai) < 6:
             abs_ai.append(0.0)
@@ -307,7 +300,7 @@ class AsphericNorm(Surface):
         if self.mat2.get_name() != "air":
             common_params += f"""
     GLAS ___BLANK 1 0 {self.mat2.n} {self.mat2.V}"""
-        
+
         common_params += f"""
     DIAM {self.r} 1 0 0 1 ""
     CONI {self.k}
@@ -317,5 +310,5 @@ class AsphericNorm(Surface):
     PARM 4 {abs_ai[3]}
     PARM 5 {abs_ai[4]}
     PARM 6 {abs_ai[5]}"""
-        
+
         return common_params

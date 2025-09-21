@@ -5,11 +5,11 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""A hybrid refractive-diffractive lens consisting of a geolens and a DOE in the back. Hybrid ray-tracing-wave-propagation is used for differentiable simulation.
+"""Ray-wave model for hybrid refractive-diffractive lens. 
 
-This differentiable hybrid lens model can similate:
-    1. Aberration of the refractive lens
-    2. DOE phase modulation
+Hybrid lens consists of a geolens and a DOE in the back. Differentiable ray-wave model is used for optical simulation: first calculate the complex wavefield at DOE plane by coherent ray tracing, then propagate the wavefield to sensor plane by angular spectrum method.
+
+This hybrid lens model can simulate: (1) Aberration of the refractive lens, (2) DOE phase modulation
 
 Technical Paper:
     Xinge Yang, Matheus Souza, Kunyi Wang, Praneeth Chakravarthula, Qiang Fu, Wolfgang Heidrich, "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model," Siggraph Asia 2024.
@@ -71,7 +71,7 @@ class HybridLens(Lens):
     def read_lens_json(self, filename):
         """Read the lens from .json file."""
         # Load geolens
-        geolens = GeoLens(filename=filename)
+        geolens = GeoLens(filename=filename, device=self.device)
 
         # Load DOE (diffractive surface)
         with open(filename, "r") as f:
@@ -102,7 +102,7 @@ class HybridLens(Lens):
         # Update hybrid lens sensor resolution and pixel size
         self.set_sensor(sensor_size=geolens.sensor_size, sensor_res=geolens.sensor_res)
         self.to(self.device)
-        
+
     def write_lens_json(self, lens_path):
         """Write the lens into .json file."""
         geolens = self.geolens
@@ -118,8 +118,7 @@ class HybridLens(Lens):
         # Geolens
         data["surfaces"] = []
         for i, s in enumerate(geolens.surfaces[:-1]):
-            surf_dict = {"idx": i + 1}
-            surf_dict.update(s.surf_dict())
+            surf_dict = s.surf_dict()
 
             # To exclude the last surface (DOE)
             if i < len(geolens.surfaces) - 2:
@@ -353,6 +352,8 @@ class HybridLens(Lens):
                 entrance_pupil=True,
                 wvln=WAVE_RGB[2 - i],
             )
+            ray.prop_to(-1.0)
+            
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
             ax, fig = geolens.draw_ray_2d(
                 ray_o_record, ax=ax, fig=fig, color=color_list[i]

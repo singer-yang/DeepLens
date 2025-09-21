@@ -110,18 +110,10 @@ class Spiral(Surface):
         params.append({"params": [self.c2], "lr": lrs[2]})
 
         # We do not optimize material parameters for spiral surface.
-        assert optim_mat, "Material parameters are not optimized for spiral surface."
+        if optim_mat:
+            raise ValueError("Material parameters are not optimized for spiral surface.")
 
         return params
-
-    # =========================================
-    # Manufacturing
-    # =========================================
-    def perturb(self, tolerance):
-        """Perturb the surface."""
-        super().perturb(tolerance)
-        self.c1_offset = np.random.randn() * tolerance.get("c1", 0.001)
-        self.c2_offset = np.random.randn() * tolerance.get("c2", 0.001)
 
     # =========================================
     # IO
