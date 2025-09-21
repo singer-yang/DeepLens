@@ -313,11 +313,7 @@ class Material(DeepObj):
         # Load the new material parameters
         self.load_dispersion()
 
-    def get_optim_param_count(self):
-        """Get number of optimizable parameters."""
-        return 2
-
-    def get_optimizer_params(self, lrs=[1e-5, 1e-3]):
+    def get_optimizer_params(self, lrs=[1e-4, 1e-3]):
         """Optimize the material parameters (n, V)."""
         if isinstance(self.n, float):
             self.n = torch.tensor(self.n).to(self.device)

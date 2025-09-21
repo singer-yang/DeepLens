@@ -1,18 +1,20 @@
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
 """
 Automated lens design from scratch. This code uses RMS spot size for lens design, which is much faster than image-based lens design.
 
 Technical Paper:
     Xinge Yang, Qiang Fu and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import logging
-import os
 import math
+import os
 import random
 import string
 from datetime import datetime
@@ -43,7 +45,7 @@ def config():
     args["result_dir"] = result_dir
 
     if args["seed"] is None:
-        seed = random.randint(0, 100)
+        seed = random.randint(0, 100000)
         args["seed"] = seed
     set_seed(args["seed"])
 
@@ -87,7 +89,7 @@ def curriculum_design(
     depth = DEPTH
     num_ring = 8
     num_arm = 8
-    spp = 512
+    spp = 2048
 
     aper_start = self.surfaces[self.aper_idx].r * 0.3
     aper_final = self.surfaces[self.aper_idx].r
@@ -95,14 +97,18 @@ def curriculum_design(
     # Log
     if not logging.getLogger().hasHandlers():
         set_logger(result_dir)
-    logging.info(f"lr:{lrs}, iterations:{iterations}, spp:{spp}, num_ring:{num_ring}, num_arm:{num_arm}.")
+    logging.info(
+        f"lr:{lrs}, iterations:{iterations}, spp:{spp}, num_ring:{num_ring}, num_arm:{num_arm}."
+    )
 
     # Optimizer
     optimizer = self.get_optimizer(lrs, decay=decay, optim_mat=optim_mat)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iterations)
 
     # Training loop
-    pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0})
+    pbar = tqdm(
+        total=iterations + 1, desc="Progress", postfix={"loss_rms": 0, "loss_reg": 0}
+    )
     for i in range(iterations + 1):
         # =======================================
         # Evaluate the lens
@@ -116,6 +122,7 @@ def curriculum_design(
                     aper_final,
                 )
                 self.surfaces[self.aper_idx].update_r(aper_r)
+                self.update_float_setting()
 
                 # Correct lens shape and evaluate current design
                 if i > 0:
@@ -130,8 +137,6 @@ def curriculum_design(
                 self.analysis(f"{result_dir}/iter{i}")
 
                 # Sample new rays and calculate target centers
-                self.update_float_setting()
-
                 rays_backup = []
                 for wv in WAVE_RGB:
                     ray = self.sample_ring_arm_rays(
@@ -140,6 +145,7 @@ def curriculum_design(
                         depth=depth,
                         spp=spp,
                         wvln=wv,
+                        scale_pupil=1.05,
                     )
                     rays_backup.append(ray)
 
@@ -166,6 +172,10 @@ def curriculum_design(
                     weight_mask = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                     weight_mask /= ray_valid.sum(-1) + EPSILON
                     weight_mask /= weight_mask.mean()
+
+                    # Drop out (20% of weight mask)
+                    dropout_mask = torch.rand_like(weight_mask) < 0.2
+                    weight_mask = weight_mask * (~dropout_mask)
 
             # Loss on rms error, shape of [num_grid, num_grid]
             l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
@@ -217,18 +227,19 @@ if __name__ == "__main__":
     lens.set_target_fov_fnum(
         hfov=args["fov"] / 2 / 57.3,
         fnum=args["fnum"],
-        foclen=args["foclen"],
     )
-    logging.info(f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}")
+    logging.info(
+        f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}"
+    )
 
     # =====> 2. Curriculum learning with RMS errors
     # Curriculum learning is used to find an optimization path when starting from scratch, where the optimization difficulty is high and the gradients are unstable. 3000 iterations is a good starting value, while increasing the number of iterations will improve the optical performance. Also, we can choose to optimize materials in this stage.
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=3000,
-        test_per_iter=100,
-        optim_mat=False,
+        iterations=2000,
+        test_per_iter=50,
+        optim_mat=True,
         match_mat=False,
         shape_control=True,
         result_dir=args["result_dir"],
@@ -236,9 +247,9 @@ if __name__ == "__main__":
 
     # To obtain optimal optical performance, we typically need additional training iterations. This code uses strong lens design constraints with small learning rates, making optimization slow but steadily improving optical performance. For demonstration purposes, here we only train for 3000 steps.
     lens.optimize(
-        lrs=[float(lr) * 0.1 for lr in args["lrs"]],
+        lrs=[float(lr) * 0.5 for lr in args["lrs"]],
         decay=float(args["decay"]),
-        iterations=3000,
+        iterations=5000,
         test_per_iter=100,
         centroid=False,
         optim_mat=False,
@@ -247,10 +258,12 @@ if __name__ == "__main__":
     )
 
     # =====> 3. Analyze final result
-    lens.prune_surf(expand_factor=0.02)
+    lens.prune_surf(expand_factor=0.05)
     lens.post_computation()
 
-    logging.info(f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}.")
+    logging.info(
+        f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
+    )
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens")
 

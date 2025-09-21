@@ -1,6 +1,6 @@
 """Base class for geometric surfaces.
 
-Surface can refract, and reflect rays. Some surfaces can also diffract rays according to local grating approximation.
+Surface can refract, and reflect rays. Some surfaces can also diffract rays according to a local grating approximation.
 """
 
 import numpy as np
@@ -10,18 +10,19 @@ import torch.nn.functional as F
 from deeplens.optics.basics import DeepObj
 from deeplens.optics.materials import Material
 
-# Newton's method parameters
-NEWTONS_MAXITER = 10  # [int] maximum number of Newton iterations
-NEWTONS_TOLERANCE = 50.0 * 1e-6  # [mm], Newton method solution threshold
-NEWTONS_STEP_BOUND = 5.0  # [mm], maximum step size in each Newton iteration
 EPSILON = 1e-12  # [float], small value to avoid division by zero
 
-class Surface(DeepObj):
-    def __init__(self, r, d, mat2, is_square=False, device="cpu"):
-        super(Surface, self).__init__()
 
-        # Surface position
+class Surface(DeepObj):
+    def __init__(self, r, d, mat2, is_square=False, surf_idx=None, device="cpu"):
+        super(Surface, self).__init__()
+        self.surf_idx = surf_idx
+
+        # Surface
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
+        
+        # Next material
+        self.mat2 = Material(mat2)
 
         # Surface aperture radius (non-differentiable parameter)
         self.r = float(r)
@@ -30,9 +31,13 @@ class Surface(DeepObj):
             self.h = float(r * np.sqrt(2))
             self.w = float(r * np.sqrt(2))
 
-        # Next aterial
-        self.mat2 = Material(mat2)
+        # Newton method parameters
+        self.newton_maxiter = 10  # [int], maximum number of Newton iterations
+        self.newton_convergence = 50.0 * 1e-6  # [mm], Newton method solution threshold
+        self.newton_step_bound = self.r / 5  # [mm], maximum step size in each Newton iteration
 
+
+        self.tolerancing = False
         self.device = device if device is not None else torch.device("cpu")
         self.to(self.device)
 
@@ -43,9 +48,9 @@ class Surface(DeepObj):
             f"init_from_dict() is not implemented for {cls.__name__}."
         )
 
-    # =========================================
-    # Intersection, refraction, reflection
-    # =========================================
+    # =====================================================================
+    # Intersection, refraction, reflection between ray and surface
+    # =====================================================================
     def ray_reaction(self, ray, n1, n2, refraction=True):
         """Compute output ray after intersection and refraction with a surface."""
         # ray = self.to_local_coord(ray)
@@ -80,8 +85,12 @@ class Surface(DeepObj):
 
         if ray.coherent:
             if t.min() > 100 and torch.get_default_dtype() == torch.float32:
-                raise Exception("Using float32 may cause precision problem at long propagation distance.")
-            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl)
+                raise Exception(
+                    "Using float32 may cause precision problem at long propagation distance."
+                )
+            ray.opl = torch.where(
+                valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl
+            )
 
         return ray
 
@@ -95,23 +104,31 @@ class Surface(DeepObj):
             t (tensor): intersection time.
             valid (tensor): valid mask.
         """
+        newton_maxiter = self.newton_maxiter
+        newton_convergence = self.newton_convergence
+        newton_step_bound = self.newton_step_bound
+
         # Tolerance
-        if hasattr(self, "d_offset"):
-            d_surf = self.d + self.d_offset
+        if self.tolerancing:
+            d_surf = self.d + self.d_error
         else:
             d_surf = self.d
 
-        # 1. Non-differentiable Newton's method to update t and find the intersection points
-        with torch.no_grad():
-            # Initial guess of t
-            # Note: Sometimes the shape of aspheric surface is too ambornal, this step will hit the back surface region and cause error
-            t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
+        # Initial guess of t
+        # Note: Sometimes the shape of aspheric surface is too ambornal, 
+        # this step will hit the back surface region and cause error.
+        t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
 
+        # 1. Non-differentiable Newton's iterations to find the intersection points
+        with torch.no_grad():
             it = 0
             ft = 1e6 * torch.ones_like(ray.o[..., 2])
-            while (torch.abs(ft) > NEWTONS_TOLERANCE).any() and (
-                it < NEWTONS_MAXITER
-            ):
+            while it < newton_maxiter:
+                # Converged
+                if (torch.abs(ft) < newton_convergence).all():
+                    break
+
+                # Newton iteration
                 it += 1
 
                 new_o = ray.o + ray.d * t.unsqueeze(-1)
@@ -124,8 +141,8 @@ class Surface(DeepObj):
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
                     ft / (dfdt + EPSILON),
-                    -NEWTONS_STEP_BOUND,
-                    NEWTONS_STEP_BOUND,
+                    -newton_step_bound,
+                    newton_step_bound,
                 )
 
         # 2. One more Newton iteration (differentiable) to gain gradients
@@ -137,22 +154,24 @@ class Surface(DeepObj):
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
         dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
-        t = t - torch.clamp(ft / (dfdt + EPSILON), -NEWTONS_STEP_BOUND, NEWTONS_STEP_BOUND)
+        t = t - torch.clamp(
+            ft / (dfdt + EPSILON), -newton_step_bound, newton_step_bound
+        )
 
-        # 4. Determine valid solutions
+        # 3. Determine valid solutions
         with torch.no_grad():
-            # Solution within the surface boundary and ray doesn't go back
+            # Solution within the surface boundary. Ray is allowed to go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.valid > 0) & (t >= 0)
+            valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
-            valid = valid & (torch.abs(ft) < NEWTONS_TOLERANCE)
+            valid = valid & (torch.abs(ft) < newton_convergence)
 
         return t, valid
 
     def refract(self, ray, n):
-        """Calculate refractive ray according to Snell's law.
+        """Calculate refracted ray according to Snell's law.
 
         Normal vector points from the surface toward the side where the light is coming from.
 
@@ -161,7 +180,7 @@ class Surface(DeepObj):
             n (float): relevant refraction coefficient, n = n_i / n_t
 
         Returns:
-            ray (Ray): refractive ray.
+            ray (Ray): refracted ray.
 
         References:
             [1] https://en.wikipedia.org/wiki/Snell%27s_law, "Vector form" section.
@@ -178,13 +197,11 @@ class Surface(DeepObj):
         # Square root term in Snell's law
         sr = torch.sqrt(1 - n**2 * (1 - cosi**2) * valid.unsqueeze(-1) + EPSILON)
 
-        # Update ray direction. Already normalized if both n and ray.d are normalized.
+        # Update ray direction and obliquity. d is already normalized if both n and ray.d are normalized.
         new_d = n * ray.d + (n * cosi - sr) * normal_vec
-        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
-
-        # Update ray obliquity
         new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
         ray.obliq = torch.where(valid.unsqueeze(-1), new_obliq, ray.obliq)
+        ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray valid mask
         ray.valid = ray.valid * valid
@@ -266,9 +283,9 @@ class Surface(DeepObj):
             )
         )
 
-    # =================================================================================
+    # =====================================================================
     # Computation functions
-    # =================================================================================
+    # =====================================================================
     def sag(self, x, y, valid=None):
         """Calculate sag (z) of the surface: z = f(x, y). Valid term is used to avoid NaN when x, y are super large, which happens in spherical and aspherical surfaces.
 
@@ -298,11 +315,10 @@ class Surface(DeepObj):
     def dfdxyz(self, x, y, valid=None):
         """Compute derivatives of surface function. Surface function: f(x, y, z): sag(x, y) - z = 0. This function is used in Newton's method and normal vector calculation.
 
-        Notes:
-            There are several methods to compute derivatives of surfaces:
-                [1] Analytical derivatives: This is the function implemented here. But the current implementation only works for surfaces which can be written as z = sag(x, y). For implicit surfaces, we need to compute derivatives (df/dx, df/dy, df/dz).
-                [2] Numerical derivatives: Use finite difference method to compute derivatives. This can be used for those very complex surfaces, for example, NURBS. But it may not be accurate when the surface is very steep.
-                [3] Automatic differentiation: Use torch.autograd to compute derivatives. This can work for almost all the surfaces and is accurate, but it requires an extra backward pass to compute the derivatives of the surface function.
+        There are several methods to compute derivatives of surfaces:
+            [1] Analytical derivatives: This is the function implemented here. But the current implementation only works for surfaces which can be written as z = sag(x, y). For implicit surfaces, we need to compute derivatives (df/dx, df/dy, df/dz).
+            [2] Numerical derivatives: Use finite difference method to compute derivatives. This can be used for those very complex surfaces, for example, NURBS. But it may not be accurate when the surface is very steep.
+            [3] Automatic differentiation: Use torch.autograd to compute derivatives. This can work for almost all the surfaces and is accurate, but it requires an extra backward pass to compute the derivatives of the surface function.
         """
         if valid is None:
             valid = self.is_valid(x, y)
@@ -360,9 +376,15 @@ class Surface(DeepObj):
         """
         delta_x = 1e-6
         delta_y = 1e-6
-        d2fdx2 = (self._dfdxy(x + delta_x, y)[0] - self._dfdxy(x - delta_x, y)[0]) / (2 * delta_x)
-        d2fdy2 = (self._dfdxy(x, y + delta_y)[1] - self._dfdxy(x, y - delta_y)[1]) / (2 * delta_y)
-        d2fdxy = (self._dfdxy(x + delta_x, y)[1] - self._dfdxy(x - delta_x, y)[1]) / (2 * delta_x)
+        d2fdx2 = (self._dfdxy(x + delta_x, y)[0] - self._dfdxy(x - delta_x, y)[0]) / (
+            2 * delta_x
+        )
+        d2fdy2 = (self._dfdxy(x, y + delta_y)[1] - self._dfdxy(x, y - delta_y)[1]) / (
+            2 * delta_y
+        )
+        d2fdxy = (self._dfdxy(x + delta_x, y)[1] - self._dfdxy(x - delta_x, y)[1]) / (
+            2 * delta_x
+        )
         return d2fdx2, d2fdxy, d2fdy2
 
     def is_valid(self, x, y):
@@ -374,7 +396,11 @@ class Surface(DeepObj):
         if self.is_square:
             valid = (torch.abs(x) <= (self.w / 2 + EPSILON)) & (torch.abs(y) <= (self.h / 2 + EPSILON))
         else:
-            valid = (x**2 + y**2).sqrt() <= (self.r + EPSILON)
+            if self.tolerancing:
+                r = self.r + self.r_error
+            else:
+                r = self.r
+            valid = (x**2 + y**2).sqrt() <= r
 
         return valid
 
@@ -382,41 +408,61 @@ class Surface(DeepObj):
         """Valid points inside the data region of the sag function."""
         return torch.ones_like(x, dtype=torch.bool)
 
-    def surface_sample(self, N=1000):
-        """Sample uniform points on the surface."""
-        raise Exception("surface_sample() is deprecated.")
-        r_max = self.r
-        theta = torch.rand(N) * 2 * torch.pi
-        r = torch.sqrt(torch.rand(N) * r_max**2)
-        x2 = r * torch.cos(theta)
-        y2 = r * torch.sin(theta)
-        z2 = torch.full_like(x2, self.d.item())
-        o2 = torch.stack((x2, y2, z2), 1).to(self.device)
-        return o2
+    def max_height(self):
+        """Maximum valid height."""
+        if self.tolerancing:
+            r = self.r + self.r_error
+        else:
+            r = self.r
+        return r
 
-    def surface(self, x, y):
-        """Calculate z coordinate of the surface at (x, y) with offset.
+    # def surface_sample(self, N=1000):
+    #     """Sample uniform points on the surface."""
+    #     raise Exception("surface_sample() is deprecated.")
+    #     r_max = self.r
+    #     theta = torch.rand(N) * 2 * torch.pi
+    #     r = torch.sqrt(torch.rand(N) * r_max**2)
+    #     x2 = r * torch.cos(theta)
+    #     y2 = r * torch.sin(theta)
+    #     z2 = torch.full_like(x2, self.d.item())
+    #     o2 = torch.stack((x2, y2, z2), 1).to(self.device)
+    #     return o2
 
-        This function is used in lens setup plotting.
+    # def surface(self, x, y):
+    #     """Calculate z coordinate of the surface at (x, y) with offset.
+
+    #     This function is used in lens setup plotting.
+    #     """
+    #     raise Exception("surface() is deprecated. Use surface_with_offset() instead.")
+    #     x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
+    #     y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
+    #     return self.sag(x, y)
+
+    def surface_with_offset(self, x, y, valid_check=True):
+        """Calculate z coordinate of the surface at (x, y).
+
+        This function is used in lens setup plotting and lens self-intersection detection.
         """
-        raise Exception("surface() is deprecated. Use surface_with_offset() instead.")
         x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
-        return self.sag(x, y)
+        if valid_check:
+            return self.sag(x, y) + self.d
+        else:
+            return self._sag(x, y) + self.d
 
     def surface_sag(self, x, y):
-        """Calculate sag of the surface at (x, y)."""
+        """Calculate sag of the surface at (x, y).
+
+        This function is currently not used.
+        """
         x = x if torch.is_tensor(x) else torch.tensor(x).to(self.device)
         y = y if torch.is_tensor(y) else torch.tensor(y).to(self.device)
         return self.sag(x, y).item()
 
-    def max_height(self):
-        """Maximum valid height."""
-        return self.r
-
-    # =========================================
+    # =====================================================================
     # Optimization
-    # =========================================
+    # =====================================================================
+
     def get_optimizer_params(self, lrs=[1e-4], optim_mat=False):
         """Get optimizer parameters for different parameters.
 
@@ -439,38 +485,80 @@ class Surface(DeepObj):
         """Update surface radius."""
         self.r = r
 
-    # =========================================
-    # Manufacturing
-    # =========================================
-    @torch.no_grad()
-    def perturb(self, tolerance):
-        """Randomly perturb surface parameters to simulate manufacturing errors.
-
-        Reference:
-            [1] Surface precision +0.000/-0.010 mm is regarded as high quality by Edmund Optics.
-            [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-specifications/?srsltid=AfmBOorBa-0zaOcOhdQpUjmytthZc07oFlmPW_2AgaiNHHQwobcAzWII
+    # =====================================================================
+    # Tolerancing
+    # =====================================================================
+    def init_tolerance(self, tolerance_params=None):
+        """Initialize tolerance parameters for the surface.
 
         Args:
-            tolerance (dict): Tolerance for surface parameters.
+            tolerance_params (dict): Tolerance for surface parameters. Example:
+                {
+                    "r_tole": 0.05, # [mm]
+                    "d_tole": 0.05, # [mm]
+                    "center_thickness_tole": 0.1, # [mm]
+                    "decenter_tole": 0.1, # [mm]
+                    "tilt_tole": 0.1, # [arcmin]
+                    "mat2_n_tole": 0.001,
+                    "mat2_V_tole": 0.01, # [%]
+                }
+
+        References:
+            [1] https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-specifications/?srsltid=AfmBOorBa-0zaOcOhdQpUjmytthZc07oFlmPW_2AgaiNHHQwobcAzWII
+            [2] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
+            [3] https://wp.optics.arizona.edu/jsasian/wp-content/uploads/sites/33/2016/03/L17_OPTI517_Lens-_Tolerancing.pdf
         """
-        self.r_offset = float(
-            self.r * torch.randn(1).item() * tolerance.get("r", 0.001)
-        )
-        self.d_offset = float(torch.randn(1).item() * tolerance.get("d", 0.001))
+        if tolerance_params is None:
+            tolerance_params = {}
 
-    # =========================================
-    # Visualization (2D and 3D)
-    # =========================================
-    def surface_with_offset(self, x, y, valid_check=True):
-        """Calculate z coordinate of the surface at (x, y)."""
-        if torch.is_tensor(x):
-            return self._sag(x, y) + self.d
-        else:
-            x = torch.tensor(x).to(self.device)
-            y = torch.tensor(y).to(self.device)
-            z = self._sag(x, y) + self.d
-            return z.cpu().numpy()        
+        self.r_tole = tolerance_params.get("r_tole", 0.05)
+        self.d_tole = tolerance_params.get("d_tole", 0.05)
+        self.center_thick_tole = tolerance_params.get("center_thick_tole", 0.1)
+        self.decenter_tole = tolerance_params.get("decenter_tole", 0.1)
+        self.tilt_tole = tolerance_params.get("tilt_tole", 0.1)
+        self.mat2_n_tole = tolerance_params.get("mat2_n_tole", 0.001)
+        self.mat2_V_tole = tolerance_params.get("mat2_V_tole", 0.01)
 
+    @torch.no_grad()
+    def sample_tolerance(self):
+        """Sample one example manufacturing error for the surface."""
+        self.r_error = float(np.random.uniform(-self.r_tole, 0))  # [mm]
+        self.d_error = float(np.random.randn() * self.d_tole)  # [mm]
+        self.center_thick_error = float(np.random.randn() * self.center_thick_tole)
+        self.decenter_error = float(np.random.randn() * self.decenter_tole)  # [mm]
+        self.tilt_error = float(np.random.randn() * self.tilt_tole)  # [arcmin]
+        self.tilt_error = self.tilt_error / 60.0 * np.pi / 180.0  # [rad]
+        self.mat2_n_error = float(np.random.randn() * self.mat2_n_tole)
+        self.mat2_V_error = float(np.random.randn() * self.mat2_V_tole) * self.mat2.V
+        self.tolerancing = True
+
+    def zero_tolerance(self):
+        """Zero tolerance."""
+        self.r_error = 0.0
+        self.d_error = 0.0
+        self.center_thick_error = 0.0
+        self.decenter_error = 0.0
+        self.tilt_error = 0.0
+        self.mat2_n_error = 0.0
+        self.mat2_V_error = 0.0
+        self.tolerancing = False
+
+    def sensitivity_score(self):
+        """Tolerance squared sum.
+        
+        Reference:
+            [1] Page 10 from: https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
+        """
+        score_dict = {}
+        score_dict.update({
+            f"surf{self.surf_idx}_d_grad": round(self.d.grad.item(), 6),
+            f"surf{self.surf_idx}_d_score": round((self.d_tole**2 * self.d.grad**2).item(), 6),
+        })
+        return score_dict
+
+    # =====================================================================
+    # Visualization
+    # =====================================================================
     def draw_widget(self, ax, color="black", linestyle="solid"):
         """Draw widget for the surface on the 2D plot."""
         r = torch.linspace(-self.r, self.r, 128, device=self.device)
@@ -483,76 +571,76 @@ class Surface(DeepObj):
             linewidth=0.75,
         )
 
-    def draw_widget3D(self, ax, color="lightblue", res=128):
-        """Draw the surface in a 3D plot."""
-        raise Exception("draw_widget3D() is deprecated. Use get_mesh() instead.")
-        if self.is_square:
-            x = torch.linspace(-self.r, self.r, res, device=self.device)
-            y = torch.linspace(-self.r, self.r, res, device=self.device)
-            X, Y = torch.meshgrid(x, y, indexing="ij")
-        else:
-            r_coords = torch.linspace(0, self.r, res // 2, device=self.device)
-            theta_coords = torch.linspace(0, 2 * torch.pi, res, device=self.device)
-            R, Theta = torch.meshgrid(r_coords, theta_coords, indexing="ij")
-            X = R * torch.cos(Theta)
-            Y = R * torch.sin(Theta)
+    # def draw_widget3D(self, ax, color="lightblue", res=128):
+    #     """Draw the surface in a 3D plot."""
+    #     raise Exception("draw_widget3D() is deprecated.")
+    #     if self.is_square:
+    #         x = torch.linspace(-self.r, self.r, res, device=self.device)
+    #         y = torch.linspace(-self.r, self.r, res, device=self.device)
+    #         X, Y = torch.meshgrid(x, y, indexing="ij")
+    #     else:
+    #         r_coords = torch.linspace(0, self.r, res // 2, device=self.device)
+    #         theta_coords = torch.linspace(0, 2 * torch.pi, res, device=self.device)
+    #         R, Theta = torch.meshgrid(r_coords, theta_coords, indexing="ij")
+    #         X = R * torch.cos(Theta)
+    #         Y = R * torch.sin(Theta)
 
-        # Calculate z coordinates
-        Z = self.surface_with_offset(X, Y, valid_check=False)
+    #     # Calculate z coordinates
+    #     Z = self.surface_with_offset(X, Y, valid_check=False)
 
-        # Convert to numpy for plotting
-        X_np = X.cpu().detach().numpy()
-        Y_np = Y.cpu().detach().numpy()
-        Z_np = Z.cpu().detach().numpy()
+    #     # Convert to numpy for plotting
+    #     X_np = X.cpu().detach().numpy()
+    #     Y_np = Y.cpu().detach().numpy()
+    #     Z_np = Z.cpu().detach().numpy()
 
-        # Plot the surface
-        surf = ax.plot_surface(
-            Z_np,
-            X_np,
-            Y_np,
-            alpha=0.5,
-            color=color,
-            edgecolor="none",
-            rcount=res,
-            ccount=res,
-            antialiased=True,
-        )
+    #     # Plot the surface
+    #     surf = ax.plot_surface(
+    #         Z_np,
+    #         X_np,
+    #         Y_np,
+    #         alpha=0.5,
+    #         color=color,
+    #         edgecolor="none",
+    #         rcount=res,
+    #         ccount=res,
+    #         antialiased=True,
+    #     )
 
-        # Draw the edge
-        if self.is_square:
-            # Draw square edge
-            w_half, h_half = self.w / 2, self.h / 2
-            edge_x_vals = [-w_half, w_half, w_half, -w_half, -w_half]
-            edge_y_vals = [h_half, h_half, -h_half, -h_half, h_half]
-            edge_x = []
-            edge_y = []
-            edge_z = []
-            # Sample points along the square edges
-            for i in range(4):
-                x_start, x_end = edge_x_vals[i], edge_x_vals[i + 1]
-                y_start, y_end = edge_y_vals[i], edge_y_vals[i + 1]
-                num_steps = res // 4
-                xs = torch.linspace(x_start, x_end, num_steps, device=self.device)
-                ys = torch.linspace(y_start, y_end, num_steps, device=self.device)
-                zs = self.surface_with_offset(xs, ys)
-                edge_x.extend(xs.cpu().numpy())
-                edge_y.extend(ys.cpu().numpy())
-                edge_z.extend(zs.cpu().numpy())
-            ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
-        else:
-            # Draw circular edge
-            theta = torch.linspace(0, 2 * torch.pi, res, device=self.device)
-            edge_x = self.r * torch.cos(theta)
-            edge_y = self.r * torch.sin(theta)
-            edge_z_tensor = self.surface_with_offset(
-                edge_x,
-                edge_y,
-                valid_check=False,
-            )
-            edge_z = edge_z_tensor.cpu().numpy()
-            ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
+    #     # Draw the edge
+    #     if self.is_square:
+    #         # Draw square edge
+    #         w_half, h_half = self.w / 2, self.h / 2
+    #         edge_x_vals = [-w_half, w_half, w_half, -w_half, -w_half]
+    #         edge_y_vals = [h_half, h_half, -h_half, -h_half, h_half]
+    #         edge_x = []
+    #         edge_y = []
+    #         edge_z = []
+    #         # Sample points along the square edges
+    #         for i in range(4):
+    #             x_start, x_end = edge_x_vals[i], edge_x_vals[i + 1]
+    #             y_start, y_end = edge_y_vals[i], edge_y_vals[i + 1]
+    #             num_steps = res // 4
+    #             xs = torch.linspace(x_start, x_end, num_steps, device=self.device)
+    #             ys = torch.linspace(y_start, y_end, num_steps, device=self.device)
+    #             zs = self.surface_with_offset(xs, ys)
+    #             edge_x.extend(xs.cpu().numpy())
+    #             edge_y.extend(ys.cpu().numpy())
+    #             edge_z.extend(zs.cpu().numpy())
+    #         ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
+    #     else:
+    #         # Draw circular edge
+    #         theta = torch.linspace(0, 2 * torch.pi, res, device=self.device)
+    #         edge_x = self.r * torch.cos(theta)
+    #         edge_y = self.r * torch.sin(theta)
+    #         edge_z_tensor = self.surface_with_offset(
+    #             edge_x,
+    #             edge_y,
+    #             valid_check=False,
+    #         )
+    #         edge_z = edge_z_tensor.cpu().numpy()
+    #         ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
 
-        return surf
+    #     return surf
 
     def create_mesh(self, n_rings=32, n_arms=128, color=[0.06, 0.3, 0.6]):
         """Create triangulated surface mesh.
@@ -664,9 +752,10 @@ class Surface(DeepObj):
 
     # =========================================
     # IO
-    # =========================================
+    # =====================================================================
     def surf_dict(self):
         surf_dict = {
+            "idx": self.surf_idx,
             "type": self.__class__.__name__,
             "r": round(self.r, 4),
             "(d)": round(self.d.item(), 4),

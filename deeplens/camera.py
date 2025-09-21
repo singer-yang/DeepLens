@@ -5,7 +5,10 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Camera class works as a renderer in an end-to-end pipeline. It contains a lens and a sensor."""
+"""Camera. 
+
+Camera works as a renderer in an end-to-end pipeline. It contains a lens and a sensor. 
+"""
 
 import torch
 

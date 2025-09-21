@@ -1,15 +1,17 @@
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
 """An example for computational photography with realistic lens and sensor model.
 
 # The code uses distributed data parallel (DDP) scheme. To run experiments on multiple GPUs, use the following command:
 # torchrun --nproc_per_node=4 7_comp_photography.py
 
 Reference:
-    [1] Brooks, Tim, et al. "Unprocessing images for learned raw denoising." Proceedings of the IEEE/CVF conference on computer vision and pattern recognition. 2019.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
+    [1] Xinge Yang, Chuong Nguyen, Wenbin Wang, Kaizhang Kang, Wolfgang Heidrich, Xiaoxing Li. "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur." ICCVW 2025.
 """
 
 import logging

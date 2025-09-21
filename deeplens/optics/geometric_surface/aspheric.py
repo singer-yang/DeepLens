@@ -11,7 +11,7 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class Aspheric(Surface):
-    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, device="cpu"):
+    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, surf_idx=None, device="cpu"):
         """Initialize aspheric surface.
 
         Args:
@@ -23,7 +23,8 @@ class Aspheric(Surface):
             mat2 (Material): material of the second medium
             device (torch.device): device to store the tensor
         """
-        Surface.__init__(self, r, d, mat2, is_square=False, device=device)
+        Surface.__init__(self, r=r, d=d, mat2=mat2, is_square=False, surf_idx=surf_idx, device=device)
+        
         self.c = torch.tensor(c)
         self.k = torch.tensor(k)
         if ai is not None:
@@ -54,6 +55,7 @@ class Aspheric(Surface):
             self.ai = None
             self.ai_degree = 0
 
+        self.tolerancing = False
         self.to(device)
 
     @classmethod
@@ -68,25 +70,29 @@ class Aspheric(Surface):
         else:
             ai = torch.rand(6) * 1e-30
 
+        surf_idx = surf_dict.get("surf_idx", None)
         return cls(
-            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"]
+            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"], surf_idx=surf_idx
         )
 
     def _sag(self, x, y):
         """Compute surface height."""
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+
+        # Calculate surface height
         r2 = x**2 + y**2
-        total_surface = (
-            r2 * self.c / (1 + torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON))
-        )
+        total_surface = r2 * c / (1 + torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON))
 
         if self.ai_degree > 0:
             if self.ai_degree == 4:
                 total_surface = (
-                    total_surface
-                    + self.ai2 * r2
-                    + self.ai4 * r2**2
-                    + self.ai6 * r2**3
-                    + self.ai8 * r2**4
+                    total_surface + self.ai2 * r2 + self.ai4 * r2**2 + self.ai6 * r2**3 + self.ai8 * r2**4
                 )
             elif self.ai_degree == 5:
                 total_surface = (
@@ -115,21 +121,22 @@ class Aspheric(Surface):
 
     def _dfdxy(self, x, y):
         """Compute first-order height derivatives to x and y."""
+        # Tolerance
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+        
+        # Compute surface height derivatives
         r2 = x**2 + y**2
-        sf = torch.sqrt(1 - (1 + self.k) * r2 * self.c**2 + EPSILON)
-        dsdr2 = (
-            (1 + sf + (1 + self.k) * r2 * self.c**2 / 2 / sf) * self.c / (1 + sf) ** 2
-        )
+        sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
+        dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / 2 / sf) * c / (1 + sf) ** 2
 
         if self.ai_degree > 0:
             if self.ai_degree == 4:
-                dsdr2 = (
-                    dsdr2
-                    + self.ai2
-                    + 2 * self.ai4 * r2
-                    + 3 * self.ai6 * r2**2
-                    + 4 * self.ai8 * r2**3
-                )
+                dsdr2 = dsdr2 + self.ai2 + 2 * self.ai4 * r2 + 3 * self.ai6 * r2**2 + 4 * self.ai8 * r2**3
             elif self.ai_degree == 5:
                 dsdr2 = (
                     dsdr2
@@ -155,92 +162,96 @@ class Aspheric(Surface):
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
 
-    def _d2fdxy(self, x, y):
-        """Compute second-order derivatives of surface height with respect to x and y."""
-        r2 = x**2 + y**2
-        c = self.c
-        k = self.k
-        sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
+    # def _d2fdxy(self, x, y):
+    #     """Compute second-order derivatives of surface height with respect to x and y."""
+    #     # Tolerance
+    #     c = self.c + self.c_error
+    #     k = self.k + self.k_error
+    #     ai2 = self.ai2 + self.ai2_error
+    #     ai4 = self.ai4 + self.ai4_error
+    #     ai6 = self.ai6 + self.ai6_error
+    #     ai8 = self.ai8 + self.ai8_error
+    #     ai10 = self.ai10 + self.ai10_error
+    #     ai12 = self.ai12 + self.ai12_error
 
-        # Compute dsdr2
-        dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / (2 * sf)) * c / (1 + sf) ** 2
+    #     # Compute surface height derivatives
+    #     r2 = x**2 + y**2
+    #     sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
 
-        # Compute derivative of dsdr2 with respect to r2 (ddsdr2_dr2)
-        ddsdr2_dr2 = (
-            ((1 + k) * c**2 / (2 * sf)) + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
-        ) * c / (1 + sf) ** 2 - 2 * dsdr2 * (
-            1 + sf + (1 + k) * r2 * c**2 / (2 * sf)
-        ) / (1 + sf)
+    #     # Compute dsdr2
+    #     dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / (2 * sf)) * c / (1 + sf) ** 2
 
-        if self.ai_degree > 0:
-            if self.ai_degree == 4:
-                dsdr2 = (
-                    dsdr2
-                    + self.ai2
-                    + 2 * self.ai4 * r2
-                    + 3 * self.ai6 * r2**2
-                    + 4 * self.ai8 * r2**3
-                )
-                ddsdr2_dr2 = (
-                    ddsdr2_dr2
-                    + 2 * self.ai4
-                    + 6 * self.ai6 * r2
-                    + 12 * self.ai8 * r2**2
-                )
-            elif self.ai_degree == 5:
-                dsdr2 = (
-                    dsdr2
-                    + self.ai2
-                    + 2 * self.ai4 * r2
-                    + 3 * self.ai6 * r2**2
-                    + 4 * self.ai8 * r2**3
-                    + 5 * self.ai10 * r2**4
-                )
-                ddsdr2_dr2 = (
-                    ddsdr2_dr2
-                    + 2 * self.ai4
-                    + 6 * self.ai6 * r2
-                    + 12 * self.ai8 * r2**2
-                    + 20 * self.ai10 * r2**3
-                )
-            elif self.ai_degree == 6:
-                dsdr2 = (
-                    dsdr2
-                    + self.ai2
-                    + 2 * self.ai4 * r2
-                    + 3 * self.ai6 * r2**2
-                    + 4 * self.ai8 * r2**3
-                    + 5 * self.ai10 * r2**4
-                    + 6 * self.ai12 * r2**5
-                )
-                ddsdr2_dr2 = (
-                    ddsdr2_dr2
-                    + 2 * self.ai4
-                    + 6 * self.ai6 * r2
-                    + 12 * self.ai8 * r2**2
-                    + 20 * self.ai10 * r2**3
-                    + 30 * self.ai12 * r2**4
-                )
-            else:
-                for i in range(1, self.ai_degree + 1):
-                    ai_coeff = getattr(self, f"ai{2 * i}")
-                    dsdr2 += i * ai_coeff * r2 ** (i - 1)
-                    if i > 1:
-                        ddsdr2_dr2 += i * (i - 1) * ai_coeff * r2 ** (i - 2)
-        else:
-            ddsdr2_dr2 = ddsdr2_dr2
+    #     # Compute derivative of dsdr2 with respect to r2 (ddsdr2_dr2)
+    #     ddsdr2_dr2 = (
+    #         ((1 + k) * c**2 / (2 * sf)) + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
+    #     ) * c / (1 + sf) ** 2 - 2 * dsdr2 * (
+    #         1 + sf + (1 + k) * r2 * c**2 / (2 * sf)
+    #     ) / (1 + sf)
 
-        # Compute second-order derivatives
-        d2f_dx2 = 2 * dsdr2 + 4 * x**2 * ddsdr2_dr2
-        d2f_dxdy = 4 * x * y * ddsdr2_dr2
-        d2f_dy2 = 2 * dsdr2 + 4 * y**2 * ddsdr2_dr2
+    #     if self.ai_degree > 0:
+    #         if self.ai_degree == 4:
+    #             dsdr2 = dsdr2 + ai2 + 2 * ai4 * r2 + 3 * ai6 * r2**2 + 4 * ai8 * r2**3
+    #             ddsdr2_dr2 = ddsdr2_dr2 + 2 * ai4 + 6 * ai6 * r2 + 12 * ai8 * r2**2
+    #         elif self.ai_degree == 5:
+    #             dsdr2 = (
+    #                 dsdr2
+    #                 + ai2
+    #                 + 2 * ai4 * r2
+    #                 + 3 * ai6 * r2**2
+    #                 + 4 * ai8 * r2**3
+    #                 + 5 * ai10 * r2**4
+    #             )
+    #             ddsdr2_dr2 = (
+    #                 ddsdr2_dr2
+    #                 + 2 * ai4
+    #                 + 6 * ai6 * r2
+    #                 + 12 * ai8 * r2**2
+    #                 + 20 * ai10 * r2**3
+    #             )
+    #         elif self.ai_degree == 6:
+    #             dsdr2 = (
+    #                 dsdr2
+    #                 + ai2
+    #                 + 2 * ai4 * r2
+    #                 + 3 * ai6 * r2**2
+    #                 + 4 * ai8 * r2**3
+    #                 + 5 * ai10 * r2**4
+    #                 + 6 * ai12 * r2**5
+    #             )
+    #             ddsdr2_dr2 = (
+    #                 ddsdr2_dr2
+    #                 + 2 * ai4
+    #                 + 6 * ai6 * r2
+    #                 + 12 * ai8 * r2**2
+    #                 + 20 * ai10 * r2**3
+    #                 + 30 * ai12 * r2**4
+    #             )
+    #         else:
+    #             for i in range(1, self.ai_degree + 1):
+    #                 exec(f"dsdr2 += i * ai{2 * i} * r2 ** {i - 1}")
+    #                 if i > 1:
+    #                     exec(f"ddsdr2_dr2 += i * (i - 1) * ai{2 * i} * r2 ** {i - 2}")
+    #     else:
+    #         ddsdr2_dr2 = ddsdr2_dr2
 
-        return d2f_dx2, d2f_dxdy, d2f_dy2
+    #     # Compute second-order derivatives
+    #     d2f_dx2 = 2 * dsdr2 + 4 * x**2 * ddsdr2_dr2
+    #     d2f_dxdy = 4 * x * y * ddsdr2_dr2
+    #     d2f_dy2 = 2 * dsdr2 + 4 * y**2 * ddsdr2_dr2
+
+    #     return d2f_dx2, d2f_dxdy, d2f_dy2
 
     def is_within_data_range(self, x, y):
         """Invalid when shape is non-defined."""
-        if self.k > -1:
-            valid = (x**2 + y**2) < 1 / self.c**2 / (1 + self.k)
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+        
+        if k > -1:
+            valid = (x**2 + y**2) < 1 / c**2 / (1 + k)
         else:
             valid = torch.ones_like(x, dtype=torch.bool)
 
@@ -248,18 +259,27 @@ class Aspheric(Surface):
 
     def max_height(self):
         """Maximum valid height."""
-        if self.k > -1:
-            max_height = torch.sqrt(1 / (self.k + 1) / (self.c**2)).item() - 0.01
+        if self.tolerancing:
+            c = self.c + self.c_error
+            k = self.k + self.k_error
+        else:
+            c = self.c
+            k = self.k
+        
+        if k > -1:
+            max_height = torch.sqrt(1 / (k + 1) / (c**2)).item() - 0.001
         else:
             max_height = 100
 
         return max_height
 
-    
     # =======================================
     # Optimization
     # =======================================
-    def get_optimizer_params(self, lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.001, optim_mat=False):
+
+    def get_optimizer_params(
+        self, lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.001, optim_mat=False
+    ):
         """Get optimizer parameters for different parameters.
 
         Args:
@@ -268,7 +288,10 @@ class Aspheric(Surface):
         """
         # Broadcast learning rates to all aspheric coefficients
         if len(lrs) == 4:
-            lrs = lrs + [lrs[-1] * decay ** (ai_degree + 1) for ai_degree in range(self.ai_degree - 1)]
+            lrs = lrs + [
+                lrs[-1] * decay ** (ai_degree + 1)
+                for ai_degree in range(self.ai_degree - 1)
+            ]
 
         params = []
         param_idx = 0
@@ -292,7 +315,7 @@ class Aspheric(Surface):
         if self.ai is not None:
             if self.ai_degree > 0:
                 for i in range(1, self.ai_degree + 1):
-                    p_name = f"ai{2*i}"
+                    p_name = f"ai{2 * i}"
                     p = getattr(self, p_name)
                     p.requires_grad_(True)
                     params.append({"params": [p], "lr": lrs[param_idx]})
@@ -304,17 +327,51 @@ class Aspheric(Surface):
 
         return params
 
+    # =======================================
+    # Tolerancing
+    # =======================================
+
     @torch.no_grad()
-    def perturb(self, tolerance):
-        """Perturb the surface with some tolerance."""
-        self.r_offset = float(self.r * np.random.randn() * tolerance.get("r", 0.001))
-        self.c_offset = float(self.c * np.random.randn() * tolerance.get("c", 0.001))
-        self.d_offset = float(np.random.randn() * tolerance.get("d", 0.001))
-        self.k_offset = float(np.random.randn() * tolerance.get("k", 0.001))
-        for i in range(1, self.ai_degree + 1):
-            exec(
-                f"self.ai{2 * i}_offset = float(np.random.randn() * tolerance.get('ai{2 * i}', 0.001))"
-            )
+    def init_tolerance(self, tolerance_params=None):
+        """Perturb the surface with some tolerance.
+
+        Args:
+            tolerance_params (dict): Tolerance for surface parameters.
+
+        References:
+            [1] https://www.edmundoptics.com/capabilities/precision-optics/capabilities/aspheric-lenses/
+            [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/all-about-aspheric-lenses/?srsltid=AfmBOoon8AUXVALojol2s5K20gQk7W1qUisc6cE4WzZp3ATFY5T1pK8q
+        """
+        super().init_tolerance(tolerance_params)
+        self.c_tole = tolerance_params.get("c_tole", 0.001)
+        self.k_tole = tolerance_params.get("k_tole", 0.001)
+
+    def sample_tolerance(self):
+        """Randomly perturb surface parameters to simulate manufacturing errors."""
+        super().sample_tolerance()
+        self.c_error = float(np.random.randn() * self.c_tole)
+        self.k_error = float(np.random.randn() * self.k_tole)
+
+    def zero_tolerance(self):
+        """Zero tolerance."""
+        super().zero_tolerance()
+        self.c_error = 0.0
+        self.k_error = 0.0
+    
+    def sensitivity_score(self):
+        """Tolerance squared sum."""
+        score_dict = super().sensitivity_score()
+        
+        score_dict.update({
+            f"surf{self.surf_idx}_c_grad": round(self.c.grad.item(), 6),
+            f"surf{self.surf_idx}_c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
+        })
+    
+        score_dict.update({
+            f"surf{self.surf_idx}_k_grad": round(self.k.grad.item(), 6),
+            f"surf{self.surf_idx}_k_score": round((self.k_tole**2 * self.k.grad**2).item(), 6),
+        })
+        return score_dict
 
     # =======================================
     # IO
@@ -322,6 +379,7 @@ class Aspheric(Surface):
     def surf_dict(self):
         """Return a dict of surface."""
         surf_dict = {
+            "idx": self.surf_idx,
             "type": "Aspheric",
             "r": round(self.r, 4),
             "(c)": round(self.c.item(), 4),
