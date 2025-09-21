@@ -560,7 +560,7 @@ class GeoLensVis3D:
         plotter.camera.focal_point = [0, 0, unit / 2]
         
         # Create meshes
-        surf_meshes, bridge_meshes, bridge_groups, sensor_mesh = self.create_mesh(
+        surf_meshes, bridge_meshes, _, sensor_mesh = self.create_mesh(
             mesh_rings, mesh_arms
         )
 
@@ -590,31 +590,28 @@ class GeoLensVis3D:
     def save_lens_obj(
         self,
         save_dir: str,
-        mesh_rings: int = 32,
-        mesh_arms: int = 128,
+        mesh_rings: int = 128,
+        mesh_arms: int = 256,
         save_rays: bool = False,
         fovs: List[float] = [0.0],
         fov_phis: List[float] = [0.0],
         ray_rings: int = 6,
         ray_arms: int = 8,
-        save_elements: bool = False,
-        wavelength: float = 0.55,  # µm, for refractive index calculation
-        save_materials: bool = True,
+        save_elements: bool = True,
     ):
         """Save lens geometry and rays as .obj files using pyvista.
         
         Args:
             lens (GeoLens): The lens object.
             save_dir (str): The directory to save the image.
-            mesh_rings (int): The number of rings in the mesh.
-            mesh_arms (int): The number of arms in the mesh.
+            mesh_rings (int): The number of rings in the mesh. (default: 128)
+            mesh_arms (int): The number of arms in the mesh. (default: 256)
             save_rays (bool): Whether to save the rays.
             fovs (List[float]): The FoV angles to be sampled, unit: degree.
             fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
-            ray_rings (int): The number of pupil rings to be sampled.
-            ray_arms (int): The number of pupil arms to be sampled.
-            wavelength (float): Wavelength in µm for refractive index calculation.
-            save_materials (bool): Whether to generate material files with refractive indices.
+            ray_rings (int): The number of pupil rings to be sampled. (default: 6)
+            ray_arms (int): The number of pupil arms to be sampled. (default: 8)
+            save_elements (bool): Whether to save the elements.
         """
         os.makedirs(save_dir, exist_ok=True)
 
