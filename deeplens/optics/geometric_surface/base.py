@@ -648,10 +648,6 @@ class Surface(DeepObj):
         rim_vertices = self.vertices[start_idx:start_idx + n_arms]
         return RimCurve(rim_vertices, is_loop=True)
 
-    def draw_mesh(self, plotter, opacity=0.5):
-        """Draw the mesh to the plotter."""
-        plotter.add_mesh(self.get_polydata(), color=self.mesh_color, opacity=opacity)
-
     def get_polydata(self):
         """Get PyVista PolyData object from previously generated vertices and faces. 
         
