@@ -473,26 +473,44 @@ class GeoLensVis3D:
             bridge_meshes (List[FaceMesh]): Lens bridges meshes. (NOT support wrap around for now)
             sensor_mesh (RectangleMesh): Sensor meshes. (only support rectangular sensor for now)
         """
-        n_surf = len(self.surfaces)
-
-        surf_meshes = [None for _ in range(n_surf)]
-        bridge_idx = []
+        surf_meshes = []
+        element_group = []
+        element_groups = []
         bridge_meshes = []
         sensor_mesh = None
 
-        # Create the surface meshes (list of Surface objects)
+        # Create the surface meshes 
         for i, surf in enumerate(self.surfaces):
-            if i < n_surf - 1 and surf.mat2.name != "air":
-                bridge_idx.append([i, i + 1])
-            surf_meshes[i] = surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms)
-
+            # Create the surface mesh (list of Surface objects)
+            surf_meshes.append(surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms))
+                
+            # Add the surface to the element group
+            element_group.append(i)
+            if surf.mat2.name == "air":
+                element_groups.append(element_group)
+                element_group = []
+        
         # Create the bridge meshes (list of FaceMesh objects)
-        for i, pair in enumerate(bridge_idx):
-            a_idx, b_idx = pair
-            a = surf_meshes[a_idx]
-            b = surf_meshes[b_idx]
-            bridge_mesh = bridge(a.rim, b.rim)
-            bridge_meshes.append(bridge_mesh)
+        for i, pair in enumerate(element_groups):
+            if len(pair) == 1:
+                continue
+            elif len(pair) == 2:
+                a_idx, b_idx = pair
+                a = surf_meshes[a_idx]
+                b = surf_meshes[b_idx]
+                bridge_mesh = bridge(a.rim, b.rim)
+                bridge_meshes.append(bridge_mesh)
+            elif len(pair) == 3:
+                a_idx, b_idx, c_idx = pair
+                a = surf_meshes[a_idx]
+                b = surf_meshes[b_idx]
+                c = surf_meshes[c_idx]
+                bridge_mesh = bridge(a.rim, b.rim)
+                bridge_meshes.append(bridge_mesh)
+                bridge_mesh = bridge(b.rim, c.rim)
+                bridge_meshes.append(bridge_mesh)
+            else:
+                raise ValueError(f"Invalid bridge group length: {len(pair)}")
 
         # Create the sensor mesh (RectangleMesh object)
         sensor_d = self.d_sensor.item()
@@ -502,7 +520,7 @@ class GeoLensVis3D:
             np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
         )
 
-        return surf_meshes, bridge_meshes, sensor_mesh
+        return surf_meshes, bridge_meshes, element_groups, sensor_mesh
 
 
     def draw_lens_3d(
@@ -532,6 +550,7 @@ class GeoLensVis3D:
             ray_arms (int): The number of pupil arms to be sampled.
         """
         surf_color = np.array(surface_color)
+        sensor_color = np.array([0.5, 0.5, 0.5])
 
         # Initialize plotter
         plotter = Plotter(window_size=(3840, 2160), off_screen=True)
@@ -541,7 +560,7 @@ class GeoLensVis3D:
         plotter.camera.focal_point = [0, 0, unit / 2]
         
         # Create meshes
-        surf_meshes, bridge_meshes, sensor_mesh = self.create_mesh(
+        surf_meshes, bridge_meshes, bridge_groups, sensor_mesh = self.create_mesh(
             mesh_rings, mesh_arms
         )
 
@@ -552,7 +571,7 @@ class GeoLensVis3D:
         for bridge in bridge_meshes:
             self.draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
         
-        self.draw_mesh(plotter, sensor_mesh, color=[0.5, 0.5, 0.5], opacity=1.0)
+        self.draw_mesh(plotter, sensor_mesh, color=sensor_color, opacity=1.0)
 
         # Draw rays
         if draw_rays:
@@ -578,6 +597,9 @@ class GeoLensVis3D:
         fov_phis: List[float] = [0.0],
         ray_rings: int = 6,
         ray_arms: int = 8,
+        save_elements: bool = False,
+        wavelength: float = 0.55,  # µm, for refractive index calculation
+        save_materials: bool = True,
     ):
         """Save lens geometry and rays as .obj files using pyvista.
         
@@ -591,26 +613,56 @@ class GeoLensVis3D:
             fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
             ray_rings (int): The number of pupil rings to be sampled.
             ray_arms (int): The number of pupil arms to be sampled.
+            wavelength (float): Wavelength in µm for refractive index calculation.
+            save_materials (bool): Whether to generate material files with refractive indices.
         """
         os.makedirs(save_dir, exist_ok=True)
 
         # Create surfaces & bridges meshes
-        surf_meshes, bridge_meshes, sensor_mesh = self.create_mesh(
+        surf_meshes, bridge_meshes, element_groups, sensor_mesh = self.create_mesh(
             mesh_rings, mesh_arms
         )
 
-        # Merge lens polydata and save
+        if save_elements:
+            bridge_idx = 0
+            for i, pair in enumerate(element_groups):
+                if len(pair) == 1:
+                    element = surf_meshes[pair[0]].get_polydata()
+                    element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                elif len(pair) == 2:
+                    a_idx, b_idx = pair
+                    surf1 = surf_meshes[a_idx].get_polydata()
+                    surf2 = surf_meshes[b_idx].get_polydata()
+                    bridge_mesh = bridge_meshes[bridge_idx].get_polydata()
+                    bridge_idx += 1
+                    element = merge([surf1, surf2, bridge_mesh])
+                    element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                elif len(pair) == 3:
+                    a_idx, b_idx, c_idx = pair
+                    surf1 = surf_meshes[a_idx].get_polydata()
+                    surf2 = surf_meshes[b_idx].get_polydata()
+                    surf3 = surf_meshes[c_idx].get_polydata()
+                    bridge1 = bridge_meshes[bridge_idx].get_polydata()
+                    bridge_idx += 1
+                    bridge2 = bridge_meshes[bridge_idx].get_polydata()
+                    bridge_idx += 1
+                    element = merge([surf1, surf2, surf3, bridge1, bridge2])
+                    element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                else:
+                    raise ValueError(f"Invalid bridge group length: {len(pair)}")
+
+        # Merge all surfaces and bridges, and save as single lens.obj file
         surf_polydata = [surf.get_polydata() for surf in surf_meshes]
         bridge_polydata = [bridge.get_polydata() for bridge in bridge_meshes]
         lens_polydata = surf_polydata + bridge_polydata
         lens_polydata = merge(lens_polydata)
         lens_polydata.save(os.path.join(save_dir, "lens.obj"))    
         
-        # Save sensor polydata
+        # Save sensor
         sensor_polydata = sensor_mesh.get_polydata()
         sensor_polydata.save(os.path.join(save_dir, "sensor.obj"))
 
-        # Generate and save rays
+        # Save rays
         if save_rays:
             rays_curve = geolens_ray_poly(
                 self, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms
