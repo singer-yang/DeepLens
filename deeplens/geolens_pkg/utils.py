@@ -117,7 +117,7 @@ def create_lens(
     lens.enpd = enpd
     lens.float_enpd = True if enpd is None else False
     lens.float_foclen = False
-    lens.float_hfov = False
+    lens.float_rfov = False
     
     # Set sensor size and resolution
     lens.r_sensor = imgh / 2

@@ -406,7 +406,7 @@ class GeoLensOptim:
             Ray: A Ray object containing the sampled rays.
         """
         # Create points on rings and arms
-        max_fov_rad = self.hfov
+        max_fov_rad = self.rfov
         if sample_more_off_axis:
             # Use beta distribution to sample more points near the edge (close to 1.0)
             # Beta(0.5, 0.5) gives more samples at 0 and 1, Beta(0.5, 0.3) gives more samples near 1.0

@@ -128,8 +128,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """After loading lens, compute foclen, fov and fnum."""
         # Basic lens parameter calculation
         self.calc_pupil()
-        self.foclen = self.calc_efl()
-        self.hfov = self.calc_hfov()
+        self.calc_foclen()
+        self.calc_fov()
         self.fnum = self.calc_fnum()
 
     def update_float_setting(self):
@@ -139,9 +139,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if self.float_enpd is False:
             self.entrance_pupilr = self.enpd / 2.0
         if self.float_foclen is True:
-            self.foclen = self.calc_efl()
-        if self.float_hfov is True:
-            self.hfov = self.calc_hfov()
+            self.calc_foclen()
+        if self.float_rfov is True:
+            self.calc_fov()
         self.fnum = self.calc_fnum()
 
     def double(self):
@@ -195,12 +195,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             y_list = [np.sign(y) * np.abs(y) ** 0.5 for y in y_list]
 
         # Calculate FoV_x and FoV_y
-        hfov_x = np.atan(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
-        hfov_y = np.atan(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
-        hfov_x = np.rad2deg(hfov_x)
-        hfov_y = np.rad2deg(hfov_y)
-        fov_x_list = [float(x * hfov_x) for x in x_list]
-        fov_y_list = [float(y * hfov_y) for y in y_list]
+        rfov_x = np.atan(np.tan(self.rfov) * self.sensor_size[0] / self.r_sensor / 2)
+        rfov_y = np.atan(np.tan(self.rfov) * self.sensor_size[1] / self.r_sensor / 2)
+        rfov_x = np.rad2deg(rfov_x)
+        rfov_y = np.rad2deg(rfov_y)
+        fov_x_list = [float(x * rfov_x) for x in x_list]
+        fov_y_list = [float(y * rfov_y) for y in y_list]
 
         # Sample rays (parallel or point source)
         if depth == float("inf"):
@@ -244,9 +244,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             ray (Ray object): Ray object. Shape [num_field, num_rays, 3]
         """
-        fov_y_list = torch.linspace(
-            0, float(np.rad2deg(self.hfov)), num_field, device=self.device
-        )
+        device = self.device
+        fov_deg = float(np.rad2deg(self.rfov))
+        fov_y_list = torch.linspace(0, fov_deg, num_field, device=device)
 
         if depth == float("inf"):
             ray = self.sample_parallel(
@@ -254,7 +254,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             )
             ray = ray.squeeze(1)
         else:
-            point_obj_x = torch.zeros(num_field, device=self.device)
+            point_obj_x = torch.zeros(num_field, device=device)
             point_obj_y = depth * torch.tan(fov_y_list * torch.pi / 180.0)
             point_obj = torch.stack(
                 [point_obj_x, point_obj_y, torch.full_like(point_obj_x, depth)], dim=-1
@@ -922,18 +922,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
+            # Pinhole camera perspective projection
             if points[..., 2].min() > -100:
                 print("Point source is too close to the lens, pinhole model may not be accurate.")
-            w, h = self.sensor_size
-            
-            # Pinhole camera perspective projection
-            # Calculate the ratio of incident FoV to full FoV, then map to sensor plane
+ 
             tan_point_fov_x = -points[..., 0] / points[..., 2]
             tan_point_fov_y = -points[..., 1] / points[..., 2]
-            tan_hfov_x = (w / 2) / self.r_sensor * np.tan(self.hfov)
-            tan_hfov_y = (h / 2) / self.r_sensor * np.tan(self.hfov)
-            psf_center_x = (tan_point_fov_x / tan_hfov_x) * w / 2
-            psf_center_y = (tan_point_fov_y / tan_hfov_y) * h / 2
+            foclen = self.foclen
+            psf_center_x = foclen * tan_point_fov_x
+            psf_center_y = foclen * tan_point_fov_y
             psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1)
 
         else:
@@ -1254,11 +1251,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     @torch.no_grad()
     def calc_foclen(self):
-        """Calculate the effective focal length."""
-        return self.calc_efl()
-
-    @torch.no_grad()
-    def calc_efl(self):
         """Compute effective focal length (EFL).
 
         Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL.
@@ -1272,7 +1264,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
         paraxial_fov_rad = 0.001
         paraxial_fov_deg = float(np.rad2deg(paraxial_fov_rad))
-        self.calc_pupil()
+        # self.calc_pupil()
         ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
 
@@ -1296,13 +1288,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     @torch.no_grad()
     def calc_eqfl(self):
         """Compute 35mm equivalent focal length. 35mm sensor: 36mm * 24mm"""
-        return 21.63 / math.tan(self.hfov)
+        return 21.63 / math.tan(self.rfov)
 
     @torch.no_grad()
     def calc_fnum(self):
         """Compute F-number."""
         _, pupilr = self.get_entrance_pupil()
-        return self.calc_efl() / (2 * pupilr)
+        return self.foclen / (2 * pupilr)
 
     @torch.no_grad()
     def calc_numerical_aperture(self):
@@ -1368,12 +1360,22 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return infocus_sensor_d
 
     @torch.no_grad()
-    def calc_hfov(self):
-        """Compute half diagonal fov.
+    def calc_fov(self):
+        """Compute FoV of the lens. We implement two types of FoV calculation:
+            1. Perspective projection from focal length and sensor size.
+            2. Ray tracing to compute output ray angle.
 
-        Shot rays from edge of sensor, trace them to the object space and compute output angel as the fov.
+        Reference:
+            [1] https://en.wikipedia.org/wiki/Angle_of_view_(photography)
         """
-        # Sample rays going out from edge of sensor, shape [SPP_CALC, 3]
+        # 1. Perspective projection
+        self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
+        self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
+        self.dfov = 2 * math.atan(self.r_sensor / self.foclen)
+        self.rfov = self.dfov / 2
+
+        # 2. Ray tracing
+        # Sample rays from edge of sensor, shape [SPP_CALC, 3]
         o1 = torch.zeros([SPP_CALC, 3])
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
 
@@ -1388,105 +1390,35 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         ray = Ray(o1, o2 - o1, device=self.device)
         ray = self.trace2obj(ray)
 
-        # Compute fov from output ray direction
-        tan_hfov = ray.d[..., 0] / ray.d[..., 2]
-        hfov = torch.atan(torch.sum(tan_hfov * ray.valid) / torch.sum(ray.valid))
+        # Compute output ray angle
+        tan_rfov = ray.d[..., 0] / ray.d[..., 2]
+        rfov = torch.atan(torch.sum(tan_rfov * ray.valid) / torch.sum(ray.valid))
 
         # If calculation failed, use pinhole camera model to compute fov
-        if torch.isnan(hfov):
-            hfov = float(round(np.arctan(self.r_sensor / self.foclen), 4))
-            print(f"Computing fov failed, set fov to {hfov}.")
+        if torch.isnan(rfov):
+            self.real_rfov = self.rfov
+            self.real_dfov = self.dfov
+            print(f"Ray tracing to compute fov failed, set real_rfov to {self.rfov}.")
         else:
-            hfov = hfov.item()
+            self.real_rfov = rfov.item()
+            self.real_dfov = 2 * rfov.item()
 
-        # Compute horizontal (x) and vertical (y) fov from diagonal fov
-        diag = math.sqrt(self.sensor_size[0] ** 2 + self.sensor_size[1] ** 2)
-        self.hfov_x = math.atan((self.sensor_size[0] * math.tan(hfov)) / diag)
-        self.hfov_y = math.atan((self.sensor_size[1] * math.tan(hfov)) / diag)
-        self.hfov = hfov
-
-        return hfov
 
     @torch.no_grad()
-    def calc_eff_hfov(self):
-        """Compute effective half fov.
+    def calc_eff_rfov(self):
+        """Compute effective radius (half diagonal) fov.
         """
-        tan_hfov = self.r_sensor / self.foclen
-        hfov = float(np.arctan(tan_hfov))
-        return hfov
+        tan_rfov = self.r_sensor / self.foclen
+        rfov = float(np.arctan(tan_rfov))
+
+        self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
+        self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
+        return rfov
 
     @torch.no_grad()
     def calc_scale(self, depth):
         """Calculate the scale factor (obj_height / img_height) with pinhole camera model."""
         return -depth / self.foclen
-
-    # @torch.no_grad()
-    # def calc_scale_pinhole(self, depth):
-    #     """Scale factor computed by pinhole camera model.
-
-    #     This function assumes the first principal point is at (0, 0, 0) and the second principal point is at (0, 0, d_sensor - focal_length).
-
-    #     Args:
-    #         depth (float): depth of the object.
-
-    #     Returns:
-    #         scale (float): scale factor. phy_size_obj / phy_size_img
-    #     """
-    #     return -depth / self.foclen
-
-    # @torch.no_grad()
-    # def calc_scale_ray(self, depth):
-    #     """Use ray tracing to compute scale factor."""
-    #     if isinstance(depth, float) or isinstance(depth, int):
-    #         # Sample rays [num_grid, num_grid, spp, 3] from the object plane
-    #         num_grid = 64
-    #         raise Warning(
-    #             "This function needs to be checked because of the change of the ray sampling function."
-    #         )
-    #         ray = self.sample_point_source(
-    #             depth=depth, num_rays=SPP_CALC, num_grid=num_grid
-    #         )
-
-    #         # Map points from object space to sensor space, ground-truth
-    #         o1 = ray.o.clone()[..., :2]
-    #         o1 = torch.flip(o1, [0, 1])
-
-    #         ray, _ = self.trace(ray)
-    #         o2 = ray.project_to(self.d_sensor)  # shape [num_grid, num_grid, spp, 2]
-
-    #         # Use only center region of points, because we assume center points have no distortion
-    #         center_start = num_grid // 2 - num_grid // 8
-    #         center_end = num_grid // 2 + num_grid // 8
-    #         o1_center = o1[center_start:center_end, center_start:center_end, :, :]
-    #         o2_center = o2[center_start:center_end, center_start:center_end, :, :]
-    #         ra_center = ray.valid.clone().detach()[
-    #             center_start:center_end, center_start:center_end, :
-    #         ]
-
-    #         x1 = o1_center[:, :, 0, 0]  # shape [num_grid // 4, num_grid // 4]
-    #         x2 = (o2_center[:, :, :, 0] * ra_center).sum(dim=-1) / (ra_center).sum(
-    #             dim=-1
-    #         ).add(EPSILON)
-
-    #         # Calculate scale factor (currently assume rotationally symmetric)
-    #         scale_x = x1 / x2  # shape [num_grid // 4, num_grid // 4]
-    #         try:
-    #             scale = torch.mean(scale_x[~scale_x.isnan()]).item()
-    #         except Exception as e:
-    #             print(f"Error calculating scale: {e}")
-    #             scale = -depth * np.tan(self.hfov) / self.r_sensor
-    #         return scale
-
-    #     elif isinstance(depth, torch.Tensor) and len(depth.shape) == 1:
-    #         scale = []
-    #         for d in depth:
-    #             scale.append(self.calc_scale_ray(d.item()))
-    #         scale = torch.tensor(scale)
-    #         return scale
-
-    #     else:
-    #         raise ValueError("Invalid depth type.")
-
 
     @torch.no_grad()
     def calc_pupil(self):
@@ -1762,7 +1694,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         raise Exception("This function will be deprecated in the future.")
         if aper_r is None:
             if foclen is None:
-                foclen = self.calc_efl()
+                foclen = self.foclen
             aper_r = foclen / fnum / 2
             self.surfaces[self.aper_idx].r = aper_r
         else:
@@ -1803,32 +1735,32 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.surfaces[self.aper_idx].r = optim_aper_r
 
     @torch.no_grad()
-    def set_target_fov_fnum(self, hfov, fnum):
+    def set_target_fov_fnum(self, rfov, fnum):
         """Set FoV, ImgH and F number, only use this function to assign design targets.
 
         Args:
-            hfov (float): half diagonal-FoV in radian.
+            rfov (float): half diagonal-FoV in radian.
             fnum (float): F number.
         """
-        if hfov > math.pi:
-            self.hfov = hfov / 180.0 * math.pi
+        if rfov > math.pi:
+            self.rfov = rfov / 180.0 * math.pi
         else:
-            self.hfov = hfov
+            self.rfov = rfov
 
-        self.foclen = self.r_sensor / math.tan(self.hfov)
+        self.foclen = self.r_sensor / math.tan(self.rfov)
         self.fnum = fnum
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].update_r(float(aper_r))
 
 
     @torch.no_grad()
-    def set_fov(self, hfov):
+    def set_fov(self, rfov):
         """Set FoV. This function is used to assign design targets.
 
         Args:
-            hfov (float): half diagonal-FoV in degree.
+            rfov (float): half diagonal-FoV in radian.
         """
-        self.hfov = hfov
+        self.rfov = rfov
 
 
     @torch.no_grad()
@@ -1854,8 +1786,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.surfaces[i].r = self.surfaces[i].r * (1 + expand_factor)
 
         # Sample and trace rays to compute the maximum valid region
-        if self.hfov is not None:
-            fov_deg = self.hfov * 180 / torch.pi
+        if self.rfov is not None:
+            fov_deg = self.rfov * 180 / torch.pi
         else:
             fov = np.arctan(self.r_sensor / self.foclen)
             fov_deg = float(fov) * 180 / torch.pi
@@ -2146,7 +2078,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.enpd = data.get("enpd", None)
         self.float_enpd = True if self.enpd is None else False
         self.float_foclen = False
-        self.float_hfov = False
+        self.float_rfov = False
 
         sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]

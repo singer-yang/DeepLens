@@ -53,7 +53,7 @@ class GeoLensIO:
                     self.enpd = float(line.split()[1])
 
         self.float_foclen = False
-        self.float_hfov = False
+        self.float_rfov = False
         
         # Read the extracted data from each SURF
         self.surfaces = []
@@ -130,7 +130,7 @@ class GeoLensIO:
     GFAC 0 0
     GCAT OSAKAGASCHEMICAL MISC
     XFLN 0. 0. 0.
-    YFLN 0.0 {0.707 * self.hfov * 57.3} {0.99 * self.hfov * 57.3}
+    YFLN 0.0 {0.707 * self.rfov * 57.3} {0.99 * self.rfov * 57.3}
     WAVL 0.4861327 0.5875618 0.6562725
     RAIM 0 0 1 1 0 0 0 0 0
     PUSH 0 0 0 0 0 0

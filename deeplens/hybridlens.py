@@ -338,8 +338,8 @@ class HybridLens(Lens):
         color_list = ["#CC0000", "#006600", "#0066CC"]
         views = [
             0.0,
-            float(np.rad2deg(geolens.hfov) * 0.707),
-            float(np.rad2deg(geolens.hfov) * 0.99),
+            float(np.rad2deg(geolens.rfov) * 0.707),
+            float(np.rad2deg(geolens.rfov) * 0.99),
         ]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
         num_rays = 5
