@@ -52,6 +52,12 @@ class Aperture(Surface):
         """Compute surface height (always zero for aperture)."""
         return torch.zeros_like(x)
 
+    def _dfdxy(self, x, y):
+        """Compute derivatives of sag to x and y (always zero for flat aperture)."""
+        dfdx = torch.zeros_like(x)
+        dfdy = torch.zeros_like(y)
+        return dfdx, dfdy
+
     # =======================================
     # Visualization
     # =======================================
@@ -87,6 +93,83 @@ class Aperture(Surface):
         line = ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.5)
 
         return line
+
+    def create_mesh(self, n_rings=32, n_arms=128, color=[0.0, 0.0, 0.0]):
+        """Create triangulated surface mesh.
+        
+        Args:
+            n_rings (int): Number of concentric rings for sampling.
+            n_arms (int): Number of angular divisions.
+            color (List[float]): The color of the mesh.
+        
+        Returns:
+            self: The surface with mesh data.
+        """
+        self.vertices = self._create_vertices(n_rings, n_arms)
+        self.faces = self._create_faces(n_rings, n_arms)
+        self.rim = self._create_rim(n_rings, n_arms)
+        self.mesh_color = color
+        return self
+    
+    def _create_vertices(self, n_rings, n_arms):
+        """Generate vertices for two-ring aperture (inner and outer rings)."""
+        n_vertices = n_rings * n_arms + 1
+        vertices = np.zeros((n_vertices, 3), dtype=np.float32)
+        aperture_z = self.d.item()  # All vertices at aperture position
+        inner_radius = self.r
+        outer_radius = 1.1 * self.r
+        
+        # Generate inner ring vertices (first n_arms vertices)
+        for j_arm in range(n_arms):
+            theta = 2 * np.pi * j_arm / n_arms
+            x = inner_radius * np.cos(theta)
+            y = inner_radius * np.sin(theta)
+            z = aperture_z
+            
+            vertices[j_arm] = [x, y, z]
+        
+        # Generate outer ring vertices (second n_arms vertices) 
+        for j_arm in range(n_arms):
+            theta = 2 * np.pi * j_arm / n_arms
+            x = outer_radius * np.cos(theta)
+            y = outer_radius * np.sin(theta)
+            z = aperture_z
+            
+            vertices[n_arms + j_arm] = [x, y, z]
+        
+        return vertices
+    
+    def _create_faces(self, n_rings, n_arms):
+        """Generate triangular faces connecting inner and outer rings."""
+        n_faces = n_arms * (2 * n_rings - 1)
+        faces = np.zeros((n_faces, 3), dtype=np.uint32)
+        
+        # Connect inner ring (indices 0 to n_arms-1) to outer ring (indices n_arms to 2*n_arms-1)
+        for j_arm in range(n_arms):
+            # Inner ring vertices
+            inner_a = j_arm
+            inner_b = (j_arm + 1) % n_arms
+            
+            # Outer ring vertices (offset by n_arms)
+            outer_a = n_arms + j_arm
+            outer_b = n_arms + (j_arm + 1) % n_arms
+            
+            # Create two triangles per quad (normal direction +z)
+            face_idx = j_arm * 2
+            faces[face_idx] = [inner_a, outer_a, inner_b]
+            faces[face_idx + 1] = [inner_b, outer_a, outer_b]
+        
+        return faces
+    
+    def _create_rim(self, n_rings, n_arms):
+        """Create rim (outer edge) vertices for aperture."""
+        # Import RimCurve from base module
+        from deeplens.optics.geometric_surface.base import RimCurve
+        
+        # Get outer ring vertices (second half of vertices array)
+        start_idx = n_arms  # Start of outer ring
+        rim_vertices = self.vertices[start_idx:start_idx + n_arms]
+        return RimCurve(rim_vertices, is_loop=True)
 
     # =========================================
     # Optimization
