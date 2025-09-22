@@ -70,15 +70,16 @@ class GeoLensOptim:
             self.flange_min = 0.8
             self.flange_max = 2.0
 
-            # Surface curvature constraints
-            self.sag_max = 2.0
-            self.grad_max = 1.0
-            self.grad2_max = 100.0
+            # Surface shape constraints
+            self.sag2diam_max = 0.1
+            self.grad_max = 0.57 # tan(30deg)
+            self.grad2_max = 50.0
             self.diam2thick_max = 10.0
             self.tmax2tmin_max = 5.0
-
-            # Chief ray angle constraints
-            self.chief_ray_angle_max = 30.0
+            
+            # Ray angle constraints
+            self.chief_ray_angle_max = 30.0 # deg
+            self.obliq_min = 0.6
         
         else:
             self.is_cellphone = False
@@ -97,31 +98,32 @@ class GeoLensOptim:
             self.flange_min = 5.0
             self.flange_max = 50.0  # float("inf")
 
-            # Surface curvature constraints
-            self.sag_max = 10.0
-            self.grad_max = 1.0
+            # Surface shape constraints
+            self.sag2diam_max = 0.1
+            self.grad_max = 0.57 # tan(30deg)
             self.grad2_max = 100.0
             self.diam2thick_max = 10.0
             self.tmax2tmin_max = 5.0
+            
+            # Ray angle constraints
+            self.chief_ray_angle_max = 20.0 # deg
+            self.obliq_min = 0.5
 
-            # Chief ray angle constraints
-            self.chief_ray_angle_max = 20.0
-
-    def loss_reg(self, w_focus=2.0, w_intersec=2.0, w_surf=1.0, w_chief_ray_angle=2.0):
+    def loss_reg(self, w_focus=1.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
         """An empirical regularization loss for lens design.
 
         By default we should use weight 0.1 * self.loss_reg() in the total loss.
         """
         # Loss functions for regularization
         loss_focus = self.loss_infocus()
+        loss_ray_angle = self.loss_ray_angle()
         loss_intersec = self.loss_self_intersec()
         loss_surf = self.loss_surface()
-        loss_chief_ray_angle = self.loss_chief_ray_angle()
         loss_reg = (
             w_focus * loss_focus
             + w_intersec * loss_intersec
             + w_surf * loss_surf
-            + w_chief_ray_angle * loss_chief_ray_angle
+            + w_ray_angle * loss_ray_angle
         )
 
         # Return loss and loss dictionary
@@ -129,7 +131,7 @@ class GeoLensOptim:
             "loss_focus": loss_focus.item(),
             "loss_intersec": loss_intersec.item(),
             "loss_surf": loss_surf.item(),
-            'loss_chief_ray_angle': loss_chief_ray_angle.item(),
+            'loss_ray_angle': loss_ray_angle.item(),
         }
         return loss_reg, loss_dict
 
@@ -160,37 +162,39 @@ class GeoLensOptim:
             4. Penalize diameter to thickness ratio
             5. Penalize maximum to minimum thickness ratio
         """
-        sag_max_allowed = self.sag_max
+        sag2diam_max = self.sag2diam_max
         grad_max_allowed = self.grad_max
         grad2_max_allowed = self.grad2_max
         diam2thick_max = self.diam2thick_max
         tmax2tmin_max = self.tmax2tmin_max
 
-        loss = torch.tensor(0.0, device=self.device)
-        loss_d_to_t = torch.tensor(0.0, device=self.device)
-        loss_tmax_to_tmin = torch.tensor(0.0, device=self.device)
+        loss_grad = torch.tensor(0.0, device=self.device)
+        loss_grad2 = torch.tensor(0.0, device=self.device)
+        loss_diam2thick = torch.tensor(0.0, device=self.device)
+        loss_tmax2tmin = torch.tensor(0.0, device=self.device)
+        loss_sag2diam = torch.tensor(0.0, device=self.device)
         for i in self.find_diff_surf():
             # Sample points on the surface
-            x_ls = torch.linspace(0.0, 1.0, 20).to(self.device) * self.surfaces[i].r
+            x_ls = torch.linspace(0.0, 1.0, 32).to(self.device) * self.surfaces[i].r
             y_ls = torch.zeros_like(x_ls)
 
             # Sag
             sag_ls = self.surfaces[i].sag(x_ls, y_ls)
-            sag_max = sag_ls.abs().max()
-            if sag_max > sag_max_allowed:
-                loss += sag_max
+            sag2diam = sag_ls.abs().max() / self.surfaces[i].r / 2
+            if sag2diam > sag2diam_max:
+                loss_sag2diam += sag2diam
 
             # 1st-order derivative
             grad_ls = self.surfaces[i].dfdxyz(x_ls, y_ls)[0]
             grad_max = grad_ls.abs().max()
             if grad_max > grad_max_allowed:
-                loss += 10 * grad_max
+                loss_grad += grad_max
 
             # 2nd-order derivative
             grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
             grad2_max = grad2_ls.abs().max()
             if grad2_max > grad2_max_allowed:
-                loss += 10 * grad2_max
+                loss_grad2 += 10 * grad2_max
 
             # Diameter to thickness ratio, thick_max to thick_min ratio
             if not self.surfaces[i].mat2.name == "air":
@@ -200,21 +204,21 @@ class GeoLensOptim:
                 # Penalize diameter to thickness ratio
                 d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
                 if d_to_t > diam2thick_max:
-                    loss_d_to_t += d_to_t
+                    loss_diam2thick += d_to_t
 
                 # Penalize thick_max to thick_min ratio
                 r_edge = min(surf2.r, surf1.r)
                 thick_center = surf2.d - surf1.d
                 thick_edge = surf2.surface_with_offset(r_edge, 0.0) - surf1.surface_with_offset(r_edge, 0.0)
                 if thick_center > thick_edge:
-                    tmax_to_tmin = thick_center / thick_edge
+                    tmax2tmin = thick_center / thick_edge
                 else:
-                    tmax_to_tmin = thick_edge / thick_center
+                    tmax2tmin = thick_edge / thick_center
 
-                if tmax_to_tmin > tmax2tmin_max:
-                    loss_tmax_to_tmin += tmax_to_tmin
+                if tmax2tmin > tmax2tmin_max:
+                    loss_tmax2tmin += tmax2tmin
 
-        return loss + loss_d_to_t + loss_tmax_to_tmin
+        return loss_sag2diam + loss_grad + loss_grad2 + loss_diam2thick + loss_tmax2tmin
 
     def loss_self_intersec(self):
         """Loss function to avoid self-intersection.
@@ -303,22 +307,29 @@ class GeoLensOptim:
         # Loss, minimize loss_max and maximize loss_min
         return loss_max - loss_min
 
-    def loss_chief_ray_angle(self):
+    def loss_ray_angle(self):
         """Loss function to penalize large chief ray angle."""
         max_angle_deg = self.chief_ray_angle_max
-        accum_obliq_min = 0.85
+        obliq_min = self.obliq_min
 
-        # Ray tracing to sensor
-        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC)
+        # Loss on chief ray angle
+        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC, scale_pupil=0.1)
         ray = self.trace2sensor(ray)
-
-        # Loss on final output ray angle
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
-        loss_cra = torch.relu(cos_cra_ref - cos_cra).mean()
+        if (cos_cra < cos_cra_ref).any():
+            loss_cra = - cos_cra[cos_cra < cos_cra_ref].mean()
+        else:
+            loss_cra = torch.tensor(0.0, device=self.device)
 
-        # Loss on accumulated oblique angle (currently not used)
-        loss_obliq = torch.relu(accum_obliq_min - ray.obliq).mean()
+        # Loss on accumulated oblique term
+        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC, scale_pupil=1.0)
+        ray = self.trace2sensor(ray)
+        obliq = ray.obliq.squeeze(-1)
+        if (obliq < obliq_min).any():
+            loss_obliq = - obliq[obliq < obliq_min].mean()
+        else:
+            loss_obliq = torch.tensor(0.0, device=self.device)
 
         return loss_cra + loss_obliq
 
@@ -442,9 +453,9 @@ class GeoLensOptim:
         """
         # Experiment settings
         depth = DEPTH
-        num_ring = 16
+        num_ring = 32
         num_arm = 8
-        spp = 4096
+        spp = 2048
 
         # Result directory and logger
         if result_dir is None:
@@ -480,7 +491,7 @@ class GeoLensOptim:
                     self.update_float_setting()
                     rays_backup = []
                     for wv in WAVE_RGB:
-                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05, sample_more_off_axis=True)
+                        ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05, sample_more_off_axis=False)
                         rays_backup.append(ray)
 
                     # Calculate ray centers
@@ -510,10 +521,6 @@ class GeoLensOptim:
                         weight_mask /= ray_valid.sum(-1) + EPSILON
                         weight_mask /= weight_mask.mean()
 
-                        # # Drop out (10% of weight mask)
-                        # dropout_mask = torch.rand_like(weight_mask) < 0.1
-                        # weight_mask = weight_mask * (~dropout_mask)
-
                 # Loss on RMS error
                 l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
                 l_rms /= ray_valid.sum(-1) + EPSILON
@@ -528,7 +535,7 @@ class GeoLensOptim:
 
             # Total loss
             loss_reg, loss_dict = self.loss_reg()
-            w_reg = 0.05
+            w_reg = 0.1
             L_total = loss_rms + w_reg * loss_reg
 
             # Back-propagation
