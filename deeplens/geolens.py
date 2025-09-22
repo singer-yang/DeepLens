@@ -64,9 +64,7 @@ from deeplens.optics.wave import AngularSpectrumMethod
 from deeplens.utils import (
     batch_psnr,
     batch_ssim,
-    denormalize_ImageNet,
     img2batch,
-    normalize_ImageNet,
 )
 
 
@@ -126,11 +124,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     def post_computation(self):
         """After loading lens, compute foclen, fov and fnum."""
-        # Basic lens parameter calculation
         self.calc_pupil()
         self.calc_foclen()
         self.calc_fov()
-        self.fnum = self.calc_fnum()
 
     def update_float_setting(self):
         """After lens changed, compute foclen, fov and fnum."""
@@ -142,7 +138,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.calc_foclen()
         if self.float_rfov is True:
             self.calc_fov()
-        self.fnum = self.calc_fnum()
 
     def double(self):
         """Use double-precision for coherent ray tracing."""
@@ -1228,16 +1223,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # ====================================================================================
     # Geometrical optics calculation
     # ====================================================================================
-    def find_aperture(self):
-        """Find aperture. If the lens has no aperture, use the surface with the smallest radius."""
-        self.aper_idx = None
-        for i in range(len(self.surfaces)):
-            if isinstance(self.surfaces[i], Aperture):
-                self.aper_idx = i
-                return
-
-        if self.aper_idx is None:
-            self.aper_idx = np.argmin([s.r for s in self.surfaces])
 
     def find_diff_surf(self):
         """Get differentiable/optimizable surface list."""
@@ -1260,41 +1245,25 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Reference:
             [1] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/10/Tutorial_MorelSophie.pdf
+            [2] https://rafcamera.com/info/imaging-theory/back-focal-length
         """
         # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
         paraxial_fov_rad = 0.001
         paraxial_fov_deg = float(np.rad2deg(paraxial_fov_rad))
-        # self.calc_pupil()
         ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
 
         # Compute the effective focal length
         paraxial_imgh = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[0, 0, :].sum()
         eff_foclen = paraxial_imgh.item() / float(np.tan(paraxial_fov_rad))
-        
         self.efl = eff_foclen
         self.foclen = eff_foclen
-        return eff_foclen
+        
+        # Compute back focal length
+        self.bfl = self.d_sensor.item() - self.surfaces[-1].d.item()
 
-    @torch.no_grad()
-    def calc_bfl(self):
-        """Compute back focal length (BFL).
-
-        Reference:
-            [1] https://rafcamera.com/info/imaging-theory/back-focal-length
-        """
-        return self.d_sensor.item() - self.surfaces[-1].d.item()
-
-    @torch.no_grad()
-    def calc_eqfl(self):
-        """Compute 35mm equivalent focal length. 35mm sensor: 36mm * 24mm"""
-        return 21.63 / math.tan(self.rfov)
-
-    @torch.no_grad()
-    def calc_fnum(self):
-        """Compute F-number."""
-        _, pupilr = self.get_entrance_pupil()
-        return self.foclen / (2 * pupilr)
+        # Compute 35mm equivalent focal length. 35mm sensor: 36mm * 24mm
+        self.eqfl = 21.63 / math.tan(self.rfov)
 
     @torch.no_grad()
     def calc_numerical_aperture(self):
@@ -1302,38 +1271,39 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         raise NotImplementedError("Numerical aperture is not implemented.")
 
     @torch.no_grad()
-    def calc_foc_dist(self, wvln=DEFAULT_WAVE):
+    def calc_focal_plane(self, wvln=DEFAULT_WAVE):
         """Compute the focus distance in the object space. Ray starts from sensor and trace to the object space."""
+        device = self.device
+        
         # Sample point source rays from sensor center
-        o1 = torch.tensor([0, 0, self.d_sensor.item()], device=self.device).repeat(
-            SPP_CALC, 1
-        )
+        o1 = torch.tensor([0, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
+        o1 = o1.to(device)
 
         # Sample the first surface as pupil
         o2 = self.sample_circle(self.surfaces[0].r, z=0.0, shape=[SPP_CALC])
         o2 *= 0.25  # Shrink sample region to improve accuracy
         d = o2 - o1
-        ray = Ray(o1, d, wvln, device=self.device)
+        ray = Ray(o1, d, wvln, device=device)
 
         # Trace rays to object space
-        ray, _ = self.trace(ray)
+        ray = self.trace2obj(ray)
 
         # Optical axis intersection
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
-        focus_p = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.valid > 0].cpu().numpy()
-        focus_p = focus_p[~np.isnan(focus_p) & (focus_p < 0)]
+        focus_z = (ray.o[..., 2] - ray.d[..., 2] * t)[ray.valid > 0].cpu().numpy()
+        focus_z = focus_z[~np.isnan(focus_z) & (focus_z < 0)]
 
-        if len(focus_p) > 0:
-            focus_dist = float(np.mean(focus_p))
+        if len(focus_z) > 0:
+            focal_plane = float(np.mean(focus_z))
         else:
-            raise Exception("No valid focus distance is found.")
+            raise Exception("Focal plane in the image space, cannot be computed.")
 
-        return focus_dist
+        return focal_plane
 
     @torch.no_grad()
-    def calc_foc_plane(self, depth=float("inf")):
+    def calc_sensor_plane(self, depth=float("inf")):
         """Calculate in-focus sensor plane."""
         # Sample and trace rays
         if depth == float("inf"):
@@ -1346,22 +1316,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
                 num_rays=SPP_CALC,
                 wvln=DEFAULT_WAVE,
             )
-        ray, _ = self.trace(ray)
+        ray = self.trace2sensor(ray)
 
         # Calculate in-focus sensor position
         t = (ray.d[..., 0] * ray.o[..., 0] + ray.d[..., 1] * ray.o[..., 1]) / (
             ray.d[..., 0] ** 2 + ray.d[..., 1] ** 2
         )
-        focus_p = ray.o[..., 2] - ray.d[..., 2] * t
-        focus_p = focus_p[ray.valid > 0]
-        focus_p = focus_p[~torch.isnan(focus_p) & (focus_p > 0)]
-        infocus_sensor_d = torch.mean(focus_p)
-
-        return infocus_sensor_d
+        focus_z = ray.o[..., 2] - ray.d[..., 2] * t
+        focus_z = focus_z[ray.valid > 0]
+        focus_z = focus_z[~torch.isnan(focus_z) & (focus_z > 0)]
+        d_sensor = torch.mean(focus_z)
+        return d_sensor
 
     @torch.no_grad()
     def calc_fov(self):
-        """Compute FoV of the lens. We implement two types of FoV calculation:
+        """Compute FoV (radian) of the lens. 
+        
+        We implement two types of FoV calculation:
             1. Perspective projection from focal length and sensor size.
             2. Ray tracing to compute output ray angle.
 
@@ -1372,7 +1343,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
         self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
         self.dfov = 2 * math.atan(self.r_sensor / self.foclen)
-        self.rfov = self.dfov / 2
+        self.rfov = self.dfov / 2 # radius (half diagonal) FoV
 
         # 2. Ray tracing
         # Sample rays from edge of sensor, shape [SPP_CALC, 3]
@@ -1403,18 +1374,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.real_rfov = rfov.item()
             self.real_dfov = 2 * rfov.item()
 
-
-    @torch.no_grad()
-    def calc_eff_rfov(self):
-        """Compute effective radius (half diagonal) fov.
-        """
-        tan_rfov = self.r_sensor / self.foclen
-        rfov = float(np.arctan(tan_rfov))
-
-        self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
-        self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
-        return rfov
-
     @torch.no_grad()
     def calc_scale(self, depth):
         """Calculate the scale factor (obj_height / img_height) with pinhole camera model."""
@@ -1436,11 +1395,25 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             - If `self.float_enpd` is True, set ENPD based on computed pupil radius.
             - Otherwise, override computed entrance pupil radius using fixed ENPD.
         """
-        self.find_aperture()
+        # Find aperture
+        self.aper_idx = None
+        for i in range(len(self.surfaces)):
+            if isinstance(self.surfaces[i], Aperture):
+                self.aper_idx = i
+                break
+
+        if self.aper_idx is None:
+            self.aper_idx = np.argmin([s.r for s in self.surfaces])
+            print(f"No aperture found, use the smallest aperture as aperture.")
+        
+        # Compute entrance and exit pupil
         self.exit_pupilz, self.exit_pupilr = self.calc_exit_pupil(paraxial=False)
         self.entr_pupilz, self.entr_pupilr = self.calc_entrance_pupil(paraxial=False)
         self.exit_pupilz_parax, self.exit_pupilr_parax = self.calc_exit_pupil(paraxial=True)
         self.entr_pupilz_parax, self.entr_pupilr_parax = self.calc_entrance_pupil(paraxial=True)
+
+        # Compute F-number
+        self.fnum = self.foclen / (2 * self.entr_pupilr)
 
     def get_entrance_pupil(self, paraxial=False):
         """Get entrance pupil location and radius."""
@@ -1679,28 +1652,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             In DSLR, phase detection autofocus (PDAF) is a popular and efficient method. But here we simplify the problem by calculating the in-focus position of green light.
         """
         # Calculate in-focus sensor position
-        d_sensor_new = self.calc_foc_plane(depth=foc_dist)
+        d_sensor_new = self.calc_sensor_plane(depth=foc_dist)
 
         # Update sensor position
-        assert d_sensor_new > 0, "sensor position is negative."
+        assert d_sensor_new > 0, "Obtained negative sensor position."
         self.d_sensor = d_sensor_new
 
         # FoV will be slightly changed
         self.update_float_setting()
-
-    @torch.no_grad()
-    def set_aperture(self, fnum=None, foclen=None, aper_r=None):
-        """Change aperture radius."""
-        raise Exception("This function will be deprecated in the future.")
-        if aper_r is None:
-            if foclen is None:
-                foclen = self.foclen
-            aper_r = foclen / fnum / 2
-            self.surfaces[self.aper_idx].r = aper_r
-        else:
-            self.surfaces[self.aper_idx].r = aper_r
-
-        self.fnum = self.foclen / aper_r / 2
 
     @torch.no_grad()
     def set_fnum(self, fnum):
@@ -1752,7 +1711,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         aper_r = self.foclen / fnum / 2
         self.surfaces[self.aper_idx].update_r(float(aper_r))
 
-
     @torch.no_grad()
     def set_fov(self, rfov):
         """Set FoV. This function is used to assign design targets.
@@ -1761,7 +1719,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             rfov (float): half diagonal-FoV in radian.
         """
         self.rfov = rfov
-
 
     @torch.no_grad()
     def prune_surf(self, expand_factor=None):
@@ -1772,7 +1729,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
                 - For cellphone lens, we usually expand by 5%
                 - For camera lens, we usually expand by 20%.
         """
-        # Settings
         surface_range = self.find_diff_surf()
         
         # Set expansion factor
