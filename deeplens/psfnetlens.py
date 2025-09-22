@@ -248,7 +248,7 @@ class PSFNetLens(Lens):
         """
         d_close = self.d_close
         d_far = self.d_far
-        rfov = self.lens.calc_eff_rfov()
+        rfov = self.lens.rfov
 
         # In each iteration, sample one focus distance, [mm], range [foc_d_far, foc_d_close]
         # Example beta distribution: https://share.google/images/Mrb9c39PdddYx3UHj
