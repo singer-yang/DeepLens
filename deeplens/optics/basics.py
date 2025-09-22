@@ -297,3 +297,26 @@ class DeepObj:
                         exec(f"self.{key}[{i}].double()")
 
         return self
+
+    def astype(self, dtype):
+        """Convert all tensors to the given dtype.
+
+        Args:
+            dtype (torch.dtype): Data type.
+        """
+        dtype_ls = [torch.float16, torch.float32, torch.float64]
+        assert dtype in dtype_ls, f"Data type {dtype} is not supported."
+        
+        self.dtype = dtype
+        for key, val in vars(self).items():
+            if torch.is_tensor(val) and val.dtype in dtype_ls:
+                exec(f"self.{key} = self.{key}.to(dtype)")
+            elif issubclass(type(val), DeepObj):
+                exec(f"self.{key}.astype(dtype)")
+            elif issubclass(type(val), list):
+                for i, v in enumerate(val):
+                    if torch.is_tensor(v) and v.dtype in dtype_ls:
+                        exec(f"self.{key}[{i}] = self.{key}[{i}].to(dtype)")
+                    elif issubclass(type(v), DeepObj):
+                        exec(f"self.{key}[{i}].astype(dtype)")
+        return self

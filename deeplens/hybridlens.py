@@ -194,7 +194,7 @@ class HybridLens(Lens):
         point_obj[:, 1] = point[:, 1] * scale * geolens.sensor_size[0] / 2
 
         # Determine ray center via chief ray
-        pointc_chief_ray = geolens.psf_center(point_obj)[0]  # shape [2]
+        pointc_chief_ray = geolens.psf_center(point_obj, method="chief_ray")[0]  # shape [2]
 
         # Ray tracing to the DOE plane
         ray = geolens.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
