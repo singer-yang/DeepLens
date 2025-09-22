@@ -31,6 +31,7 @@ from deeplens.geolens_pkg.io import GeoLensIO
 from deeplens.geolens_pkg.optim import GeoLensOptim
 from deeplens.geolens_pkg.tolerance import GeoLensTolerance
 from deeplens.geolens_pkg.vis import GeoLensVis
+from deeplens.geolens_pkg.view_3d import GeoLensVis3D
 from deeplens.lens import Lens
 from deeplens.optics.basics import (
     DEFAULT_WAVE,
