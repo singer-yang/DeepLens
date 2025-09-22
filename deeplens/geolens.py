@@ -74,9 +74,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     def __init__(
         self,
         filename=None,
-        sensor_res=(2000, 2000),
-        sensor_size=(8.0, 8.0),
+        sensor_res=(2000, 2000), # (W, H)
+        sensor_size=(8.0, 8.0), # [mm], (W, H)
         device=None,
+        dtype=torch.float32,
     ):
         """Initialize a refractive lens.
 
@@ -84,7 +85,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             1. Read a lens from .json/.zmx/.seq file
             2. Initialize a lens with no lens file, then manually add surfaces and materials
         """
-        super().__init__(device=device)
+        super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution
         self.sensor_res = sensor_res
@@ -194,8 +195,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             y_list = [np.sign(y) * np.abs(y) ** 0.5 for y in y_list]
 
         # Calculate FoV_x and FoV_y
-        hfov_x = np.atan(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
-        hfov_y = np.atan(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
+        hfov_x = np.atan(np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2)
+        hfov_y = np.atan(np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2)
         hfov_x = np.rad2deg(hfov_x)
         hfov_y = np.rad2deg(hfov_y)
         fov_x_list = [float(x * hfov_x) for x in x_list]
@@ -447,21 +448,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             ray (Ray object): Ray object. Shape [H, W, spp, 3]
         """
+        w, h = self.sensor_size
+        W, H = self.sensor_res
+        device = self.device
+
         # Sample points on sensor plane
         # Use top-left point as reference in rendering, so here we should sample bottom-right point
         x1, y1 = torch.meshgrid(
-            torch.linspace(
-                -self.sensor_size[1] / 2,
-                self.sensor_size[1] / 2,
-                self.sensor_res[1] + 1,
-                device=self.device,
-            )[1:],
-            torch.linspace(
-                self.sensor_size[0] / 2,
-                -self.sensor_size[0] / 2,
-                self.sensor_res[0] + 1,
-                device=self.device,
-            )[1:],
+            torch.linspace(-w / 2, w / 2, W + 1, device=device,)[1:],
+            torch.linspace(h / 2, -h / 2, H + 1, device=device,)[1:],
             indexing="xy",
         )
         z1 = torch.full_like(x1, self.d_sensor.item())
@@ -477,11 +472,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Sub-pixel sampling for more realistic rendering
         if sub_pixel:
             delta_ox = (
-                torch.rand((ray_o[:, :, :, 0].clone().shape), device=self.device)
+                torch.rand((ray_o[:, :, :, 0].clone().shape), device=device)
                 * self.pixel_size
             )
             delta_oy = (
-                -torch.rand((ray_o[:, :, :, 1].clone().shape), device=self.device)
+                -torch.rand((ray_o[:, :, :, 1].clone().shape), device=device)
                 * self.pixel_size
             )
             delta_oz = torch.zeros_like(delta_ox)
@@ -490,7 +485,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Form rays
         ray_d = ray_o2 - ray_o  # shape [H, W, spp, 3]
-        ray = Ray(ray_o, ray_d, wvln, device=self.device)
+        ray = Ray(ray_o, ray_d, wvln, device=device)
         return ray
 
     def sample_circle(self, r, z, shape=[16, 16, 512]):
@@ -909,43 +904,40 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # PSF (incoherent ray tracing)
     # ====================================================================================
     @torch.no_grad()
-    def psf_center(self, point, method="chief_ray"):
+    def psf_center(self, points, method="chief_ray"):
         """Compute reference PSF center (flipped to match the original point, green light) for given point source.
 
         Args:
-            point: [..., 3] un-normalized point is in object plane.
+            points: [..., 3] un-normalized point is in object plane. [-Inf, Inf] * [-Inf, Inf] * [-Inf, 0]
 
         Returns:
             psf_center: [..., 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray
-            ray = self.sample_from_points(point, scale_pupil=0.2, num_rays=SPP_CALC)
+            ray = self.sample_from_points(points, scale_pupil=0.2, num_rays=SPP_CALC)
             ray = self.trace2sensor(ray)
-            assert (ray.valid == 1).any(), "No sampled rays is valid."
-            valid = ray.valid.unsqueeze(-1)
-            psf_center = (ray.o * valid).sum(-2) / valid.sum(-2).add(
-                EPSILON
-            )  # shape [..., 3]
+            assert (ray.valid == 1).any(), "When tracing chief ray, no ray arrives at the sensor."
+            psf_center = ray.centroid()
             psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
+            if points[..., 2].min() > -100:
+                print("Point source is too close to the lens, pinhole model may not be accurate.")
+            w, h = self.sensor_size
+            
             # Pinhole camera perspective projection
-            # Calculate the FoV of incident ray, then map to sensor plane
-            tan_point_fov_x = -point[..., 0] / point[..., 2]
-            tan_point_fov_y = -point[..., 1] / point[..., 2]
-            tan_hfov_x = float(
-                np.tan(self.hfov) * self.sensor_size[1] / self.r_sensor / 2
-            )
-            tan_hfov_y = float(
-                np.tan(self.hfov) * self.sensor_size[0] / self.r_sensor / 2
-            )
-            psf_center_x = tan_point_fov_x / tan_hfov_x * self.sensor_size[1] / 2
-            psf_center_y = tan_point_fov_y / tan_hfov_y * self.sensor_size[0] / 2
+            # Calculate the ratio of incident FoV to full FoV, then map to sensor plane
+            tan_point_fov_x = -points[..., 0] / points[..., 2]
+            tan_point_fov_y = -points[..., 1] / points[..., 2]
+            tan_hfov_x = (w / 2) / self.r_sensor * np.tan(self.hfov)
+            tan_hfov_y = (h / 2) / self.r_sensor * np.tan(self.hfov)
+            psf_center_x = (tan_point_fov_x / tan_hfov_x) * w / 2
+            psf_center_y = (tan_point_fov_y / tan_hfov_y) * h / 2
             psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1)
 
         else:
-            raise ValueError(f"Unsupported method: {method}.")
+            raise ValueError(f"Unsupported method for PSF center calculation: {method}.")
 
         return psf_center
 
@@ -985,7 +977,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Calculate PSF
         if recenter:
             # PSF center on the sensor plane defined by chief ray
-            pointc_chief_ray = self.psf_center(point_obj)  # shape [N, 2]
+            pointc_chief_ray = self.psf_center(point_obj, method="chief_ray")  # shape [N, 2]
             psf = forward_integral(
                 ray,
                 ps=self.pixel_size,
@@ -1079,7 +1071,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Ray center determined by chief ray
         # shape [N, 2], un-normalized physical coordinates
-        pointc_chief_ray = self.psf_center(point_obj)
+        pointc_chief_ray = self.psf_center(point_obj, method="chief_ray")
 
         # Ray-tracing to last surface
         ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
@@ -1271,6 +1263,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL.
 
+        Returns:
+            eff_foclen (float): Effective focal length.
+
         Reference:
             [1] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/10/Tutorial_MorelSophie.pdf
         """
@@ -1284,6 +1279,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Compute the effective focal length
         paraxial_imgh = (ray.o[0, 0, :, 1] * ray.valid[0, 0, :]).sum() / ray.valid[0, 0, :].sum()
         eff_foclen = paraxial_imgh.item() / float(np.tan(paraxial_fov_rad))
+        
+        self.efl = eff_foclen
+        self.foclen = eff_foclen
         return eff_foclen
 
     @torch.no_grad()
