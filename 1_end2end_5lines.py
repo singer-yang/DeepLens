@@ -235,7 +235,7 @@ if __name__ == "__main__":
     # ========================================
     lens = GeoLens(filename=args["lens"]["path"])
     lens.set_sensor_res(sensor_res=args["train"]["img_res"])
-    lens.set_target_fov_fnum(hfov=20, fnum=4.0)
+    lens.set_target_fov_fnum(rfov=20, fnum=4.0)
 
     net = NAFNet(
         in_chan=3,

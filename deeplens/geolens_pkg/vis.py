@@ -174,7 +174,7 @@ class GeoLensVis:
         if lens_title is None:
             eff_foclen = self.foclen
             eq_foclen = self.calc_eqfl()
-            fov_deg = 2 * self.hfov * 180 / torch.pi
+            fov_deg = self.dfov * 180 / torch.pi
 
             if self.aper_idx is not None:
                 _, pupil_r = self.calc_entrance_pupil()
@@ -186,7 +186,7 @@ class GeoLensVis:
         # Draw lens layout
         if not multi_plot:
             colors_list = ["#CC0000", "#006600", "#0066CC"]
-            views = np.linspace(0, float(np.rad2deg(self.hfov) * 0.99), num=num_views)
+            views = np.linspace(0, float(np.rad2deg(self.rfov) * 0.99), num=num_views)
             ax, fig = self.draw_lens_2d(zmx_format=zmx_format)
 
             for i, view in enumerate(views):
@@ -225,7 +225,7 @@ class GeoLensVis:
             plt.close()
 
         else:
-            views = np.linspace(0, np.rad2deg(self.hfov) * 0.99, num=num_views)
+            views = np.linspace(0, np.rad2deg(self.rfov) * 0.99, num=num_views)
             colors_list = ["#CC0000", "#006600", "#0066CC"]
             fig, axs = plt.subplots(1, 3, figsize=(15, 5))
             fig.suptitle(lens_title)

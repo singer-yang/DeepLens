@@ -18,7 +18,7 @@ train:
 
 lens:
   path: './lenses/cellphone/3P_blank.json'
-  target_hfov: 0.6
+  target_rfov: 0.6
   target_fnum: 2.8
   lr: !!python/tuple [1e-4, 1e-4, 1e-1, 1e-3]
   ai_lr_decay: 0.02

@@ -225,7 +225,7 @@ if __name__ == "__main__":
         save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
-        hfov=args["fov"] / 2 / 57.3,
+        rfov=args["fov"] / 2 / 57.3,
         fnum=args["fnum"],
     )
     logging.info(
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     lens.post_computation()
 
     logging.info(
-        f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
+        f"Actual: diagonal FOV {lens.rfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
     )
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens")

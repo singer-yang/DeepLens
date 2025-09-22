@@ -56,7 +56,7 @@ class PSFNetLens(Lens):
         self.lens_path = lens_path
         self.lens = GeoLens(filename=lens_path, device=self.device)
         self.lens.set_sensor_res(sensor_res=sensor_res)
-        self.hfov = self.lens.hfov
+        self.rfov = self.lens.rfov
 
         # Init PSF network
         self.in_chan = in_chan
@@ -239,7 +239,7 @@ class PSFNetLens(Lens):
 
         Returns:
             sample_input (tensor): [B, 3] tensor, (fov, depth, foc_dist).
-                - fov from [0, hfov] on 0y-axis, [radians]
+                - fov from [0, rfov] on 0y-axis, [radians]
                 - depth from [d_far, d_close], [mm]
                 - foc_dist from [foc_d_far, foc_d_close], [mm]
                 - We use absolute fov and depth.
@@ -248,7 +248,7 @@ class PSFNetLens(Lens):
         """
         d_close = self.d_close
         d_far = self.d_far
-        hfov = self.lens.calc_eff_hfov()
+        rfov = self.lens.calc_eff_rfov()
 
         # In each iteration, sample one focus distance, [mm], range [foc_d_far, foc_d_close]
         # Example beta distribution: https://share.google/images/Mrb9c39PdddYx3UHj
@@ -257,10 +257,10 @@ class PSFNetLens(Lens):
         self.lens.refocus(foc_dist)
         foc_dist = torch.full((num_points,), foc_dist)
 
-        # Sample (fov), [radians], range[0, hfov]
+        # Sample (fov), [radians], range[0, rfov]
         beta_values = np.random.beta(4, 1, num_points)  # Biased towards 1
         beta_values = torch.from_numpy(beta_values).float()
-        fov = beta_values * hfov
+        fov = beta_values * rfov
 
         # Sample (depth), sample more points near the focus distance, [mm], range [d_far, d_close]
         # A smaller std_dev value samples points more tightly
@@ -295,7 +295,7 @@ class PSFNetLens(Lens):
 
         Returns:
             input (tensor): [N, 3] tensor, (fov, depth, foc_dist).
-                - fov from [0, hfov] on y-axis, [radians]
+                - fov from [0, rfov] on y-axis, [radians]
                 - depth/1000.0 from [d_far, d_close], [mm]
                 - foc_dist/1000.0 from [foc_d_far, foc_d_close], [mm]
         """
