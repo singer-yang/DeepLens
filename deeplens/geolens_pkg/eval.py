@@ -260,7 +260,7 @@ class GeoLensEval:
         )
         ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
 
-        ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
+        ray, _ = self.trace(ray)
         t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
 
         # Calculate actual image height
@@ -665,7 +665,8 @@ class GeoLensEval:
         inc_ray = ray.clone()
 
         # Trace to the aperture
-        ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
+        surf_range = range(0, self.aper_idx)
+        ray, _ = self.trace(ray, surf_range=surf_range)
 
         # Look for the ray that is closest to the optical axis
         center_x = torch.min(torch.abs(ray.o[:, 0]))
@@ -803,7 +804,8 @@ class GeoLensEval:
             # Trace until the aperture
             ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
             inc_ray = ray.clone()
-            ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx + 1)))
+            surf_range = range(0, self.aper_idx + 1)
+            ray, _ = self.trace(ray, surf_range=surf_range)
 
             # Look for the ray that is closest to the optical axis
             if plane == "sagittal":

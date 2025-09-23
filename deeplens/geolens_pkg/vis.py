@@ -173,7 +173,7 @@ class GeoLensVis:
         # Lens title
         if lens_title is None:
             eff_foclen = self.foclen
-            eq_foclen = self.calc_eqfl()
+            eq_foclen = self.eqfl
             fov_deg = self.dfov * 180 / torch.pi
 
             if self.aper_idx is not None:
@@ -186,14 +186,14 @@ class GeoLensVis:
         # Draw lens layout
         if not multi_plot:
             colors_list = ["#CC0000", "#006600", "#0066CC"]
-            views = np.linspace(0, float(np.rad2deg(self.rfov) * 0.99), num=num_views)
+            fov_ls = np.linspace(0, float(np.rad2deg(self.real_rfov) * 0.99), num=num_views)
             ax, fig = self.draw_lens_2d(zmx_format=zmx_format)
 
-            for i, view in enumerate(views):
+            for i, fov in enumerate(fov_ls):
                 # Sample rays, shape (num_view, num_rays, 3)
                 if depth == float("inf"):
                     ray = self.sample_parallel_2D(
-                        fov=view,
+                        fov=fov,
                         wvln=WAVE_RGB[2 - i],
                         num_rays=num_rays,
                         entrance_pupil=entrance_pupil,
@@ -202,7 +202,7 @@ class GeoLensVis:
                     )  # shape (num_rays, 3)
                 else:
                     ray = self.sample_point_source_2D(
-                        fov=view,
+                        fov=fov,
                         depth=depth,
                         num_rays=num_rays,
                         wvln=WAVE_RGB[2 - i],
@@ -225,7 +225,7 @@ class GeoLensVis:
             plt.close()
 
         else:
-            views = np.linspace(0, np.rad2deg(self.rfov) * 0.99, num=num_views)
+            fov_ls = np.linspace(0, np.rad2deg(self.real_rfov) * 0.99, num=num_views)
             colors_list = ["#CC0000", "#006600", "#0066CC"]
             fig, axs = plt.subplots(1, 3, figsize=(15, 5))
             fig.suptitle(lens_title)
@@ -234,10 +234,10 @@ class GeoLensVis:
                 ax = axs[i]
                 ax, fig = self.draw_lens_2d(ax=ax, fig=fig, zmx_format=zmx_format)
 
-                for view in views:
+                for fov in fov_ls:
                     if depth == float("inf"):
                         ray = self.sample_parallel_2D(
-                            fov=view,
+                            fov=fov,
                             num_rays=num_rays,
                             wvln=wvln,
                             entrance_pupil=entrance_pupil,
@@ -245,7 +245,7 @@ class GeoLensVis:
                         )  # shape (num_rays, 3)
                     else:
                         ray = self.sample_point_source_2D(
-                            fov=view,
+                            fov=fov,
                             depth=depth,
                             num_rays=num_rays,
                             wvln=wvln,

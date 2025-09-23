@@ -24,6 +24,8 @@ from deeplens.optics.basics import (
     RED_RESPONSE,
     WAVE_BOARD_BAND,
     WAVE_RGB,
+    DEFAULT_WAVE,
+    SPP_PSF,
     DeepObj,
     init_device,
 )
@@ -68,22 +70,26 @@ class Lens(DeepObj):
         """Write lens to a json file."""
         raise NotImplementedError
 
-    # ===========================================
-    # Sensor-related functions
-    # ===========================================
     def set_sensor(self, sensor_size, sensor_res):
-        """Set sensor resolution."""
-        if not sensor_size[0] * sensor_res[1] == sensor_size[1] * sensor_res[0]:
-            raise Exception("Given sensor resolution does not match sensor size.")
+        """Set sensor size and resolution.
+        
+        Args:
+            sensor_size (tuple): Sensor size (w, h) in [mm].
+            sensor_res (tuple): Sensor resolution (W, H) in [pixels].
+        """
+        assert sensor_size[0] * sensor_res[1] == sensor_size[1] * sensor_res[0], (
+            "Sensor resolution aspect ratio does not match sensor size aspect ratio."
+        )
         self.sensor_size = sensor_size
         self.sensor_res = sensor_res
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
+        self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
 
     def set_sensor_res(self, sensor_res):
-        """Set sensor resolution. Sensor radius does not change.
+        """Set sensor resolution (and aspect ratio) while keeping sensor radius unchanged.
 
         Args:
-            sensor_res (tuple): Sensor resolution (H, W).
+            sensor_res (tuple): Sensor resolution (W, H) in [pixels].
         """
         # Change sensor resolution
         self.sensor_res = sensor_res
@@ -96,20 +102,6 @@ class Lens(DeepObj):
         )
         self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 3)
 
-    def set_sensor_size(self, sensor_size):
-        """Set sensor size. Pixel size does not change.
-
-        Args:
-            sensor_size (tuple): Sensor size (H, W).
-        """
-        self.sensor_size = sensor_size
-        self.r_sensor = (
-            np.sqrt(self.sensor_size[0] ** 2 + self.sensor_size[1] ** 2) / 2.0
-        )
-        self.sensor_res = (
-            int(self.sensor_size[0] / self.pixel_size),
-            int(self.sensor_size[1] / self.pixel_size),
-        )
 
     # ===========================================
     # PSF-ralated functions
@@ -209,10 +201,10 @@ class Lens(DeepObj):
             grid (tuple, optional): Grid size. Defaults to (9, 9), meaning 9x9 grid.
             normalized (bool): Return normalized object source coordinates. Defaults to True, meaning object sources xy coordinates range from [-1, 1].
             quater (bool): Use quater of the sensor plane to save memory. Defaults to False.
-            center (bool): Use center of each patch. Defaults to False.
+            center (bool): Use center of each patch. Defaults to True.
 
         Returns:
-            point_source: Shape of [grid, grid, 3].
+            point_source: Shape of [grid, grid, 3], [-1, 1], [-1, 1], [-Inf, 0].
         """
         # Compute point source grid
         if grid[0] == 1:
@@ -254,14 +246,14 @@ class Lens(DeepObj):
 
         return point_source
 
-    def psf_map(self, grid=(5, 5), wvln=0.589, depth=DEPTH, ks=51, **kwargs):
+    def psf_map(self, grid=(5, 5), wvln=DEFAULT_WAVE, depth=DEPTH, ks=PSF_KS, **kwargs):
         """Compute monochrome PSF map.
 
         Args:
             grid (tuple, optional): Grid size. Defaults to (5, 5), meaning 5x5 grid.
-            wvln (float, optional): Wavelength. Defaults to 0.589.
+            wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
             depth (float, optional): Depth of the object. Defaults to DEPTH.
-            ks (int, optional): Kernel size. Defaults to 51, meaning 51x51 kernel size.
+            ks (int, optional): Kernel size. Defaults to PSF_KS.
 
         Returns:
             psf_map: Shape of [grid, grid, 3, ks, ks].
@@ -416,7 +408,7 @@ class Lens(DeepObj):
         psfs = []
         for i in range(M):
             # Scale PSF for a better visualization
-            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=4096)
+            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=SPP_PSF)
             psf /= psf.max()
 
             if log_scale:
@@ -461,15 +453,16 @@ class Lens(DeepObj):
             [1] "Optical Aberration Correction in Postprocessing using Imaging Simulation", TOG 2021.
         """
         # Check sensor resolution
-        B, C, H, W = img_obj.shape
-        assert self.sensor_res[0] == H and self.sensor_res[1] == W, (
-            "Sensor resolution must match input image object."
-        )
+        B, C, Himg, Wimg = img_obj.shape
+        Wsensor, Hsensor = self.sensor_res
 
         # Image simulation (in RAW space)
         if method == "psf_map":
             # Render full resolution image with PSF map convolution
-            psf_grid = kwargs.get("psf_grid", (7, 7))
+            assert Wimg == Wsensor and Himg == Hsensor, (
+                f"Sensor resolution {Wsensor}x{Hsensor} must match input image {Wimg}x{Himg}."
+            )
+            psf_grid = kwargs.get("psf_grid", (10, 10))
             psf_ks = kwargs.get("psf_ks", 51)
             img_render = self.render_psf_map(
                 img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
@@ -508,20 +501,20 @@ class Lens(DeepObj):
 
         return img_render
 
-    def render_psf(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=51):
+    def render_psf(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=PSF_KS):
         """Render image patch using PSF convolution. Better not use this function to avoid confusion."""
         return self.render_psf_patch(
             img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
         )
 
-    def render_psf_patch(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=51):
+    def render_psf_patch(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=PSF_KS):
         """Render an image patch using PSF convolution, and return positional encoding channel.
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
             depth (float): Depth of the object.
             psf_center (tensor): Center of the PSF patch. Shape of [2].
-            psf_ks (int): PSF kernel size.
+            psf_ks (int): PSF kernel size. Defaults to PSF_KS.
 
         Returns:
             img_render: Rendered image. Shape of [B, C, H, W].
@@ -538,7 +531,7 @@ class Lens(DeepObj):
         img_render = conv_psf(img_obj, psf=psf)
         return img_render
 
-    def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=51):
+    def render_psf_map(self, img_obj, depth=DEPTH, psf_grid=7, psf_ks=PSF_KS):
         """Render image using PSF block convolution.
 
         Note:
@@ -548,7 +541,7 @@ class Lens(DeepObj):
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
             depth (float): Depth of the object.
             psf_grid (int): PSF grid size.
-            psf_ks (int): PSF kernel size.
+            psf_ks (int): PSF kernel size. Defaults to PSF_KS.
 
         Returns:
             img_render: Rendered image. Shape of [B, C, H, W].
@@ -579,7 +572,7 @@ class Lens(DeepObj):
         if method == "psf_patch":
             # Render a small image patch (same FoV, different depth)
             psf_center = kwargs.get("psf_center", (0.0, 0.0))
-            psf_ks = kwargs.get("psf_ks", 51)
+            psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
             num_depth = kwargs.get("num_depth", 10)
