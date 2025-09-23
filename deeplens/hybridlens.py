@@ -52,12 +52,12 @@ class HybridLens(Lens):
         sensor_res=(2000, 2000),
         sensor_size=(8.0, 8.0),
         device=None,
+        dtype=torch.float64,
     ):
-        super().__init__(device=device)
+        super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution
-        self.sensor_res = sensor_res
-        self.sensor_size = sensor_size
+        self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
 
         # Load lens file
         if filename is not None:
@@ -146,11 +146,11 @@ class HybridLens(Lens):
         self.doe.draw_phase_map(save_name=f"{save_name}_doe.png")
 
     def double(self):
-        self.geolens.double()
-        self.doe.double()
+        self.geolens.astype(torch.float64)
+        self.doe.astype(torch.float64)
 
     def refocus(self, foc_dist):
-        """Refocus the DoeLens to a given depth. Donot move DOE because DOE is installed with geolens in the Siggraph Asia 2024 paper."""
+        """Refocus the DoeLens to a given depth. DOE is not moved because it is installed with geolens in the Siggraph Asia 2024 paper."""
         self.geolens.refocus(foc_dist)
 
     def calc_scale(self, depth):

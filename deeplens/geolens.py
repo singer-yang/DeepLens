@@ -119,6 +119,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # After loading lens, compute foclen, fov and fnum
         self.to(self.device)
+        self.astype(self.dtype)
         self.post_computation()
 
     def post_computation(self):
@@ -138,11 +139,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if self.float_rfov is True:
             self.calc_fov()
 
-    def double(self):
-        """Use double-precision for coherent ray tracing."""
-        torch.set_default_dtype(torch.float64)
-        for surf in self.surfaces:
-            surf.double()
+    # def double(self):
+    #     """Use double-precision for coherent ray tracing."""
+    #     self.astype(torch.float64)
+    #     # torch.set_default_dtype(torch.float64)
+    #     # for surf in self.surfaces:
+    #     #     surf.double()
 
     def __call__(self, ray):
         """The input and output of a GeoLens object are both Ray objects."""
@@ -531,10 +533,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             ray_final (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
-        # # Manually propagate ray to a shallow depth to avoid numerical instability
-        # if (ray.o[..., 2].min() < -100.0).any():
-        #     ray = ray.prop_to(-10.0)
-
         if surf_range is None:
             surf_range = range(0, len(self.surfaces))
 

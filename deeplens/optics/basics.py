@@ -221,8 +221,8 @@ def wave_rgb():
 # Classes
 # ===========================================
 class DeepObj:
-    def __init__(self, dtype=torch.float32):
-        self.dtype = dtype
+    def __init__(self, dtype=None):
+        self.dtype = torch.get_default_dtype() if dtype is None else dtype
 
     def __str__(self):
         """Called when using print() and str()"""
@@ -269,34 +269,6 @@ class DeepObj:
                         exec(f"self.{key}[{i}].to(device)")
         return self
 
-    def double(self):
-        """Convert all float32 tensors to float64.
-
-        Remember to upgrade pytorch to the latest version to use double-precision optimizer.
-
-        torch.set_default_dtype(torch.float64)
-        """
-        # assert (
-        #     torch.get_default_dtype() == torch.float64
-        # ), "Default dtype should be float64."
-        self.dtype = torch.float64
-
-        for key, val in vars(self).items():
-            if torch.is_tensor(val):
-                exec(f"self.{key} = self.{key}.double()")
-            elif isinstance(val, nn.Module):
-                exec(f"self.{key}.double()")
-            elif issubclass(type(val), DeepObj):
-                exec(f"self.{key}.double()")
-            elif issubclass(type(val), list):
-                # Now only support tensor list or DeepObj list
-                for i, v in enumerate(val):
-                    if torch.is_tensor(v):
-                        exec(f"self.{key}[{i}] = self.{key}[{i}].double()")
-                    elif issubclass(type(v), DeepObj):
-                        exec(f"self.{key}[{i}].double()")
-
-        return self
 
     def astype(self, dtype):
         """Convert all tensors to the given dtype.
@@ -304,8 +276,15 @@ class DeepObj:
         Args:
             dtype (torch.dtype): Data type.
         """
+        if dtype is None:
+            return self
+        
         dtype_ls = [torch.float16, torch.float32, torch.float64]
         assert dtype in dtype_ls, f"Data type {dtype} is not supported."
+        
+        if torch.get_default_dtype() != dtype:
+            torch.set_default_dtype(dtype)
+            print(f"Set {dtype} as default torch dtype.")
         
         self.dtype = dtype
         for key, val in vars(self).items():

@@ -16,9 +16,8 @@ from deeplens.optics.basics import DEFAULT_WAVE, EPSILON, DeepObj
 
 
 class Ray(DeepObj):
-    def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu", dtype=torch.float32):
+    def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
         """Optical ray class."""
-        super().__init__(dtype=dtype)
 
         # Basic ray parameters
         self.o = o if torch.is_tensor(o) else torch.tensor(o)
@@ -38,7 +37,6 @@ class Ray(DeepObj):
         self.opl = torch.zeros((*self.shape, 1))
 
         self.to(device)
-        self.astype(dtype)
         self.d = F.normalize(self.d, p=2, dim=-1)
 
     def prop_to(self, z, n=1.0):
