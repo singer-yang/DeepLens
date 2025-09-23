@@ -5,13 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Ray tracing geometric lens model. 
-
-Differentiable ray tracing is used to simulate the light propagation through the geometric lens. Usually geometric lens only consists of refractive/reflective surfaces, but it can also contain diffractive surfaces, which are simplified as local grating (the same as Zemax).
-
-For image simulation:
-    1. Ray tracing based rendering
-    2. PSF + patch convolution
+"""Ray tracing geometric lens model. Differentiable ray tracing is used to simulate light propagation through the geometric lens. A geometric lens typically consists of refractive/reflective surfaces, but it can also contain diffractive surfaces, which are simplified as local gratings (similar to the approach used in Zemax).
 
 Technical Paper:
     Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
