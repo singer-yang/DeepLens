@@ -5,9 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Surrogate lens model, representing the PSF of a lens by a neural network. 
-
-Surrogate lens model can accelerate the calculation of PSF compared to ray tracing.
+"""Surrogate lens model that represents the Point Spread Function (PSF) of a lens using a neural network. This surrogate model can significantly accelerate PSF calculations compared to traditional ray tracing methods.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, Mohamed Elhoseiny, and Wolfgang Heidrich, "Aberration-Aware Depth-from-Focus" IEEE-TPAMI 2023.

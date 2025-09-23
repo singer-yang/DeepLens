@@ -5,12 +5,11 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Paraxial geometric lens model.
-
-Paraxial lens model can simulate defocus (Circle of Confusion) but not optical aberrations. This model is commonly used in software such as Blender.
+"""Paraxial geometric/ABCD matrix lens model. The paraxial lens model can simulate defocus (Circle of Confusion) but not optical aberrations. This model is commonly used in software such as Blender.
 
 Reference:
     [1] https://en.wikipedia.org/wiki/Circle_of_confusion
+    [2] https://en.wikipedia.org/wiki/Ray_transfer_matrix_analysis
 """
 
 import numpy as np

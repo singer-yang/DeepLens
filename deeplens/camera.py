@@ -5,9 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Camera. 
-
-Camera works as a renderer in an end-to-end pipeline. It contains a lens and a sensor. 
+"""Camera contains a lens and a sensor, working as an image simulator in an end-to-end computational imaging pipeline.
 """
 
 import torch
@@ -18,9 +16,11 @@ from deeplens.sensor import RGBSensor
 
 
 class Renderer:
-    """Renderer is a basic class for image simulation.
+    """Renderer is the basic class for image simulation. 
     
-    We will support Camera renderer, and PSF renderer.
+    We will support two types of renderers:
+        [1] Camera renderer using optical simulation.
+        [2] PSF renderer using calibrated PSF data.
     """
 
     def __init__(self, device=None):
@@ -56,18 +56,18 @@ class Renderer:
 
 
 class Camera(Renderer):
-    """Camera includes an optical lens and a sensor. It is used to simulate real camera-captured images for computational photography."""
+    """Camera includes an optical lens and a sensor. It is used to simulate real camera-captured images for computational imaging."""
 
     def __init__(
         self,
         lens_file,
-        sensor_size=(5, 5),
-        sensor_res=(1024, 1024),
+        sensor_size=(8.0, 6.0),
+        sensor_res=(2000, 1500),
         device=None,
     ):
         super().__init__(device)
 
-        # Lens
+        # Lens (here we can use either GeoLens or other lens models)
         self.lens = GeoLens(lens_file, device=device)
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
 
