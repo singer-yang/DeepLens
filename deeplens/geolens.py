@@ -85,10 +85,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """
         super().__init__(device=device, dtype=dtype)
 
-        # Lens sensor size and resolution
-        self.sensor_res = sensor_res
-        self.sensor_size = sensor_size
-        self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
+        # Lens sensor size and resolution (will be overwritten if read from file)
+        self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
+        # self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
 
         # Load lens file
         if filename is not None:
@@ -112,7 +111,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         elif filename[-5:] == ".json":
             self.read_lens_json(filename)
         elif filename[-4:] == ".zmx":
-            self.read_zmx(filename)
+            self.read_lens_zmx(filename)
         elif filename[-4:] == ".seq":
             raise NotImplementedError("File format .seq is not supported yet.")
         else:
@@ -124,8 +123,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     def post_computation(self):
         """After loading lens, compute foclen, fov and fnum."""
-        self.calc_pupil()
         self.calc_foclen()
+        self.calc_pupil()
         self.calc_fov()
 
     def update_float_setting(self):
@@ -357,6 +356,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             pupilr *= scale_pupil
         else:
             pupilz, pupilr = 0, self.surfaces[0].r
+            pupilr *= scale_pupil
 
         ray_o = self.sample_circle(
             r=pupilr, z=pupilz, shape=[len(fov_y), len(fov_x), num_rays]
@@ -519,35 +519,35 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # ====================================================================================
     # Ray tracing
     # ====================================================================================
-    def trace(self, ray, lens_range=None, record=False):
+    def trace(self, ray, surf_range=None, record=False):
         """Ray tracing function. Forward or backward ray tracing is automatically determined by ray directions.
 
         Args:
             ray (Ray object): Ray object.
-            lens_range (list): lens range.
+            surf_range (list): Surface range.
             record (bool): record ray path or not.
 
         Returns:
             ray_final (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
-        # Manually propagate ray to a shallow depth to improve accuracy
-        if (ray.o[..., 2].min() < -100.0).any():
-            ray = ray.prop_to(-10.0)
+        # # Manually propagate ray to a shallow depth to avoid numerical instability
+        # if (ray.o[..., 2].min() < -100.0).any():
+        #     ray = ray.prop_to(-10.0)
 
-        if lens_range is None:
-            lens_range = range(0, len(self.surfaces))
+        if surf_range is None:
+            surf_range = range(0, len(self.surfaces))
 
         if ray.is_forward.any():
-            ray_out, ray_o_record = self.forward_tracing(ray, lens_range, record=record)
+            ray_out, ray_o_record = self.forward_tracing(ray, surf_range, record=record)
         else:
             ray_out, ray_o_record = self.backward_tracing(
-                ray, lens_range, record=record
+                ray, surf_range, record=record
             )
 
         return ray_out, ray_o_record
 
-    def trace2obj(self, ray, depth=DEPTH):
+    def trace2obj(self, ray):
         """Trace rays through the lens and reach the sensor plane.
 
         Args:
@@ -555,7 +555,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             depth (float): sensor distance.
         """
         ray, _ = self.trace(ray)
-        ray = ray.prop_to(depth)
         return ray
 
     def trace2sensor(self, ray, record=False):
@@ -569,7 +568,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             ray_out (Ray object): ray after optical system.
             ray_o_record (list): list of intersection points.
         """
-        # Manually propagate ray to a shallow depth to improve accuracy
+        # Manually propagate ray to a shallow depth to avoid numerical instability
         if (ray.o[..., 2].min() < -100.0).any():
             ray = ray.prop_to(-10.0)
 
@@ -586,12 +585,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             return ray
 
-    def forward_tracing(self, ray, lens_range, record):
+    def forward_tracing(self, ray, surf_range, record):
         """Trace rays from object space to sensor plane.
 
         Args:
             ray (Ray object): Ray object.
-            lens_range (list): lens range.
+            surf_range (list): Surface range.
             record (bool): record ray path or not.
         """
         if record:
@@ -601,7 +600,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             ray_o_record = None
 
         mat1 = Material("air")
-        for i in lens_range:
+        for i in surf_range:
             n1 = mat1.ior(ray.wvln)
             n2 = self.surfaces[i].mat2.ior(ray.wvln)
             ray = self.surfaces[i].ray_reaction(ray, n1, n2)
@@ -614,12 +613,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return ray, ray_o_record
 
-    def backward_tracing(self, ray, lens_range, record):
+    def backward_tracing(self, ray, surf_range, record):
         """Trace rays from sensor plane to object space.
 
         Args:
             ray (Ray object): Ray object.
-            lens_range (list): lens range.
+            surf_range (list): Surface range.
             record (bool): record ray path or not.
         """
         if record:
@@ -629,7 +628,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             ray_o_record = None
 
         mat1 = Material("air")
-        for i in np.flip(lens_range):
+        for i in np.flip(surf_range):
             n1 = mat1.ior(ray.wvln)
             n2 = self.surfaces[i - 1].mat2.ior(ray.wvln)
             ray = self.surfaces[i].ray_reaction(ray, n1, n2)
@@ -659,18 +658,24 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             method (str, optional): Image simulation method. Defaults to "psf".
             **kwargs: Additional arguments for different methods.
         """
-        # Check sensor resolution
-        if not (
-            self.sensor_res[0] == img_obj.shape[-2]
-            and self.sensor_res[1] == img_obj.shape[-1]
-        ):
-            H, W = img_obj.shape[-2], img_obj.shape[-1]
-            self.set_sensor_res(sensor_res=(H, W))
+        B, C, Himg, Wimg = img_obj.shape
+        Wsensor, Hsensor = self.sensor_res
 
-        # Differentiable image simulation
+        # # Check sensor resolution
+        # if not (
+        #     self.sensor_res[0] == img_obj.shape[-2]
+        #     and self.sensor_res[1] == img_obj.shape[-1]
+        # ):
+        #     H, W = img_obj.shape[-2], img_obj.shape[-1]
+        #     self.set_sensor_res(sensor_res=(H, W))
+
+        # Image simulation
         if method == "psf_map":
             # PSF based rendering - uses PSF map to render image
-            psf_grid = kwargs.get("psf_grid", (7, 7))
+            assert Wimg == Wsensor and Himg == Hsensor, (
+                f"Sensor resolution {Wsensor}x{Hsensor} must match input image {Wimg}x{Himg}."
+            )
+            psf_grid = kwargs.get("psf_grid", (10, 10))
             psf_ks = kwargs.get("psf_ks", 51)
             img_render = self.render_psf_map(img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks)
 
@@ -682,6 +687,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         elif method == "ray_tracing":
             # Ray tracing based rendering
+            assert Wimg == Wsensor and Himg == Hsensor, (
+                f"Sensor resolution {Wsensor}x{Hsensor} must match input image {Wimg}x{Himg}."
+            )
             spp = kwargs.get("spp", SPP_RENDER)
             img_render = self.render_raytracing(img_obj, depth=depth, spp=spp)
 
@@ -728,7 +736,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         img = torch.flip(img, [-2, -1])
         scale = self.calc_scale(depth=depth)
         ray = self.sample_sensor(spp=spp, wvln=wvln)
-        ray = self.trace2obj(ray, depth=depth)
+        ray = self.trace2obj(ray)
         img_mono = self.render_compute_image(
             img, depth=depth, scale=scale, ray=ray, vignetting=vignetting
         )
@@ -749,17 +757,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             image (tensor): [N, C, H, W] or [N, H, W] shape rendered image tensor.
         """
-        # Preparetion (img is [N, C, H, W] or [N, H, W] tensor)
-        if torch.is_tensor(img):
-            H, W = img.shape[-2:]
-            if len(img.shape) == 4:
-                img = F.pad(img, (1, 1, 1, 1), "replicate")
-            else:
-                img = F.pad(img.unsqueeze(1), (1, 1, 1, 1), "replicate").squeeze(1)
-            # img = F.pad(img, (1,1,1,1), "constant")    #constant padding can work for arbitary dmensions
+        assert torch.is_tensor(img), "Input image should be Tensor."
+        
+        # Padding
+        H, W = img.shape[-2:]
+        if len(img.shape) == 3:
+            img = F.pad(img.unsqueeze(1), (1, 1, 1, 1), "replicate").squeeze(1)
+        elif len(img.shape) == 4:
+            img = F.pad(img, (1, 1, 1, 1), "replicate")
         else:
-            raise Exception("Input image should be Tensor.")
-
+            raise ValueError("Input image should be [N, C, H, W] or [N, H, W] tensor.")
+          
         # Scale object image physical size to get 1:1 pixel-pixel alignment with sensor image
         ray = ray.prop_to(depth)
         p = ray.o[..., :2]
@@ -845,8 +853,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     ):
         """Render a single image for visualization and analysis. 
         
-        This function is designed to be non-differentiable. If want to use differentiable rendering, call self.render() function.
-
         Args:
             img_org (tensor): [H, W, 3] shape image.
             depth (float, optional): depth of object image. Defaults to DEPTH.
@@ -859,7 +865,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Change sensor resolution to match the image
         sensor_res_original = self.sensor_res
         img = img2batch(img_org).to(self.device)
-        # self.set_sensor(sensor_res=img.shape[-2:], sensor_size=self.sensor_size)
         self.set_sensor_res(sensor_res=img.shape[-2:])
 
         # Image rendering
@@ -885,7 +890,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             # Compute PSNR and SSIM
             render_psnr = round(batch_psnr(img, img_render), 3)
             render_ssim = round(batch_ssim(img, img_render), 3)
-            print(f"Rendered image: PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}")
+            print(f"Rendered image (unwarped): PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}")
 
             if save_name is not None:
                 save_image(img_render, f"{save_name}_unwarped.png")
@@ -910,7 +915,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray
-            ray = self.sample_from_points(points, scale_pupil=0.2, num_rays=SPP_CALC)
+            ray = self.sample_from_points(points, scale_pupil=0.25, num_rays=SPP_CALC)
             ray = self.trace2sensor(ray)
             assert (ray.valid == 1).any(), "When tracing chief ray, no ray arrives at the sensor."
             psf_center = ray.centroid()
@@ -945,9 +950,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             kernel: Shape of [ks, ks] or [N, ks, ks].
         """
+        sensor_w, sensor_h = self.sensor_size
+        pixel_size = self.pixel_size
+        device = self.device
+        
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
-            points = torch.tensor(points)
+            points = torch.tensor(points, device=device)
         
         if len(points.shape) == 1:
             single_point = True
@@ -958,8 +967,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Ray position in the object space by perspective projection, because points are normalized
         depth = points[:, 2]
         scale = self.calc_scale(depth)
-        point_obj_x = points[..., 0] * scale * self.sensor_size[1] / 2
-        point_obj_y = points[..., 1] * scale * self.sensor_size[0] / 2
+        point_obj_x = points[..., 0] * scale * sensor_w / 2
+        point_obj_y = points[..., 1] * scale * sensor_h / 2
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
 
         # Trace rays to sensor plane
@@ -972,18 +981,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             pointc_chief_ray = self.psf_center(point_obj, method="chief_ray")  # shape [N, 2]
             psf = forward_integral(
                 ray,
-                ps=self.pixel_size,
+                ps=pixel_size,
                 ks=ks,
                 pointc=pointc_chief_ray,
                 coherent=False,
             )
         else:
             # PSF center on the sensor plane defined by perspective projection
-            pointc_ideal = points.clone()[:, :2]
-            pointc_ideal[:, 0] *= self.sensor_size[1] / 2
-            pointc_ideal[:, 1] *= self.sensor_size[0] / 2
+            pointc_ideal = points.clone()[:, :2].to(device)
+            pointc_ideal[:, 0] *= sensor_w / 2
+            pointc_ideal[:, 1] *= sensor_h / 2
             psf = forward_integral(
-                ray, ps=self.pixel_size, ks=ks, pointc=pointc_ideal.to(self.device), coherent=False
+                ray, ps=pixel_size, ks=ks, pointc=pointc_ideal, coherent=False
             )
 
         # Normalize to 1
@@ -1046,20 +1055,21 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             "Please set the default dtype to float64 for accurate phase calculation."
         )
 
+        sensor_w, sensor_h = self.sensor_size
+        device = self.device
+
         if isinstance(point, list):
-            point = torch.tensor(point, device=self.device).unsqueeze(
-                0
-            )  # shape of [1, 3]
+            point = torch.tensor(point, device=device).unsqueeze(0)  # shape of [1, 3]
         elif torch.is_tensor(point) and len(point.shape) == 1:
-            point = point.unsqueeze(0).to(torch.float64)  # shape of [1, 3]
+            point = point.unsqueeze(0).to(torch.float64).to(device)  # shape of [1, 3]
         else:
             raise Exception("Unsupported point type.")
 
         # Ray origin in the object space
         scale = self.calc_scale(point[:, 2].item())
         point_obj = point.clone()
-        point_obj[:, 0] = point[:, 0] * scale * self.sensor_size[1] / 2  # x coordinate
-        point_obj[:, 1] = point[:, 1] * scale * self.sensor_size[0] / 2  # y coordinate
+        point_obj[:, 0] = point[:, 0] * scale * sensor_w / 2  # x coordinate
+        point_obj[:, 1] = point[:, 1] * scale * sensor_h / 2  # y coordinate
 
         # Ray center determined by chief ray
         # shape [N, 2], un-normalized physical coordinates
@@ -1075,23 +1085,23 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         ray = ray.prop_to(pupilz)
 
         # Calculate a full-resolution complex field for exit-pupil diffraction
-        pointc_ref = torch.zeros_like(point[:, :2]).to(self.device)
+        pointc_ref = torch.zeros_like(point[:, :2]).to(device)
         wavefront = forward_integral(
             ray,
             ps=self.pixel_size,
-            ks=self.sensor_res[0],
+            ks=self.sensor_res[1],
             pointc=pointc_ref,
             coherent=True,
         )
-        wavefront = wavefront.squeeze(0)  # shape of [H, W]
+        wavefront = wavefront.squeeze(0)  # shape of [H, H]
 
         # Aperture clip
 
         # PSF center (on the sensor plane)
         pointc_chief_ray = pointc_chief_ray[0, :]
         psf_center = [
-            pointc_chief_ray[0] / self.sensor_size[0] * 2,
-            pointc_chief_ray[1] / self.sensor_size[1] * 2,
+            pointc_chief_ray[0] / sensor_w * 2,
+            pointc_chief_ray[1] / sensor_h * 2,
         ]
 
         return wavefront, psf_center
@@ -1250,7 +1260,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
         paraxial_fov_rad = 0.001
         paraxial_fov_deg = float(np.rad2deg(paraxial_fov_rad))
-        ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, scale_pupil=0.2)
+        ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, entrance_pupil=False, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
 
         # Compute the effective focal length
@@ -1261,9 +1271,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         
         # Compute back focal length
         self.bfl = self.d_sensor.item() - self.surfaces[-1].d.item()
-
-        # Compute 35mm equivalent focal length. 35mm sensor: 36mm * 24mm
-        self.eqfl = 21.63 / math.tan(self.rfov)
 
     @torch.no_grad()
     def calc_numerical_aperture(self):
@@ -1374,6 +1381,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.real_rfov = rfov.item()
             self.real_dfov = 2 * rfov.item()
 
+        # 3. Compute 35mm equivalent focal length. 35mm sensor: 36mm * 24mm
+        self.eqfl = 21.63 / math.tan(self.rfov)
+
     @torch.no_grad()
     def calc_scale(self, depth):
         """Calculate the scale factor (obj_height / img_height) with pinhole camera model."""
@@ -1404,7 +1414,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         if self.aper_idx is None:
             self.aper_idx = np.argmin([s.r for s in self.surfaces])
-            print(f"No aperture found, use the smallest aperture as aperture.")
+            print("No aperture found, use the smallest surface as aperture.")
         
         # Compute entrance and exit pupil
         self.exit_pupilz, self.exit_pupilr = self.calc_exit_pupil(paraxial=False)
@@ -1478,8 +1488,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         ray = Ray(ray_o, d, device=self.device)
 
         # Ray tracing from aperture edge to last surface
-        lens_range = range(self.aper_idx + 1, len(self.surfaces))
-        ray, _ = self.trace(ray, lens_range=lens_range)
+        surf_range = range(self.aper_idx + 1, len(self.surfaces))
+        ray, _ = self.trace(ray, surf_range=surf_range)
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
@@ -1558,8 +1568,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         ray = Ray(ray_o, d, device=self.device)
 
         # Ray tracing from aperture edge to first surface
-        lens_range = range(0, self.aper_idx)
-        ray, _ = self.trace(ray, lens_range=lens_range)
+        surf_range = range(0, self.aper_idx)
+        ray, _ = self.trace(ray, surf_range=surf_range)
 
         # Compute intersection points, solving the equation: o1+d1*t1 = o2+d2*t2
         ray_o = torch.stack(
