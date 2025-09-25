@@ -467,32 +467,15 @@ class Lens(DeepObj):
             )
 
         elif method == "psf_patch":
-            # Render a small image patch with one PSF
+            # Render an image patch with its corresponding PSF
             psf_center = kwargs.get("psf_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", 51)
             img_render = self.render_psf_patch(
                 img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
             )
 
-            # Compute positional encoding channel for image patch. Shape of [1, H, W].
-            Wobj, Hobj = img_obj.shape[-1], img_obj.shape[-2]
-            ps_norm = 2 / self.sensor_res[0]
-            grid_x, grid_y = torch.meshgrid(
-                torch.linspace(
-                    psf_center[0] - Wobj / 2 * ps_norm,
-                    psf_center[0] + Wobj / 2 * ps_norm,
-                    Wobj // 2,
-                    device=self.device,
-                ),
-                torch.linspace(
-                    psf_center[1] + Hobj / 2 * ps_norm,
-                    psf_center[1] - Hobj / 2 * ps_norm,
-                    Hobj // 2,
-                    device=self.device,
-                ),
-                indexing="xy",
-            )
-            field_chan = torch.sqrt(grid_x**2 + grid_y**2).unsqueeze(0)
+        elif method == "psf_pixel":
+            raise NotImplementedError("Per-pixel PSF convolution has not been implemented.")
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
@@ -511,7 +494,7 @@ class Lens(DeepObj):
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
             depth (float): Depth of the object.
-            psf_center (tensor): Center of the PSF patch. Shape of [2].
+            psf_center (tensor): Center of the PSF patch. Shape of [2] or [B, 2].
             psf_ks (int): PSF kernel size. Defaults to PSF_KS.
 
         Returns:
@@ -521,8 +504,11 @@ class Lens(DeepObj):
         if isinstance(psf_center, (list, tuple)):
             points = (psf_center[0], psf_center[1], depth)
             points = torch.tensor(points).unsqueeze(0)
+        elif isinstance(psf_center, torch.Tensor):
+            depth = torch.full_like(psf_center[..., 0], depth)
+            points = torch.stack([psf_center[..., 0], psf_center[..., 1], depth], dim=-1)
         else:
-            raise Exception("PSF center must be a list or tuple.")
+            raise Exception(f"PSF center must be a list or tuple or tensor, but got {type(psf_center)}.")
 
         # Compute PSF and perform PSF convolution
         psf = self.psf_rgb(points=points, ks=psf_ks).squeeze(0)

@@ -1,12 +1,21 @@
-"""Basic and common dataset classes."""
+"""Dataset class and download functions.
+
+The following datasets are supported:
+- BSDS300 (300 images, 22MB)
+- DIV2K (800 images, 3.98GB)
+- FLICK2K (2650 images, 11.6GB)
+- DIV8K (1504 images, 46.3GB)
+- MIT5K (5000 images, ~50GB)
+"""
 
 import glob
 import os
 import zipfile
 
-from huggingface_hub import hf_hub_download
 import requests
 import torch
+from tqdm import tqdm
+from huggingface_hub import hf_hub_download
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -48,21 +57,24 @@ class ImageDataset(Dataset):
 class PhotographicDataset(Dataset):
     """Loads images and samples ISO values from a directory. The data dict will be used for image simulation, then network training."""
 
-    def __init__(self, img_dir, output_type="rgb", img_res=(512, 512), is_train=True):
+    def __init__(self, img_dir, img_res=(512, 512), iso_range=(100, 400), is_train=True):
         """Initialize the Photographic Dataset.
 
         Args:
             img_dir: Directory containing the images
-            output_type: Type of output image format
             img_res: Image resolution. If int, creates square image of [img_res, img_res]
+            iso_range: ISO range. Defaults to (100, 400).
+            iso_scale: ISO scale. Defaults to 1000.
             is_train: Whether this is for training (with augmentation) or testing
         """
         super(PhotographicDataset, self).__init__()
         self.img_paths = glob.glob(f"{img_dir}/**.png") + glob.glob(f"{img_dir}/**.jpg")
+        assert len(self.img_paths) > 0, f"No images found in {img_dir}"
         print(f"Found {len(self.img_paths)} images in {img_dir}")
 
         if isinstance(img_res, int):
             img_res = (img_res, img_res)
+        self.iso_range = iso_range
         self.is_train = is_train
 
         # Training transform with augmentation
@@ -88,31 +100,38 @@ class PhotographicDataset(Dataset):
             ]
         )
 
-        self.output_type = output_type
-
     def __len__(self):
         return len(self.img_paths)
 
     def sample_iso(self):
-        return torch.randint(100, 400, (1,))[0].float()
+        """Sample ISO value from the ISO range."""
+        iso_low, iso_high = self.iso_range
+        return torch.randint(iso_low, iso_high, (1,))[0].float()
+
+    def sample_field(self):
+        """Sample field value from the field range [-1, 1] on x and y axis."""
+        return torch.rand(2) * 2 - 1
 
     def __getitem__(self, idx):
-        # Load image
+        # Read a RGB image
         img = Image.open(self.img_paths[idx]).convert("RGB")
 
-        # Transform
         if self.is_train:
+            # Train transform
             img = self.train_transform(img)
+            iso = self.sample_iso()
+            field_center = self.sample_field()
         else:
+            # Test transform (we can assign fixed field value and ISO value for testing)
             img = self.test_transform(img)
-
-        # Random ISO value
-        iso = self.sample_iso()
-
+            iso = self.sample_iso()
+            field_center = self.sample_field()
+        
         return {
             "img": img,
             "iso": iso,
-            "output_type": self.output_type,
+            "iso_scale": 1000, # used to normalize the ISO value
+            "field_center": field_center,
         }
 
 
@@ -229,7 +248,7 @@ def download_div8k(destination_folder="./datasets"):
     print("DIV8K extracted to:", out_dir)
 
 def download_mit5k(destination_folder="./datasets"):
-    """Download the MIT5K dataset (5000 images, 11.6GB).
+    """Download the MIT5K dataset (5000 images, ~50GB).
     
     You can directly download the zip file from the following URL:
         https://data.csail.mit.edu/graphics/fivek/fivek_dataset.tar

@@ -653,14 +653,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         B, C, Himg, Wimg = img_obj.shape
         Wsensor, Hsensor = self.sensor_res
 
-        # # Check sensor resolution
-        # if not (
-        #     self.sensor_res[0] == img_obj.shape[-2]
-        #     and self.sensor_res[1] == img_obj.shape[-1]
-        # ):
-        #     H, W = img_obj.shape[-2], img_obj.shape[-1]
-        #     self.set_sensor_res(sensor_res=(H, W))
-
         # Image simulation
         if method == "psf_map":
             # PSF based rendering - uses PSF map to render image
