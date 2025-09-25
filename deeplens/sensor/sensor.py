@@ -130,7 +130,7 @@ class Sensor(nn.Module):
         Reference:
             [1] "Unprocessing Images for Learned Raw Denoising."
             [2] https://www.dpreview.com/forums/thread/4669806
-            [3] We can tune the iso channel in the network input to (1) compensate for inaccurate noise model, (2) achieve better image quality.
+            [3] We can tune the iso channel in the network input to (1) compensate for inaccurate noise model, and (2) achieve better image quality.
         """
         nbit = self.bit
         black_level = self.black_level
@@ -149,9 +149,9 @@ class Sensor(nn.Module):
             + self.shotnoise_std_beta,
             0.0,
         )
-        if (iso > 400).any():
+        if (iso > 800).any():
             raise ValueError(
-                f"Currently noise model only works for low ISO <= 400, got {iso}"
+                f"Currently noise model only works for low ISO <= 800, got {iso}"
             )
         gain_analog = 1.0  # we only measured analog gain = 1.0
         gain_digit = (iso / self.iso_base).view(-1, 1, 1, 1)

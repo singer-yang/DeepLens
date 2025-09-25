@@ -109,6 +109,10 @@ class RGBSensor(Sensor):
 
         Returns:
             img_raw: Raw image
+
+        Reference:
+            [1] Spectral Sensitivity Estimation Without a Camera. ICCP 2023.
+            [2] https://github.com/COLOR-Lab-Eilat/Spectral-sensitivity-estimation
         """
         if self.wavelengths is not None:
             img_raw = torch.zeros(
@@ -186,21 +190,22 @@ class RGBSensor(Sensor):
         Returns:
             bayer_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
         """
+        black_level = self.black_level
+        bit = self.bit
+        
         bayer_float = self.isp.demosaic.reverse(img_raw)
-        bayer_nbit = (
-            bayer_float * (2**self.bit - 1 - self.black_level) + self.black_level
-        )
+        bayer_nbit = (bayer_float * (2**bit - 1 - black_level) + black_level)
         bayer_nbit = torch.round(bayer_nbit)
         return bayer_nbit
 
     def sample_augmentation(self):
-        """Enable augmentation for ISP modules."""
+        """Randomly sample a set of augmentation parameters for ISP modules. Used for data augmentation during training."""
         self.isp.gamma.sample_augmentation()
         self.isp.ccm.sample_augmentation()
         self.isp.awb.sample_augmentation()
 
     def reset_augmentation(self):
-        """Reset augmentation for ISP modules."""
+        """Reset parameters for ISP modules. Used for evaluation."""
         self.isp.gamma.reset_augmentation()
         self.isp.ccm.reset_augmentation()
         self.isp.awb.reset_augmentation()

@@ -174,7 +174,7 @@ class AutoWhiteBalance(nn.Module):
 
         elif len(img.shape) == 4:
             gains = (
-                torch.tensor([1.0 / kr, 1.0 / kg, 1.0 / kb], device=rgb.device)
+                torch.tensor([1.0 / kr, 1.0 / kg, 1.0 / kb], device=img.device)
                 .unsqueeze(-1)
                 .unsqueeze(-1)
                 .unsqueeze(0)
