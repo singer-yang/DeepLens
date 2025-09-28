@@ -170,12 +170,17 @@ class GeoLensTolerance:
         return results
 
     def tolerancing_wavefront(self, tolerance_params=None):
-        """Use wavefront differential method to compute the tolerance.
+        """Use wavefront differential method to compute the tolerance. 
+        
+        Wavefront differential method is proposed in [1], while the detailed implementation remains unknown. I (Xinge Yang) assume a symbolic differentiation is used to compute the gradient/Jacobian of the wavefront error. With AutoDiff, we can easily calculate Jacobian with gradient backpropagation, therefore I leave the implementation of this method as future work.
 
         Args:
             tolerance_params (dict): Tolerance parameters
 
         Returns:
             dict: Wavefront tolerance analysis results
+
+        References:
+            [1] Optical Design Tolerancing. CODE V.
         """
         pass
