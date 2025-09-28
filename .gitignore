@@ -15,6 +15,7 @@ debug.py
 temp/*
 
 lenses/pancake/
+datasets/BSDS300/
 
 
 # add my own files

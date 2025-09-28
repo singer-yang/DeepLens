@@ -122,7 +122,7 @@ def curriculum_design(
                     aper_final,
                 )
                 self.surfaces[self.aper_idx].update_r(aper_r)
-                self.update_float_setting()
+                self.post_computation()
 
                 # Correct lens shape and evaluate current design
                 if i > 0:
@@ -149,7 +149,7 @@ def curriculum_design(
                     )
                     rays_backup.append(ray)
 
-                center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+                center_ref = -self.psf_center(points=ray.o[:, :, 0, :], method="pinhole")
                 center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =======================================
@@ -225,7 +225,7 @@ if __name__ == "__main__":
         save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
-        hfov=args["fov"] / 2 / 57.3,
+        rfov=args["fov"] / 2 / 57.3,
         fnum=args["fnum"],
     )
     logging.info(
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     lens.post_computation()
 
     logging.info(
-        f"Actual: diagonal FOV {lens.hfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
+        f"Actual: diagonal FOV {lens.rfov}, r sensor {lens.r_sensor}, F/{lens.fnum}."
     )
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens")

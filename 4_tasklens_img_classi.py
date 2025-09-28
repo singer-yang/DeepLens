@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # Lens
     lens = GeoLens(filename=args["lens"]["path"]).to(args["device"])
     lens.set_target_fov_fnum(
-        hfov=args["lens"]["target_hfov"], fnum=args["lens"]["target_fnum"]
+        rfov=args["lens"]["target_rfov"], fnum=args["lens"]["target_fnum"]
     )
     lens.write_lens_json(f"{args['result_dir']}/epoch0.json")
     lens.analysis(f"{args['result_dir']}/epoch0", render=False)

@@ -32,6 +32,13 @@ class ColorCorrectionMatrix(nn.Module):
                 [0.0, 0.0, 1.0],
                 [0.0, 0.0, 0.0]
             ])
+        elif isinstance(ccm_matrix, list):
+            ccm_matrix = torch.tensor(ccm_matrix)
+            if ccm_matrix.shape == (3, 3):
+                ccm_matrix = torch.cat([ccm_matrix, torch.zeros(1, 3)], dim=0)
+        else:
+            raise ValueError(f"Unknown type of ccm_matrix: {type(ccm_matrix)}")
+        
         self.register_buffer('ccm_matrix', ccm_matrix)
 
     def sample_augmentation(self):

@@ -9,24 +9,24 @@ import torch.nn as nn
 class AutoWhiteBalance(nn.Module):
     """Auto white balance (AWB)."""
 
-    def __init__(self, awb_method="gray_world", gains=(2.0, 1.0, 1.8)):
+    def __init__(self, awb_method="gray_world", white_balance=(2.0, 1.0, 1.8)):
         """Initialize auto white balance.
 
         Args:
             awb_method: AWB method, "gray_world" or "manual".
-            gains: RGB gains for manual AWB, shape [3].
+            white_balance: RGB white balance for manual AWB, shape [3].
         """
         super().__init__()
         self.awb_method = awb_method
-        self.register_buffer('gains', torch.tensor(gains))
+        self.register_buffer('white_balance', torch.tensor(white_balance))
 
     def sample_augmentation(self):
-        if not hasattr(self, "gains_org"):
-            self.gains_org = self.gains
-        self.gains = self.gains_org + torch.randn_like(self.gains_org) * 0.1
+        if not hasattr(self, "white_balance_org"):
+            self.white_balance_org = self.white_balance
+        self.white_balance = self.white_balance_org + torch.randn_like(self.white_balance_org) * 0.1
 
     def reset_augmentation(self):
-        self.gains = self.gains_org
+        self.white_balance = self.white_balance_org
 
     def apply_awb_bayer(self, bayer):
         """Apply white balance to Bayer pattern image.
@@ -60,7 +60,7 @@ class AutoWhiteBalance(nn.Module):
             g_avg = torch.sum(g, dim=[2, 3]) / torch.sum(g_mask)
             b_avg = torch.sum(b, dim=[2, 3]) / torch.sum(b_mask)
 
-            # Calculate gains to make averages equal
+            # Calculate white balance to make averages equal
             g_gain = torch.ones_like(g_avg)
             r_gain = g_avg / (r_avg + 1e-6)
             b_gain = g_avg / (b_avg + 1e-6)
@@ -77,9 +77,9 @@ class AutoWhiteBalance(nn.Module):
             # Apply manual gains
             bayer_wb = bayer.clone()
             bayer_wb = bayer_wb * (
-                r_mask.view(1, 1, H, W) * self.gains[0]
-                + g_mask.view(1, 1, H, W) * self.gains[1]
-                + b_mask.view(1, 1, H, W) * self.gains[2]
+                r_mask.view(1, 1, H, W) * self.white_balance[0]
+                + g_mask.view(1, 1, H, W) * self.white_balance[1]
+                + b_mask.view(1, 1, H, W) * self.white_balance[2]
             )
         else:
             raise ValueError(f"Unknown AWB method: {self.awb_method}")
@@ -108,7 +108,7 @@ class AutoWhiteBalance(nn.Module):
 
         elif self.awb_method == "manual":
             # Apply manual gains
-            rgb_wb = rgb * self.gains.view(1, 3, 1, 1)
+            rgb_wb = rgb * self.white_balance.view(1, 3, 1, 1)
         
         else:
             raise ValueError(f"Unknown AWB method: {self.awb_method}")
@@ -131,20 +131,20 @@ class AutoWhiteBalance(nn.Module):
 
     def reverse(self, img):
         """Inverse auto white balance."""
-        kr = self.gains[0]
-        kg = self.gains[1]
-        kb = self.gains[2]
+        r_gain = self.white_balance[0]
+        g_gain = self.white_balance[1]
+        b_gain = self.white_balance[2]
 
         # Inverse AWB
         rgb_unbalanced = torch.zeros_like(img)
         if len(img.shape) == 3:
-            rgb_unbalanced[0, :, :] = img[0, :, :] / kr
-            rgb_unbalanced[1, :, :] = img[1, :, :] / kg
-            rgb_unbalanced[2, :, :] = img[2, :, :] / kb
+            rgb_unbalanced[0, :, :] = img[0, :, :] / r_gain
+            rgb_unbalanced[1, :, :] = img[1, :, :] / g_gain
+            rgb_unbalanced[2, :, :] = img[2, :, :] / b_gain
         else:
-            rgb_unbalanced[:, 0, :, :] = img[:, 0, :, :] / kr
-            rgb_unbalanced[:, 1, :, :] = img[:, 1, :, :] / kg
-            rgb_unbalanced[:, 2, :, :] = img[:, 2, :, :] / kb
+            rgb_unbalanced[:, 0, :, :] = img[:, 0, :, :] / r_gain
+            rgb_unbalanced[:, 1, :, :] = img[:, 1, :, :] / g_gain
+            rgb_unbalanced[:, 2, :, :] = img[:, 2, :, :] / b_gain
 
         return rgb_unbalanced
 
@@ -153,14 +153,14 @@ class AutoWhiteBalance(nn.Module):
 
         Ref: https://github.com/google-research/google-research/blob/master/unprocessing/unprocess.py#L92C1-L102C28
         """
-        kr = self.gains[0]
-        kg = self.gains[1]
-        kb = self.gains[2]
+        r_gain = self.white_balance[0]
+        g_gain = self.white_balance[1]
+        b_gain = self.white_balance[2]
 
         # Safely inverse AWB
         if len(img.shape) == 3:
-            gains = (
-                torch.tensor([1.0 / kr, 1.0 / kg, 1.0 / kb], device=img.device)
+            white_balance = (
+                torch.tensor([1.0 / r_gain, 1.0 / g_gain, 1.0 / b_gain], device=img.device)
                 .unsqueeze(-1)
                 .unsqueeze(-1)
             )
@@ -168,13 +168,13 @@ class AutoWhiteBalance(nn.Module):
             gray = torch.mean(img, dim=0, keepdim=True)
             inflection = 0.9
             mask = (torch.clamp(gray - inflection, min=0.0) / (1.0 - inflection)) ** 2.0
-            safe_gains = torch.max(mask + (1.0 - mask) * gains, gains)
+            safe_gains = torch.max(mask + (1.0 - mask) * white_balance, white_balance)
 
             rgb_unbalanced = img * safe_gains
 
         elif len(img.shape) == 4:
-            gains = (
-                torch.tensor([1.0 / kr, 1.0 / kg, 1.0 / kb], device=rgb.device)
+            white_balance = (
+                torch.tensor([1.0 / r_gain, 1.0 / g_gain, 1.0 / b_gain], device=img.device)
                 .unsqueeze(-1)
                 .unsqueeze(-1)
                 .unsqueeze(0)
@@ -183,7 +183,7 @@ class AutoWhiteBalance(nn.Module):
             gray = torch.mean(img, dim=1, keepdim=True)
             inflection = 0.9
             mask = (torch.clamp(gray - inflection, min=0.0) / (1.0 - inflection)) ** 2.0
-            safe_gains = torch.max(mask + (1.0 - mask) * gains, gains)
+            safe_gains = torch.max(mask + (1.0 - mask) * white_balance, white_balance)
 
             rgb_unbalanced = img * safe_gains
 

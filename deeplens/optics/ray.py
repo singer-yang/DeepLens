@@ -18,30 +18,28 @@ from deeplens.optics.basics import DEFAULT_WAVE, EPSILON, DeepObj
 class Ray(DeepObj):
     def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
         """Optical ray class."""
-        assert wvln > 0.1 and wvln < 1, "Ray wavelength unit should be [um]"
 
-        # Ray parameters
-        self.o = o.to(device) if torch.is_tensor(o) else torch.tensor(o, device=device)
-        self.d = d.to(device) if torch.is_tensor(d) else torch.tensor(d, device=device)
-        self.d = F.normalize(self.d, p=2, dim=-1)
-        if isinstance(wvln, float):
-            self.wvln = torch.full_like(self.o[..., 0].unsqueeze(-1), wvln, device=device)
-        else:
-            self.wvln = wvln.to(device)
-        
-        # Auxiliary parameters
-        self.valid = torch.ones(o.shape[:-1], device=device)
-        self.en = torch.ones_like(self.valid).unsqueeze(-1)
-        self.obliq = torch.ones_like(self.en)
+        # Basic ray parameters
+        self.o = o if torch.is_tensor(o) else torch.tensor(o)
+        self.d = d if torch.is_tensor(d) else torch.tensor(d)
+        self.shape = self.o.shape[:-1]
+        assert wvln > 0.1 and wvln < 1, "Ray wavelength unit should be [um]"
+        self.wvln = torch.full((*self.shape, 1), wvln)
+
+        # Auxiliary ray parameters
+        self.valid = torch.ones(self.shape)
+        self.en = torch.ones((*self.shape, 1))
+        self.obliq = torch.ones((*self.shape, 1))
         self.is_forward = self.d[..., 2].unsqueeze(-1) > 0
 
-        # Coherent ray tracing (initialize coherent light)
+        # Coherent ray tracing
         self.coherent = coherent  # bool
-        self.opl = torch.zeros_like(self.en)
+        self.opl = torch.zeros((*self.shape, 1))
 
-        self.device = device
+        self.to(device)
+        self.d = F.normalize(self.d, p=2, dim=-1)
 
-    def prop_to(self, z, n=1):
+    def prop_to(self, z, n=1.0):
         """Ray propagates to a given depth plane.
 
         Args:
@@ -50,17 +48,15 @@ class Ray(DeepObj):
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
         new_o = self.o + self.d * t.unsqueeze(-1)
-
-        valid_mask = (self.valid > 0) & (torch.abs(t) >= 0)
-        self.o = torch.where(valid_mask.unsqueeze(-1), new_o, self.o)
+        valid_mask = (self.valid > 0).unsqueeze(-1)
+        self.o = torch.where(valid_mask, new_o, self.o)
 
         if self.coherent:
-            if t.min().abs() > 100 and t.dtype == torch.float32:
-                raise Warning(
-                    "Should use float64 in coherent ray tracing for precision."
-                )
+            if t.abs().max() > 100.0 and t.dtype != torch.float64:
+                raise Warning("Should use float64 in coherent ray tracing.")
             else:
-                self.opl = torch.where(valid_mask.unsqueeze(-1), self.opl + n * t.unsqueeze(-1), self.opl)
+                new_opl = self.opl + n * t.unsqueeze(-1)
+                self.opl = torch.where(valid_mask, new_opl, self.opl)
 
         return self
 
@@ -79,6 +75,7 @@ class Ray(DeepObj):
 
         Args:
             center_ref (torch.Tensor): Reference center of the ray, shape (..., 3). If None, use the centroid of the ray as reference.
+        
         Returns:
             torch.Tensor: average RMS error of the ray
         """

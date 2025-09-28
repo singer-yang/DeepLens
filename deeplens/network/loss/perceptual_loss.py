@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from torchvision.models import VGG16_Weights
 
 
 class PerceptualLoss(nn.Module):
@@ -20,7 +21,7 @@ class PerceptualLoss(nn.Module):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        self.vgg = models.vgg16(pretrained=True).features.to(device)
+        self.vgg = models.vgg16(weights=VGG16_Weights.DEFAULT).features.to(device)
         self.layer_name_mapping = {
             '3': "relu1_2",
             '8': "relu2_2",

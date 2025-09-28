@@ -5,11 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Ray-wave model for hybrid refractive-diffractive lens. 
-
-Hybrid lens consists of a geolens and a DOE in the back. Differentiable ray-wave model is used for optical simulation: first calculate the complex wavefield at DOE plane by coherent ray tracing, then propagate the wavefield to sensor plane by angular spectrum method.
-
-This hybrid lens model can simulate: (1) Aberration of the refractive lens, (2) DOE phase modulation
+"""Ray-wave model for hybrid refractive-diffractive lens. A hybrid lens consists of a GeoLens and a DOE in the back. A differentiable ray-wave model is used for optical simulation: first calculating the complex wavefield at the DOE plane by coherent ray tracing, then propagating the wavefield to the sensor plane by angular spectrum method. This hybrid lens model can simulate: (1) GeoLens aberration, and (2) DOE phase modulation.
 
 Technical Paper:
     Xinge Yang, Matheus Souza, Kunyi Wang, Praneeth Chakravarthula, Qiang Fu, Wolfgang Heidrich, "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model," Siggraph Asia 2024.
@@ -52,12 +48,12 @@ class HybridLens(Lens):
         sensor_res=(2000, 2000),
         sensor_size=(8.0, 8.0),
         device=None,
+        dtype=torch.float64,
     ):
-        super().__init__(device=device)
+        super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution
-        self.sensor_res = sensor_res
-        self.sensor_size = sensor_size
+        self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
 
         # Load lens file
         if filename is not None:
@@ -146,11 +142,11 @@ class HybridLens(Lens):
         self.doe.draw_phase_map(save_name=f"{save_name}_doe.png")
 
     def double(self):
-        self.geolens.double()
-        self.doe.double()
+        self.geolens.astype(torch.float64)
+        self.doe.astype(torch.float64)
 
     def refocus(self, foc_dist):
-        """Refocus the DoeLens to a given depth. Donot move DOE because DOE is installed with geolens in the Siggraph Asia 2024 paper."""
+        """Refocus the DoeLens to a given depth. DOE is not moved because it is installed with geolens in the Siggraph Asia 2024 paper."""
         self.geolens.refocus(foc_dist)
 
     def calc_scale(self, depth):
@@ -194,7 +190,7 @@ class HybridLens(Lens):
         point_obj[:, 1] = point[:, 1] * scale * geolens.sensor_size[0] / 2
 
         # Determine ray center via chief ray
-        pointc_chief_ray = geolens.psf_center(point_obj)[0]  # shape [2]
+        pointc_chief_ray = geolens.psf_center(point_obj, method="chief_ray")[0]  # shape [2]
 
         # Ray tracing to the DOE plane
         ray = geolens.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
@@ -338,8 +334,8 @@ class HybridLens(Lens):
         color_list = ["#CC0000", "#006600", "#0066CC"]
         views = [
             0.0,
-            float(np.rad2deg(geolens.hfov) * 0.707),
-            float(np.rad2deg(geolens.hfov) * 0.99),
+            float(np.rad2deg(geolens.rfov) * 0.707),
+            float(np.rad2deg(geolens.rfov) * 0.99),
         ]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
         num_rays = 5

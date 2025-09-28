@@ -1,13 +1,14 @@
-"""
-Jointly optimize refractive-diffractive lens with a differentiable ray-wave model. This code can be easily extended to end-to-end refractive-diffractive lens and network design. 
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
+
+"""Jointly optimize refractive-diffractive lens with a differentiable ray-wave model. This code can be extended to end-to-end refractive-diffractive lens and network design. 
 
 Technical Paper:
     Xinge Yang, Matheus Souza, Kunyi Wang, Praneeth Chakravarthula, Qiang Fu and Wolfgang Heidrich, "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model," Siggraph Asia 2024.
-
-This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-    # The license is only for non-commercial use (commercial licenses can be obtained from authors).
-    # The material is provided as-is, with no warranties whatsoever.
-    # If you publish any code, data, or scientific work based on this, please cite our work.
 """
 
 import logging
@@ -76,9 +77,8 @@ def config():
 
 def main(args):
     # Create a hybrid refractive-diffractive lens
-    lens = HybridLens(filename="./lenses/hybridlens/a489_doe.json")
+    lens = HybridLens(filename="./lenses/hybridlens/a489_doe.json", dtype=torch.float64)
     lens.refocus(foc_dist=-1000.0)
-    lens.double()
 
     # PSF optimization loop to focus blue light
     optimizer = lens.get_optimizer(doe_lr=0.1, lens_lr=[1e-4, 1e-4, 1e-1, 1e-5])

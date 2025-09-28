@@ -20,10 +20,9 @@ from deeplens import GeoLens
 
 
 def main():
-    # Better to use a high sensor resolution (4000x4000 is small!)
-    lens = GeoLens(filename="./lenses/cellphone/cellphone80deg.json")
+    # Better to use a high sensor resolution (4000x4000 is roughly acceptable, but higher is better)
+    lens = GeoLens(filename="./lenses/cellphone/cellphone80deg.json", dtype=torch.float64)
     lens.set_sensor_res(sensor_res=[4000, 4000])
-    lens.double()
 
     # Calculate the pupil field
     wavefront, _ = lens.pupil_field(

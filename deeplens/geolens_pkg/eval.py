@@ -237,12 +237,12 @@ class GeoLensEval:
     # Distortion
     # ================================================================
     def calc_distortion_2D(
-        self, hfov, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=True
+        self, rfov, wvln=DEFAULT_WAVE, plane="meridional", ray_aiming=True
     ):
         """Calculate distortion at a specific field angle.
 
         Args:
-            hfov (float): view angle (degree)
+            rfov (float): view angle (degree)
             wvln (float): wavelength
             plane (str): meridional or sagittal
             ray_aiming (bool): whether the chief ray through the center of the stop.
@@ -251,16 +251,16 @@ class GeoLensEval:
             distortion (float): distortion at the specific field angle
         """
         # Calculate ideal image height
-        eff_foclen = self.calc_efl()
-        ideal_imgh = eff_foclen * np.tan(hfov * np.pi / 180)
+        eff_foclen = self.foclen
+        ideal_imgh = eff_foclen * np.tan(rfov * np.pi / 180)
 
         # Calculate chief ray
         chief_ray_o, chief_ray_d = self.calc_chief_ray_infinite(
-            hfov=hfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming
+            rfov=rfov, wvln=wvln, plane=plane, ray_aiming=ray_aiming
         )
         ray = Ray(chief_ray_o, chief_ray_d, wvln=wvln, device=self.device)
 
-        ray, _ = self.trace(ray, lens_range=range(len(self.surfaces)))
+        ray, _ = self.trace(ray)
         t = (self.d_sensor - ray.o[..., 2]) / ray.d[..., 2]
 
         # Calculate actual image height
@@ -284,7 +284,7 @@ class GeoLensEval:
 
     def draw_distortion_radial(
         self,
-        hfov,
+        rfov,
         num_points=GEO_GRID,
         wvln=DEFAULT_WAVE,
         plane="meridional",
@@ -294,19 +294,19 @@ class GeoLensEval:
         """Draw distortion. zemax format(default): ray_aiming = False.
 
         Args:
-            hfov: view angle (degrees)
+            rfov: view angle (degrees)
             filename: Save filename. Defaults to None.
             num_points: Number of points. Defaults to GEO_GRID.
             plane: Meridional or sagittal. Defaults to meridional.
             ray_aiming: Whether to use ray aiming. Defaults to False.
         """
         # Sample view angles
-        hfov_samples = torch.linspace(0, hfov, num_points)
+        rfov_samples = torch.linspace(0, rfov, num_points)
         distortions = []
 
         # Calculate distortion
         distortions = self.calc_distortion_2D(
-            hfov=hfov_samples,
+            rfov=rfov_samples,
             wvln=wvln,
             plane=plane,
             ray_aiming=ray_aiming,
@@ -322,7 +322,7 @@ class GeoLensEval:
         ax.set_title(f"{plane} Surface Distortion")
 
         # Draw distortion curve
-        ax.plot(values, hfov_samples, linestyle="-", color="g", linewidth=1.5)
+        ax.plot(values, rfov_samples, linestyle="-", color="g", linewidth=1.5)
 
         # Draw reference line (vertical line)
         ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
@@ -337,7 +337,7 @@ class GeoLensEval:
 
         # Set ticks
         x_ticks = np.linspace(-value, value, 3)
-        y_ticks = np.linspace(0, hfov, 3)
+        y_ticks = np.linspace(0, rfov, 3)
 
         ax.set_xticks(x_ticks)
         ax.set_yticks(y_ticks)
@@ -355,7 +355,7 @@ class GeoLensEval:
 
         # Set axis range
         ax.set_xlim(x_min, x_max)
-        ax.set_ylim(0, hfov)
+        ax.set_ylim(0, rfov)
         if filename is None:
             plt.savefig(
                 f"./{plane}_distortion_infinite_mm.png",
@@ -571,7 +571,7 @@ class GeoLensEval:
                 )
 
                 # Set title and label for subplot
-                fov_deg = round(fov_relative * self.hfov * 180 / np.pi, 1)
+                fov_deg = round(fov_relative * self.rfov * 180 / np.pi, 1)
                 depth_str = ("inf" if depth == float("inf") else f"{depth}")
                 ax.set_title(f"Depth: {depth_str}mm, FOV: {fov_deg}deg", fontsize=8)
                 ax.set_xlabel("Spatial Frequency [cycles/mm]", fontsize=8)
@@ -665,7 +665,8 @@ class GeoLensEval:
         inc_ray = ray.clone()
 
         # Trace to the aperture
-        ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx)))
+        surf_range = range(0, self.aper_idx)
+        ray, _ = self.trace(ray, surf_range=surf_range)
 
         # Look for the ray that is closest to the optical axis
         center_x = torch.min(torch.abs(ray.o[:, 0]))
@@ -677,7 +678,7 @@ class GeoLensEval:
     @torch.no_grad()
     def calc_chief_ray_infinite(
         self,
-        hfov,
+        rfov,
         depth=0.0,
         wvln=DEFAULT_WAVE,
         plane="meridional",
@@ -687,56 +688,56 @@ class GeoLensEval:
         """Compute chief ray for an incident angle.
 
         Args:
-            hfov (float): incident angle in degree.
+            rfov (float): incident angle in degree.
             depth (float): depth of the object.
             wvln (float): wavelength of the light.
             plane (str): "sagittal" or "meridional".
             num_rays (int): number of rays.
             ray_aiming (bool): whether the chief ray through the center of the stop.
         """
-        if isinstance(hfov, float) and hfov > 0:
-            hfov = torch.linspace(0, hfov, 2)
-        hfov = hfov.to(self.device)
+        if isinstance(rfov, float) and rfov > 0:
+            rfov = torch.linspace(0, rfov, 2)
+        rfov = rfov.to(self.device)
 
         if not isinstance(depth, torch.Tensor):
-            depth = torch.tensor(depth, device=self.device).repeat(len(hfov))
+            depth = torch.tensor(depth, device=self.device).repeat(len(rfov))
 
         # set chief ray
-        chief_ray_o = torch.zeros([len(hfov), 3]).to(self.device)
-        chief_ray_d = torch.zeros([len(hfov), 3]).to(self.device)
+        chief_ray_o = torch.zeros([len(rfov), 3]).to(self.device)
+        chief_ray_d = torch.zeros([len(rfov), 3]).to(self.device)
 
-        # Convert hfov to radian
-        hfov = hfov * torch.pi / 180.0
+        # Convert rfov to radian
+        rfov = rfov * torch.pi / 180.0
 
-        if torch.any(hfov == 0):
+        if torch.any(rfov == 0):
             chief_ray_o[0, ...] = torch.tensor(
                 [0.0, 0.0, depth[0]], device=self.device, dtype=torch.float32
             )
             chief_ray_d[0, ...] = torch.tensor(
                 [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
             )
-            if len(hfov) == 1:
+            if len(rfov) == 1:
                 return chief_ray_o, chief_ray_d
 
-        if len(hfov) > 1:
-            hfovs = hfov[1:]
+        if len(rfov) > 1:
+            rfovs = rfov[1:]
             depths = depth[1:]
 
         if self.aper_idx == 0:
             if plane == "sagittal":
                 chief_ray_o[1:, ...] = torch.stack(
-                    [depths * torch.tan(hfovs), torch.zeros_like(hfovs), depths], dim=-1
+                    [depths * torch.tan(rfovs), torch.zeros_like(rfovs), depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    [torch.sin(rfovs), torch.zeros_like(rfovs), torch.cos(rfovs)],
                     dim=-1,
                 )
             else:
                 chief_ray_o[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), depths * torch.tan(hfovs), depths], dim=-1
+                    [torch.zeros_like(rfovs), depths * torch.tan(rfovs), depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    [torch.zeros_like(rfovs), torch.sin(rfovs), torch.cos(rfovs)],
                     dim=-1,
                 )
 
@@ -744,7 +745,7 @@ class GeoLensEval:
 
         # Scale factor
         pupilz, _ = self.calc_entrance_pupil()
-        y_distance = torch.tan(hfovs) * (abs(depths) + pupilz)
+        y_distance = torch.tan(rfovs) * (abs(depths) + pupilz)
 
         if ray_aiming:
             scale = 0.05
@@ -753,18 +754,18 @@ class GeoLensEval:
         if not ray_aiming:
             if plane == "sagittal":
                 chief_ray_o[1:, ...] = torch.stack(
-                    [-y_distance, torch.zeros_like(hfovs), depths], dim=-1
+                    [-y_distance, torch.zeros_like(rfovs), depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    [torch.sin(rfovs), torch.zeros_like(rfovs), torch.cos(rfovs)],
                     dim=-1,
                 )
             else:
                 chief_ray_o[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), -y_distance, depths], dim=-1
+                    [torch.zeros_like(rfovs), -y_distance, depths], dim=-1
                 )
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    [torch.zeros_like(rfovs), torch.sin(rfovs), torch.cos(rfovs)],
                     dim=-1,
                 )
 
@@ -779,7 +780,7 @@ class GeoLensEval:
                 dim=0,
             )
 
-            o1 = torch.zeros([len(hfovs), num_rays, 3])
+            o1 = torch.zeros([len(rfovs), num_rays, 3])
             o1[:, :, 2] = depths[0]
 
             o2_linspace = torch.stack(
@@ -790,7 +791,7 @@ class GeoLensEval:
                 dim=0,
             )
 
-            o2 = torch.zeros([len(hfovs), num_rays, 3])
+            o2 = torch.zeros([len(rfovs), num_rays, 3])
             o2[:, :, 2] = pupilz
 
             if plane == "sagittal":
@@ -803,25 +804,26 @@ class GeoLensEval:
             # Trace until the aperture
             ray = Ray(o1, o2 - o1, wvln=wvln, device=self.device)
             inc_ray = ray.clone()
-            ray, _ = self.trace(ray, lens_range=list(range(0, self.aper_idx + 1)))
+            surf_range = range(0, self.aper_idx + 1)
+            ray, _ = self.trace(ray, surf_range=surf_range)
 
             # Look for the ray that is closest to the optical axis
             if plane == "sagittal":
                 _, center_idx = torch.min(torch.abs(ray.o[..., 0]), dim=1)
                 chief_ray_o[1:, ...] = inc_ray.o[
-                    torch.arange(len(hfovs)), center_idx.long(), ...
+                    torch.arange(len(rfovs)), center_idx.long(), ...
                 ]
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.sin(hfovs), torch.zeros_like(hfovs), torch.cos(hfovs)],
+                    [torch.sin(rfovs), torch.zeros_like(rfovs), torch.cos(rfovs)],
                     dim=-1,
                 )
             else:
                 _, center_idx = torch.min(torch.abs(ray.o[..., 1]), dim=1)
                 chief_ray_o[1:, ...] = inc_ray.o[
-                    torch.arange(len(hfovs)), center_idx.long(), ...
+                    torch.arange(len(rfovs)), center_idx.long(), ...
                 ]
                 chief_ray_d[1:, ...] = torch.stack(
-                    [torch.zeros_like(hfovs), torch.sin(hfovs), torch.cos(hfovs)],
+                    [torch.zeros_like(rfovs), torch.sin(rfovs), torch.cos(rfovs)],
                     dim=-1,
                 )
 

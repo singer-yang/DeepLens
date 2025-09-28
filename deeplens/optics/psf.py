@@ -17,78 +17,87 @@ from deeplens.optics.basics import DELTA
 # ================================================
 # PSF convolution for image simulation
 # ================================================
-def render_psf(img, psf):
-    raise Exception("This function has been renamed to conv_psf.")
-    return conv_psf(img, psf)
-
 
 def conv_psf(img, psf):
     """Convolve an image batch with a PSF.
 
     Args:
         img (torch.Tensor): [B, C, H, W]
-        psf (torch.Tensor): [C, ks, ks]
+        psf (torch.Tensor): [C, ks, ks]. ks can be odd or even.
 
     Returns:
         img_render (torch.Tensor): [B, C, H, W]
     """
-    # Padding
-    _, ks, ks = psf.shape
-    padding = int(ks / 2)
-    psf = torch.flip(psf, [1, 2])  # flip the PSF because F.conv2d use cross-correlation
+    B, C, H, W = img.shape
+    C_psf, ks, _ = psf.shape
+    assert C_psf == C, f"psf channels ({C_psf}) must match image channels ({C})."
+
+    # Flip the PSF because F.conv2d use cross-correlation
+    psf = torch.flip(psf, [1, 2])
     psf = psf.unsqueeze(1)  # shape [C, 1, ks, ks]
-    img_pad = F.pad(img, (padding, padding, padding, padding), mode="reflect")
+
+    # Padding
+    pad_h_left  = (ks - 1) // 2
+    pad_h_right = ks // 2
+    pad_w_left  = (ks - 1) // 2
+    pad_w_right = ks // 2
+    img_pad = F.pad(img, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
 
     # Convolution
-    img_render = F.conv2d(img_pad, psf, groups=img.shape[1], padding=0, bias=None)
+    img_render = F.conv2d(img_pad, psf, groups=C)
     return img_render
-
-
-def render_psf_map(img, psf_map):
-    raise Exception("This function has been renamed to conv_psf_map.")
-    return conv_psf_map(img, psf_map)
-
 
 def conv_psf_map(img, psf_map):
     """Convolve an image batch with a PSF map.
 
     Args:
-        img (torch.Tensor): [B, 3, H, W]
-        psf_map (torch.Tensor): [grid_h, grid_w, 3, ks, ks]
+        img (torch.Tensor): [B, C, H, W]
+        psf_map (torch.Tensor): [grid_h, grid_w, C, ks, ks]
 
     Returns:
         img_render (torch.Tensor): [B, C, H, W]
     """
-    # Patch convolution
-    grid_h, grid_w, _, ks, ks = psf_map.shape
-    _, _, Himg, Wimg = img.shape
-    pad = int(ks / 2)
-    img_pad = F.pad(img, (pad, pad, pad, pad), mode="reflect")
+    B, C, H, W = img.shape
+    grid_h, grid_w, C_psf, ks, _ = psf_map.shape
+    assert C_psf == C, f"PSF map channels ({C_psf}) must match image channels ({C})."
+    
+    # Padding
+    pad_h_left  = (ks - 1) // 2
+    pad_h_right = ks // 2
+    pad_w_left  = (ks - 1) // 2
+    pad_w_right = ks // 2
+    img_pad = F.pad(img, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
 
     # Render image patch by patch
     img_render = torch.zeros_like(img)
     for i in range(grid_h):
-        for j in range(grid_w):
-            psf = psf_map[i, j]  # shape [C, ks, ks]
-            psf = torch.flip(psf, [1, 2]).unsqueeze(1)  # shape [C, 1, ks, ks]
+        h_low  = (i * H) // grid_h
+        h_high = ((i + 1) * H) // grid_h
 
-            h_low, w_low = int(i / grid_h * Himg), int(j / grid_w * Wimg)
-            h_high, w_high = int((i + 1) / grid_h * Himg), int((j + 1) / grid_w * Wimg)
+        for j in range(grid_w):
+            w_low  = (j * W) // grid_w
+            w_high = ((j + 1) * W) // grid_w
+
+            # PSF, [C, 1, ks, ks]
+            psf = torch.flip(psf_map[i, j], dims=(-2, -1)).unsqueeze(1)
 
             # Consider overlap to avoid boundary artifacts
             img_pad_patch = img_pad[
-                :, :, h_low : h_high + 2 * pad, w_low : w_high + 2 * pad
+                :,
+                :,
+                h_low : h_high + pad_h_left + pad_h_right,
+                w_low : w_high + pad_w_left + pad_w_right,
             ]
-            render_patch = F.conv2d(
-                img_pad_patch, psf, groups=img.shape[1], padding="valid", bias=None
-            )
+
+            # Convolution, [B, C, h_high-h_low, w_high-w_low]
+            render_patch = F.conv2d(img_pad_patch, psf, groups=C)  
             img_render[:, :, h_low:h_high, w_low:w_high] = render_patch
 
     return img_render
 
 
 def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
-    """Convolve an image batch with PSF at given depths, then do interpolation with a depth map.
+    """Convolve an image batch with PSFs at multiple given depths, then do interpolation with a depth map.
 
     The differentiability of this function is not guaranteed.
 
@@ -138,32 +147,22 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
     img_render = torch.sum(imgs_blur * weights, dim=0)
     return img_render
 
-
-def local_psf_render(img, psf, expand=False):
-    raise Exception("This function has been renamed to conv_psf_pixel.")
-    return conv_psf_pixel(img, psf, expand)
-
-
-def conv_psf_pixel(img, psf, expand=False):
+def conv_psf_pixel(img, psf):
     """Convolve an image batch with pixel-wise PSF.
 
     Use the different PSF kernel for different pixels (folding approach). Application example: Blurs image with dynamic Gaussian blur.
 
     Args:
-        img (Tensor): The image to be blurred (1, C, H, W).
-        psf (Tensor): Per pixel local PSFs (H, W, C, ks, ks)
-        expand (bool): Whether to expand image for the final output. Default is False.
-
+        img (Tensor): The image to be blurred (B, C, H, W).
+        psf (Tensor): Per pixel local PSFs (H, W, C, ks, ks). ks can be odd or even.
+    
     Returns:
-        img_render (Tensor): Rendered image (1, C, H, W). (if expand is True, the output will be (1, C, H+pad*2, W+pad*2))
+        img_render (Tensor): Rendered image (B, C, H, W).
     """
-    # Folding for convolution
     B, C, H, W = img.shape
-    _, _, _, _, ks = psf.shape
-    assert B == 1, "Only support batch size 1"
-    assert C == psf.shape[2] and H == psf.shape[0] and W == psf.shape[1], (
-        "Input and PSF shape mismatch."
-    )
+    H_psf, W_psf, C_psf, ks, _ = psf.shape
+    assert C == C_psf, ("Image and PSF channels mismatch.")
+    assert H == H_psf and W == W_psf, ("Image and PSF size mismatch.")
 
     # Scattering for PSF convolution
     img = img.unsqueeze(-1).unsqueeze(-1)  # [B, C, H, W, 1, 1]
@@ -174,31 +173,32 @@ def conv_psf_pixel(img, psf, expand=False):
     y = y.permute(0, 1, 4, 5, 2, 3).reshape(B, C * ks * ks, H * W)
 
     # Output processing
-    pad = int((ks - 1) / 2)
-    if expand:
-        img_render = F.fold(y, (H + pad * 2, W + pad * 2), (ks, ks), padding=0)
+    if ks % 2 == 0:
+        pad_h_left  = (ks - 1) // 2
+        pad_h_right = ks // 2
+        pad_w_left  = (ks - 1) // 2
+        pad_w_right = ks // 2
+        img_render = F.fold(y, (H + pad_h_left + pad_h_right, W + pad_w_left + pad_w_right), (ks, ks), padding=0)
+        img_render = img_render[:, :, pad_h_left:-pad_h_right, pad_w_left:-pad_w_right]
     else:
+        pad = (ks - 1) // 2
         img_render = F.fold(y, (H, W), (ks, ks), padding=pad)
+    
     return img_render
-
-
-def local_psf_render_high_res(img, psf, patch_num=(4, 4), expand=False):
-    raise Exception("This function has been renamed to conv_psf_pixel_high_res.")
-    return conv_psf_pixel_high_res(img, psf, patch_num, expand)
-
 
 def conv_psf_pixel_high_res(img, psf, patch_num=(4, 4), expand=False):
     """Convolve an image batch with pixel-wise PSF patch by patch. Overlapping windows are used to avoid boundary artifacts.
 
     Args:
         img (Tensor): The image to be blurred (1, C, H, W).
-        psf (Tensor): Per pixel local PSFs (H, W, 3, ks, ks)
+        psf (Tensor): Per pixel local PSFs (H, W, 3, ks, ks). ks can be odd or even.
         patch_num (list): Number of patches in each dimension. Defaults to (4, 4).
         expand (bool): Whether to expand image for the final output. Default is False.
 
     Returns:
         img_render (Tensor): Rendered image with same shape (1, C, H, W) as input. if expand is True, the output will be (1, C, H+pad*2, W+pad*2)
     """
+    raise Exception("This function has not been tested.")
     B, Cimg, Himg, Wimg = img.shape
     Hpsf, Wpsf, Cpsf, _, ks = psf.shape
     assert B == 1, "Only support batch size 1"
