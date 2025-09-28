@@ -4,8 +4,7 @@ seed: 42
 
 camera:
   lens_file: "./lenses/camera/rf50mm_f1.8.json"
-  sensor_size: [36, 24]
-  sensor_res: [5472, 3648] # Canon EOS R6
+  sensor_file: "./sensors/canon_r6.json"
 
 network:
   name: NAFNet

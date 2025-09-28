@@ -61,39 +61,33 @@ class Camera(Renderer):
     def __init__(
         self,
         lens_file,
-        sensor_size=(8.0, 6.0),
-        sensor_res=(4032, 3024),
+        sensor_file,
         device=None,
     ):
         super().__init__(device=device)
 
+        # Sensor
+        self.sensor = RGBSensor.from_json(sensor_file)
+        self.sensor.to(device)
+        sensor_res = self.sensor.res
+        sensor_size = self.sensor.size
+
         # Lens (here we can use either GeoLens or other lens models)
         self.lens = GeoLens(lens_file, device=device)
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
-
-        # Sensor
-        self.sensor = RGBSensor(
-            res=sensor_res,
-            bit=10,
-            black_level=64,
-            iso_base=100,
-            read_noise_std=0.5,
-            shot_noise_std_alpha=0.4,
-        ).to(device)
 
     def __call__(self, data_dict):
         """Simulate a blurry and noisy RGB image considering lens and sensor."""
         return self.render(data_dict)
 
     def render(self, data_dict, render_mode="psf_patch", output_type="rggbif"):
-    # def render(self, data_dict):
-        """Simulate image with lens aberrations and sensor noise in RAW space. 
+        """Simulate image with lens aberrations and sensor noise in linear RGB space. 
 
         Args:
             data_dict (dict): Dictionary containing essential information for image simulation. 
                 For example:
                     {
-                        "img": rgb image (torch.Tensor), (B, 3, H, W), [0, 1]
+                        "img": sRGB image (torch.Tensor), (B, 3, H, W), [0, 1]
                         "iso": iso (int), (B,)
                         "field_center": field_center (torch.Tensor), (B, 2), [-1, 1]
                     }
@@ -110,16 +104,16 @@ class Camera(Renderer):
         img = data_dict["img"]
         iso = data_dict["iso"]
 
-        # Unprocess from RGB to RAW (linear RGB) space
+        # Unprocess from RGB to linear RGB space
         sensor = self.sensor
-        img_raw = sensor.unprocess(img)  # (B, 3, H, W), [0, 1]
+        img_linrgb = sensor.unprocess(img)  # (B, 3, H, W), [0, 1]
 
-        # Lens aberration simulation in RAW (linear RGB) space
-        img_lq = self.render_lens(img_raw, render_mode=render_mode, **data_dict)  # (B, 3, H, W), [0, 1]
+        # Lens aberration simulation in linear RGB space
+        img_lq = self.render_lens(img_linrgb, render_mode=render_mode, **data_dict)  # (B, 3, H, W), [0, 1]
 
-        # Convert to Bayer space
-        bayer_gt = sensor.raw2bayer(img_raw)  # (B, 1, H, W), [0, 2**bit - 1]
-        bayer_lq = sensor.raw2bayer(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
+        # Convert linear RGB to Bayer space
+        bayer_gt = sensor.linrgb2bayer(img_linrgb)  # (B, 1, H, W), [0, 2**bit - 1]
+        bayer_lq = sensor.linrgb2bayer(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
 
         # Simulate sensor noise
         bayer_lq = sensor.simu_noise(bayer_lq, iso)  # (B, 1, H, W), [black_level, 2**bit - 1]
@@ -133,46 +127,41 @@ class Camera(Renderer):
         )
         return data_lq, data_gt
 
-    def render_lens(self, img_raw, render_mode="psf_patch", **kwargs):
-    # def render_lens(self, data_dict):
+    def render_lens(self, img_linrgb, render_mode="psf_patch", **kwargs):
         """Simulate an image with lens aberrations.
 
         Args:
-            img_raw (torch.Tensor): Raw image (linear RGB, or image after demosaic). (B, 3, H, W), [0, 1]
+            img_linrgb (torch.Tensor): Linear RGB image (energy image), (B, 3, H, W), [0, 1]
             render_mode (str): Render mode. Defaults to "psf_patch".
             **kwargs: Additional arguments for different methods.
 
         Returns:
             img_lq (torch.Tensor): Low-quality image (B, 3, H, W), [0, 1]
-        """
-        # img = data_dict["img"]
-        # render_mode = data_dict["render_mode"]
-        # kwargs = data_dict
-        
+        """        
         if render_mode == "psf_patch":
-            # Because different image in a batch can have different PSF, so we should use for loop
+            # Because different image in a batch can have different PSF, so we use for loop here
             img_lq_ls = []
-            for b in range(img_raw.shape[0]):
-                img = img_raw[b, ...].unsqueeze(0)
+            for b in range(img_linrgb.shape[0]):
+                img = img_linrgb[b, ...].unsqueeze(0)
                 psf_center = kwargs["field_center"][b, ...]
                 img_lq = self.lens.render(img, method="psf_patch", psf_center=psf_center)
                 img_lq_ls.append(img_lq)
             img_lq = torch.cat(img_lq_ls, dim=0)
-            
+
         elif render_mode == "psf_map":
-            img_lq = self.lens.render(img, method="psf_map")
+            img_lq = self.lens.render(img_linrgb, method="psf_map")
         
         elif render_mode == "psf_pixel":
             depth = kwargs["depth"][b, ...]
-            img_lq = self.lens.render(img, method="psf_pixel", **kwargs)
+            img_lq = self.lens.render(img_linrgb, method="psf_pixel", **kwargs)
         
         elif render_mode == "ray_tracing":
-            img_lq = self.lens.render(img, method="ray_tracing", **kwargs)
+            img_lq = self.lens.render(img_linrgb, method="ray_tracing", **kwargs)
         
         elif render_mode == "psf_patch_depth_interp":
             img_lq_ls = []
-            for b in range(img_raw.shape[0]):
-                img = img_raw[b, ...].unsqueeze(0)
+            for b in range(img_linrgb.shape[0]):
+                img = img_linrgb[b, ...].unsqueeze(0)
                 psf_center = kwargs["field_center"][b, ...]
                 depth = kwargs["depth"][b, ...]
                 img_lq = self.lens.render_rgbd(img, depth, method="psf_patch", psf_center=psf_center)

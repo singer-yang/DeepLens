@@ -130,8 +130,7 @@ class Trainer:
         """Initialize the camera."""
         self.camera = Camera(
             lens_file=camera_args["lens_file"],
-            sensor_size=camera_args["sensor_size"],
-            sensor_res=camera_args["sensor_res"],
+            sensor_file=camera_args["sensor_file"],
             device=self.device,
         )
 
