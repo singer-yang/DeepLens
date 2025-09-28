@@ -367,7 +367,7 @@ class GeoLensOptim:
             # Calculate reference center, shape of (..., 2)
             if i == 0:
                 with torch.no_grad():
-                    ray_center_green = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+                    ray_center_green = -self.psf_center(points=ray.o[:, :, 0, :], method="pinhole")
 
             ray = self.trace2sensor(ray)
 
@@ -406,7 +406,7 @@ class GeoLensOptim:
             Ray: A Ray object containing the sampled rays.
         """
         # Create points on rings and arms
-        max_fov_rad = self.hfov
+        max_fov_rad = self.rfov
         if sample_more_off_axis:
             # Use beta distribution to sample more points near the edge (close to 1.0)
             # Beta(0.5, 0.5) gives more samples at 0 and 1, Beta(0.5, 0.3) gives more samples near 1.0
@@ -496,10 +496,10 @@ class GeoLensOptim:
 
                     # Calculate ray centers
                     if centroid:
-                        center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="chief_ray")
+                        center_ref = -self.psf_center(points=ray.o[:, :, 0, :], method="chief_ray")
                         center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
                     else:
-                        center_ref = -self.psf_center(point=ray.o[:, :, 0, :], method="pinhole")
+                        center_ref = -self.psf_center(points=ray.o[:, :, 0, :], method="pinhole")
                         center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
             # ===> Optimize lens by minimizing RMS

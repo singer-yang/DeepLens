@@ -5,13 +5,13 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""An example for computational photography with realistic lens and sensor model.
+"""An example for computational photography with lens aberration and sensor noise simulation.
 
 # The code uses distributed data parallel (DDP) scheme. To run experiments on multiple GPUs, use the following command:
 # torchrun --nproc_per_node=4 7_comp_photography.py
 
 Reference:
-    [1] Xinge Yang, Chuong Nguyen, Wenbin Wang, Kaizhang Kang, Wolfgang Heidrich, Xiaoxing Li. "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur." ICCVW 2025.
+    [1] Xinge Yang, Chuong Nguyen, Wenbin Wang, Kaizhang Kang, Wolfgang Heidrich, Xiaoxing Li. "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur." ICCV Workshop 2025.
 """
 
 import logging
@@ -24,7 +24,7 @@ from datetime import datetime
 import lpips
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
+import torch.nn as nn
 import torch.optim as optim
 import yaml
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -114,27 +114,27 @@ class Trainer:
         self.local_rank = local_rank
         self.rank = int(os.environ["RANK"])
         self.world_size = world_size
-        self.args = args
         self.device = torch.device(f"cuda:{local_rank}")
+        self.args = args
 
-        # Initialize model, renderer, and data
+        # Initialize camera, restoration model, and dataset
+        self._init_camera(camera_args=args["camera"])
         self._init_data(
             train_set_config=args["train_set"], eval_set_config=args["eval_set"]
         )
         self._init_model(net_args=args["network"], train_args=args["train"])
-        self._init_camera(camera_args=args["camera"])
+        
 
     def _init_camera(self, camera_args):
         """Initialize the camera."""
         self.camera = Camera(
             lens_file=camera_args["lens_file"],
-            sensor_size=camera_args["sensor_size"],
-            sensor_res=camera_args["sensor_res"],
+            sensor_file=camera_args["sensor_file"],
             device=self.device,
         )
 
     def _init_model(self, net_args, train_args):
-        """Initialize the model and optimizer."""
+        """Initialize the image restoration model and optimizer."""
         # Create model
         self.model = NAFNet(
             in_chan=net_args["in_chan"],
@@ -162,7 +162,7 @@ class Trainer:
             self.ddp_model.parameters(), lr=float(train_args["lr"])
         )
 
-        # Create scheduler
+        # Create learning rate scheduler
         total_steps = train_args["epochs"] * len(self.train_loader)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
@@ -170,24 +170,47 @@ class Trainer:
             eta_min=1e-7,
         )
 
-        # Create loss
+        # Create rendering and training mode
+        self.render_mode = train_args["render_mode"]
+        self.output_type = train_args["output_type"]
+
+        # Create loss functions (pixel loss and perceptual loss)
+        self.l1_loss = nn.L1Loss()
         self.lpips_loss = PerceptualLoss(device=self.device)
 
-        # Create metrics
+        # Create evaluation metrics
         self.lpips_metric = lpips.LPIPS(net="alex").to(self.device)
 
     def _init_data(self, train_set_config, eval_set_config):
         """Initialize data loaders."""
+        # Download dataset if not exists
+        if train_set_config["dataset"] == "./datasets/DIV2K_train_HR" and not os.path.exists(
+            "./datasets/DIV2K_train_HR"
+        ):
+            if self.rank == 0:
+                print("Downloading DIV2K dataset...")
+                from deeplens.network.dataset import download_div2k
+                download_div2k("./datasets")
+            # Wait for rank 0 to finish downloading
+            dist.barrier()
+        elif train_set_config["dataset"] == "./datasets/BSDS300/images/train" and not os.path.exists(
+            "./datasets/BSDS300/images/train"
+        ):
+            if self.rank == 0:
+                print("Downloading BSDS300 dataset...")
+                from deeplens.network.dataset import download_bsd300
+                download_bsd300("./datasets")
+            # Wait for rank 0 to finish downloading
+            dist.barrier()
+        
         # Create datasets
         train_dataset = PhotographicDataset(
             train_set_config["dataset"],
-            output_type=train_set_config["output_type"],
             img_res=train_set_config["res"],
             is_train=True,
         )
         val_dataset = PhotographicDataset(
             eval_set_config["dataset"],
-            output_type=eval_set_config["output_type"],
             img_res=eval_set_config["res"],
             is_train=False,
         )
@@ -196,7 +219,6 @@ class Trainer:
         self.train_sampler = DistributedSampler(
             train_dataset, num_replicas=self.world_size, rank=self.rank, shuffle=True
         )
-
         val_sampler = DistributedSampler(
             val_dataset, num_replicas=self.world_size, rank=self.rank, shuffle=False
         )
@@ -209,7 +231,6 @@ class Trainer:
             num_workers=train_set_config["num_workers"],
             pin_memory=True,
         )
-
         self.val_loader = DataLoader(
             dataset=val_dataset,
             batch_size=eval_set_config["batch_size"],
@@ -233,19 +254,19 @@ class Trainer:
         outputs = self.ddp_model(inputs)
         outputs = outputs.clamp(0, 1)
 
-        # Convert to RGB for loss computation
+        # Convert to RGB (with random ISP) for loss computation
         sensor = self.camera.sensor
         sensor.sample_augmentation()
-        outputs_rgb = sensor.process2rgb(outputs)
-        targets_rgb = sensor.process2rgb(targets)
+        outputs_rgb = sensor.process2rgb(outputs, in_type="rggb")
+        targets_rgb = sensor.process2rgb(targets, in_type="rggb")
 
-        # RGB Loss
-        l1_loss = F.l1_loss(outputs_rgb, targets_rgb)
+        # Loss in RGB space (pixel loss and perceptual loss)
+        l1_loss = self.l1_loss(outputs_rgb, targets_rgb)
         perceptual_loss = self.lpips_loss(outputs_rgb, targets_rgb)
         rgb_loss = l1_loss + 0.5 * perceptual_loss
 
-        # RAW Loss
-        raw_loss = F.l1_loss(outputs, targets)
+        # Loss in RAW space (pixel loss)
+        raw_loss = self.l1_loss(outputs, targets)
 
         # Total loss
         loss = rgb_loss + raw_loss
@@ -257,12 +278,12 @@ class Trainer:
         return loss, loss_dict
 
     def compute_metrics(self, outputs, targets=None):
-        """Compute metrics between model outputs and targets."""
-        # Convert to RGB
+        """Compute evaluation metrics between model outputs and targets."""
+        # Convert to RGB (with default ISP)
         sensor = self.camera.sensor
         sensor.reset_augmentation()
-        outputs_rgb = sensor.process2rgb(outputs)
-        targets_rgb = sensor.process2rgb(targets)
+        outputs_rgb = sensor.process2rgb(outputs, in_type="rggb")
+        targets_rgb = sensor.process2rgb(targets, in_type="rggb")
 
         # Calculate metrics
         lpips_score = self.lpips_metric(outputs_rgb * 2 - 1, targets_rgb * 2 - 1)
@@ -283,10 +304,11 @@ class Trainer:
 
         # Training loop
         for i, data_dict in enumerate(tqdm(self.train_loader, disable=self.rank != 0)):
+            
             # Image simulation, training data synthesis
-            inputs, targets = self.camera.render(data_dict)
+            inputs, targets = self.camera.render(data_dict, render_mode=self.render_mode, output_type=self.output_type)
 
-            # Compute loss
+            # Forward pass and compute loss
             loss, loss_dict = self.compute_loss(inputs, targets)
 
             # Backward and optimize
@@ -315,9 +337,9 @@ class Trainer:
 
                     sensor = self.camera.sensor
                     sensor.reset_augmentation()
-                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :])
-                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :])
-                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :])
+                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :], in_type="rggb")
+                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :], in_type="rggb")
+                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :], in_type="rggb")
                     save_image(
                         torch.cat([inputs_rgb, outputs_rgb, targets_rgb], dim=2),
                         f"{self.args['result_dir']}/train_epoch{epoch}_batch{i}.png",
@@ -342,7 +364,7 @@ class Trainer:
                 tqdm(self.val_loader, desc="Validating", disable=self.rank != 0)
             ):
                 # Apply blur to create inputs using camera
-                inputs, targets = self.camera.render(data_dict)
+                inputs, targets = self.camera.render(data_dict, render_mode=self.render_mode, output_type=self.output_type)
 
                 # Forward pass
                 outputs = self.ddp_model(inputs)
@@ -357,12 +379,12 @@ class Trainer:
 
                 # Save sample validation images
                 if i == 0 and self.rank == 0:
-                    # Convert to RGB
+                    # Convert to RGB (with default ISP)
                     sensor = self.camera.sensor
                     sensor.reset_augmentation()
-                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :])
-                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :])
-                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :])
+                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :], in_type="rggb")
+                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :], in_type="rggb")
+                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :], in_type="rggb")
 
                     # Save images
                     save_image(
@@ -429,15 +451,10 @@ class Trainer:
                 # Log epoch results
                 if self.rank == 0:
                     if val_metrics:
-                        print(f"Validation Loss: {val_metrics.get('val_loss', 'N/A')}")
-                        print(
-                            f"Validation PSNR: {val_metrics.get('val_psnr', 'N/A')} dB"
-                        )
-                        print(f"Validation SSIM: {val_metrics.get('val_ssim', 'N/A')}")
-                        print(
-                            f"Validation LPIPS: {val_metrics.get('val_lpips', 'N/A')}"
-                        )
-
+                        print(f"Val Loss: {val_metrics.get('val_loss', 'N/A')}")
+                        print(f"Val PSNR: {val_metrics.get('val_psnr', 'N/A')} dB")
+                        print(f"Val SSIM: {val_metrics.get('val_ssim', 'N/A')}")
+                        print(f"Val LPIPS: {val_metrics.get('val_lpips', 'N/A')}")
                     print("-" * 50)
 
         # Save final model

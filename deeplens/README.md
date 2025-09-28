@@ -7,8 +7,9 @@ This document outlines the file structure of the `deeplens` package.
     -   `geolens.py`: Implements refractive lens systems.
     -   `diffraclens.py`: Implements diffractive lens systems.
     -   `hybridlens.py`: Implements hybrid refractive-diffractive lens systems.
+    -   `paraxiallens.py`: Implements a paraxial lens model for simulating defocus.
     -   `camera.py`: Defines a camera system combining a lens and a sensor.
-    -   `psfnet.py`: A network to learn the Point Spread Function (PSF).
+    -   `psfnetlens.py`: A surrogate lens model that uses a neural network to represent the Point Spread Function (PSF).
     -   `utils.py`: Utility functions.
 
 -   **`optics/`**: Contains modules for optical simulations.
@@ -28,4 +29,3 @@ This document outlines the file structure of the `deeplens` package.
     -   `loss/`: Defines various loss functions.
 
 -   **`geolens_pkg/`**: A helper package for geometry-related operations, including I/O, optimization, and visualization.
-

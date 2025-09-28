@@ -14,6 +14,7 @@ from deeplens.optics.geometric_surface.spheric import Spheric
 from deeplens.optics.geometric_surface.aspheric import Aspheric
 
 class GeoLensIO:
+    
     def read_lens_zmx(self, filename="./test.zmx"):
         """Load the lens from .zmx file."""
         # Read .zmx file
@@ -53,7 +54,7 @@ class GeoLensIO:
                     self.enpd = float(line.split()[1])
 
         self.float_foclen = False
-        self.float_hfov = False
+        self.float_rfov = False
         
         # Read the extracted data from each SURF
         self.surfaces = []
@@ -80,17 +81,17 @@ class GeoLensIO:
                 surf_param7 = surf_dict.get("PARM7", 0.0)
                 surf_param8 = surf_dict.get("PARM8", 0.0)
 
+                # Create surface object
                 if surf_dict["TYPE"] == "STANDARD":
-                    # Aperture
                     if surf_c == 0.0 and mat2 == "air":
+                        # Aperture
                         s = Aperture(r=surf_r, d=d)
-
-                    # Spherical surface
                     else:
+                        # Spherical surface
                         s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2)
-
-                # Aspherical surface
+                
                 elif surf_dict["TYPE"] == "EVENASPH":
+                    # Aspherical surface
                     s = Aspheric(c=surf_c, r=surf_r, d=d, ai=[surf_param2, surf_param3, surf_param4, surf_param5, surf_param6, surf_param7, surf_param8], k=surf_conic, mat2=mat2)
 
                 else:
@@ -130,7 +131,7 @@ class GeoLensIO:
     GFAC 0 0
     GCAT OSAKAGASCHEMICAL MISC
     XFLN 0. 0. 0.
-    YFLN 0.0 {0.707 * self.hfov * 57.3} {0.99 * self.hfov * 57.3}
+    YFLN 0.0 {0.707 * self.rfov * 57.3} {0.99 * self.rfov * 57.3}
     WAVL 0.4861327 0.5875618 0.6562725
     RAIM 0 0 1 1 0 0 0 0 0
     PUSH 0 0 0 0 0 0

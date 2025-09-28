@@ -1,4 +1,12 @@
-"""Basic and common dataset classes."""
+"""Dataset class and download functions.
+
+The following datasets are supported:
+- BSDS300 (300 images, 22MB)
+- DIV2K (800 images, 3.98GB)
+- FLICK2K (2650 images, 11.6GB)
+- DIV8K (1504 images, 46.3GB)
+- MIT5K (5000 images, ~50GB)
+"""
 
 import glob
 import os
@@ -6,6 +14,8 @@ import zipfile
 
 import requests
 import torch
+from tqdm import tqdm
+from huggingface_hub import hf_hub_download
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -47,21 +57,24 @@ class ImageDataset(Dataset):
 class PhotographicDataset(Dataset):
     """Loads images and samples ISO values from a directory. The data dict will be used for image simulation, then network training."""
 
-    def __init__(self, img_dir, output_type="rgb", img_res=(512, 512), is_train=True):
+    def __init__(self, img_dir, img_res=(512, 512), iso_range=(100, 400), is_train=True):
         """Initialize the Photographic Dataset.
 
         Args:
             img_dir: Directory containing the images
-            output_type: Type of output image format
             img_res: Image resolution. If int, creates square image of [img_res, img_res]
+            iso_range: ISO range. Defaults to (100, 400).
+            iso_scale: ISO scale. Defaults to 1000.
             is_train: Whether this is for training (with augmentation) or testing
         """
         super(PhotographicDataset, self).__init__()
         self.img_paths = glob.glob(f"{img_dir}/**.png") + glob.glob(f"{img_dir}/**.jpg")
-        # print(f"Found {len(self.img_paths)} images in {img_dir}")
+        assert len(self.img_paths) > 0, f"No images found in {img_dir}"
+        print(f"Found {len(self.img_paths)} images in {img_dir}")
 
         if isinstance(img_res, int):
             img_res = (img_res, img_res)
+        self.iso_range = iso_range
         self.is_train = is_train
 
         # Training transform with augmentation
@@ -87,38 +100,78 @@ class PhotographicDataset(Dataset):
             ]
         )
 
-        self.output_type = output_type
-
     def __len__(self):
         return len(self.img_paths)
 
     def sample_iso(self):
-        return torch.randint(100, 400, (1,))[0].float()
+        """Sample ISO value from the ISO range."""
+        iso_low, iso_high = self.iso_range
+        return torch.randint(iso_low, iso_high, (1,))[0].float()
+
+    def sample_field(self):
+        """Sample field value from the field range [-1, 1] on x and y axis."""
+        return torch.rand(2) * 2 - 1
 
     def __getitem__(self, idx):
-        # Load image
+        # Read a RGB image
         img = Image.open(self.img_paths[idx]).convert("RGB")
 
-        # Transform
         if self.is_train:
+            # Train transform
             img = self.train_transform(img)
+            iso = self.sample_iso()
+            field_center = self.sample_field()
         else:
+            # Test transform (we can assign fixed field value and ISO value for testing)
             img = self.test_transform(img)
-
-        # Random ISO value
-        iso = self.sample_iso()
-
+            iso = self.sample_iso()
+            field_center = self.sample_field()
+        
         return {
             "img": img,
             "iso": iso,
-            "output_type": self.output_type,
+            "iso_scale": 1000, # used to normalize the ISO value
+            "field_center": field_center,
         }
 
 
 # ======================================
 # Download datasets
 # ======================================
-def download_and_unzip_div2k(destination_folder):
+def download_bsd300(destination_folder="./datasets"):
+    """Download the BSDS300 dataset (300 images, 22MB).
+
+    Reference:
+        [1] https://github.com/pytorch/examples/blob/main/super_resolution/data.py#L10
+    """
+    import tarfile
+    import urllib.request
+    from os import remove
+    from os.path import basename, exists, join
+
+    output_image_dir = join(destination_folder, "BSDS300/images")
+
+    if not exists(output_image_dir):
+        url = "http://www2.eecs.berkeley.edu/Research/Projects/CS/vision/bsds/BSDS300-images.tgz"
+        print("downloading url ", url)
+
+        data = urllib.request.urlopen(url)
+
+        file_path = join(destination_folder, basename(url))
+        with open(file_path, "wb") as f:
+            f.write(data.read())
+
+        print("Extracting data")
+        with tarfile.open(file_path) as tar:
+            for item in tar:
+                tar.extract(item, destination_folder)
+
+        remove(file_path)
+
+    return output_image_dir
+
+def download_div2k(destination_folder):
+    """Download the DIV2K dataset (800 images, 3.98GB)."""
     urls = {
         "DIV2K_train_HR.zip": "http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip",
         "DIV2K_valid_HR.zip": "http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_valid_HR.zip",
@@ -150,35 +203,54 @@ def download_and_unzip_div2k(destination_folder):
         # Remove the zip files
         os.remove(zip_path)
 
-
-def download_bsd300(destination_folder="./datasets"):
-    """Download the BSDS300 dataset.
-
-    Reference:
-        [1] https://github.com/pytorch/examples/blob/main/super_resolution/data.py#L10
+def download_flick2k(destination_folder="./datasets"):
+    """Download the FLICK2K dataset (2650 images, 11.6GB).
+    
+    You can directly download the zip file from the following URL:
+        https://huggingface.co/datasets/yangtao9009/Flickr2K/blob/main/Flickr2K.zip
     """
-    import tarfile
-    import urllib.request
-    from os import remove
-    from os.path import basename, exists, join
+    # Download
+    zip_path = hf_hub_download(
+        repo_id="yangtao9009/Flickr2K",
+        repo_type="dataset",
+        filename="Flickr2K.zip",
+        revision="main"  # or a specific commit/tag
+    )
+    print("Flickr2K downloaded to:", zip_path)
 
-    output_image_dir = join(destination_folder, "BSDS300/images")
+    # Unzip
+    out_dir = destination_folder
+    os.makedirs(out_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        zf.extractall(out_dir)
+    print("Flickr2K extracted to:", out_dir)
 
-    if not exists(output_image_dir):
-        url = "http://www2.eecs.berkeley.edu/Research/Projects/CS/vision/bsds/BSDS300-images.tgz"
-        print("downloading url ", url)
+def download_div8k(destination_folder="./datasets"):
+    """Download the DIV8K dataset (1504 images, 46.3GB).
+    
+    You can directly download the zip file from the following URL:
+        https://huggingface.co/datasets/Iceclear/DIV8K_TrainingSet/blob/main/DIV8K.zip
+    """
+    # Download
+    zip_path = hf_hub_download(
+        repo_id="Iceclear/DIV8K_TrainingSet",
+        repo_type="dataset",
+        filename="DIV8K.zip",
+        revision="main"
+    )
+    print("DIV8K downloaded to:", zip_path)
 
-        data = urllib.request.urlopen(url)
+    # Unzip
+    out_dir = destination_folder
+    os.makedirs(out_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        zf.extractall(out_dir)
+    print("DIV8K extracted to:", out_dir)
 
-        file_path = join(destination_folder, basename(url))
-        with open(file_path, "wb") as f:
-            f.write(data.read())
-
-        print("Extracting data")
-        with tarfile.open(file_path) as tar:
-            for item in tar:
-                tar.extract(item, destination_folder)
-
-        remove(file_path)
-
-    return output_image_dir
+def download_mit5k(destination_folder="./datasets"):
+    """Download the MIT5K dataset (5000 images, ~50GB).
+    
+    You can directly download the zip file from the following URL:
+        https://data.csail.mit.edu/graphics/fivek/fivek_dataset.tar
+    """
+    pass

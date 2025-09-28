@@ -3,13 +3,12 @@ is_debug: True
 seed: 42
 
 camera:
-  lens_file: "./lenses/camera/ef50mm_f1.8.json"
-  sensor_size: [20, 20]
-  sensor_res: [1000, 1000]
+  lens_file: "./lenses/camera/rf50mm_f1.8.json"
+  sensor_file: "./sensors/canon_r6.json"
 
 network:
   name: NAFNet
-  in_chan: 5
+  in_chan: 6
   out_chan: 4
   width: 32
   middle_blk_num: 1
@@ -19,20 +18,20 @@ network:
 
 train:
   epochs: 100
-  eval_every_n_epochs: 5
+  eval_every_n_epochs: 10
   log_every_n_steps: 100
   lr: 1e-4
+  render_mode: "psf_patch"
+  output_type: "rggbif"
 
 train_set:
   dataset: "./datasets/DIV2K_train_HR"
   res: [512, 512]
-  output_type: "rggbi"
-  batch_size: 4
+  batch_size: 8
   num_workers: 3
 
 eval_set:
   dataset: "./datasets/DIV2K_valid_HR"
   res: [512, 512]
-  output_type: "rggbi"
   batch_size: 1
   num_workers: 3
