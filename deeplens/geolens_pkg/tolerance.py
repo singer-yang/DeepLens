@@ -5,9 +5,11 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-import torch
 import numpy as np
+import torch
 from tqdm import tqdm
+
+from deeplens.optics.basics import DEPTH
 
 
 class GeoLensTolerance:
@@ -20,7 +22,7 @@ class GeoLensTolerance:
 
         for i in range(len(self.surfaces)):
             self.surfaces[i].init_tolerance(tolerance_params=tolerance_params)
-    
+
     @torch.no_grad()
     def sample_tolerance(self):
         """Sample a random manufacturing error for the lens."""
@@ -36,25 +38,28 @@ class GeoLensTolerance:
         """Clear manufacturing error for the lens."""
         for i in range(len(self.surfaces)):
             self.surfaces[i].zero_tolerance()
-        
+
         # Refocus the lens
         self.refocus()
 
+    # ================================================
+    # Three tolerancing analysis methods
+    # 1. Sensitivity analysis (1st order gradient)
+    # 2. Monte Carlo method
+    # 3. Wavefront differential method
+    # ================================================
 
-    # =======================================
-    # Tolerancing
-    # =======================================
-    
     def tolerancing_sensitivity(self, tolerance_params=None):
         """Use sensitivity analysis (1st order gradient) to compute the tolerance score.
-        
+
         References:
             [1] Page 10 from: https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/08/8-Tolerancing-1.pdf
             [2] Fast sensitivity control method with differentiable optics. Optics Express 2025.
+            [3] Optical Design Tolerancing. CODE V.
         """
         # Initialize tolerance
         self.init_tolerance(tolerance_params=tolerance_params)
-        
+
         # AutoDiff to compute the gradient/sensitivity
         self.get_optimizer_params()
         loss = self.loss_rms()
@@ -64,18 +69,21 @@ class GeoLensTolerance:
         sensitivity_results = {}
         for i in range(len(self.surfaces)):
             sensitivity_results.update(self.surfaces[i].sensitivity_score())
-        
+
         # Toleranced RSS (Root Sum Square) loss
-        tolerancing_score = sum(v for k, v in sensitivity_results.items() if k.endswith("_score"))
+        tolerancing_score = sum(
+            v for k, v in sensitivity_results.items() if k.endswith("_score")
+        )
         loss_rss = torch.sqrt(loss**2 + tolerancing_score).item()
-        sensitivity_results['loss_nominal'] = round(loss.item(), 6)
-        sensitivity_results['loss_rss'] = round(loss_rss, 6)
+        sensitivity_results["loss_nominal"] = round(loss.item(), 6)
+        sensitivity_results["loss_rss"] = round(loss_rss, 6)
         return sensitivity_results
 
+    @torch.no_grad()
     def tolerancing_monte_carlo(self, trials=1000, tolerance_params=None):
         """Use Monte Carlo simulation to compute the tolerance.
 
-        TODO: we can multiplex sampled rays to improve the speed.
+        Note: we can multiplex sampled rays to improve the speed.
 
         Args:
             trials (int): Number of Monte Carlo trials
@@ -86,14 +94,23 @@ class GeoLensTolerance:
 
         References:
             [1] https://optics.ansys.com/hc/en-us/articles/43071088477587-How-to-analyze-your-tolerance-results
+            [2] Optical Design Tolerancing. CODE V.
         """
+        def merit_func(lens, fov=0.0, depth=DEPTH):
+            # Calculate MTF at a specific field of view
+            point = [0, -fov / lens.rfov, depth]
+            psf = lens.psf(points=point, recenter=True)
+            freq, mtf_tan, mtf_sag = lens.psf2mtf(psf, pixel_size=lens.pixel_size)
+
+            # Evaluate MTF at a specific frequency
+            nyquist_freq = 0.5 / lens.pixel_size
+            eval_freq = 0.25 * nyquist_freq
+            idx = torch.argmin(torch.abs(torch.tensor(freq) - eval_freq))
+            score = (mtf_tan[idx] + mtf_sag[idx]) / 2
+            return score.item()
+
+        # Initialize tolerance
         self.init_tolerance(tolerance_params=tolerance_params)
-        # merit_func = self.loss_rms
-        merit_func = self.loss_infocus
-        
-        # Baseline merit
-        self.refocus()
-        baseline_merit = merit_func(target=0.0).item()
 
         # Monte Carlo simulation
         merit_ls = []
@@ -103,41 +120,67 @@ class GeoLensTolerance:
                 self.sample_tolerance()
 
                 # Evaluate perturbed performance
-                perturbed_merit = merit_func(target=0.0)
-                merit_ls.append(perturbed_merit.item())
+                perturbed_merit = merit_func(lens=self, fov=0.0, depth=DEPTH)
+                merit_ls.append(perturbed_merit)
 
                 # Clear perturbation
                 self.zero_tolerance()
-
-        # Analyze results
         merit_ls = np.array(merit_ls)
-        merit_mean = np.mean(merit_ls)
-        merit_variations = np.abs(merit_ls - baseline_merit)
-        merit_std = np.std(merit_variations)
 
-        # Calculate yield rates (assuming the smaller the merit, the better the performance)
-        performance_drops = (merit_ls - baseline_merit) / baseline_merit
-        yield_95 = np.sum(performance_drops <= 0.05) / trials
-        yield_90 = np.sum(performance_drops <= 0.10) / trials
-        yield_80 = np.sum(performance_drops <= 0.20) / trials
+        # Baseline merit (TODO: do we need to use baseline merit to normalize the results?)
+        self.refocus()
+        baseline_merit = merit_func(lens=self, fov=0.0, depth=DEPTH)
 
         # Return results
         results = {
             "method": "monte_carlo",
-            "trials": len(merit_variations),
+            "trials": trials,
             "baseline_merit": round(baseline_merit, 6),
-            "merit_std": round(float(merit_std), 6),
-            "merit_mean": round(float(merit_mean), 6),
-            "merit_percentiles": {
-                "95%": round(float(np.percentile(merit_variations, 95)), 4),
-                "99%": round(float(np.percentile(merit_variations, 99)), 4),
-                "99.9%": round(float(np.percentile(merit_variations, 99.9)), 4),
+            "merit_std": round(float(np.std(merit_ls)), 6),
+            "merit_mean": round(float(np.mean(merit_ls)), 6),
+            "merit_yield": {
+                "99% > ": round(float(np.percentile(merit_ls, 1)), 4),
+                "95% > ": round(float(np.percentile(merit_ls, 5)), 4),
+                "90% > ": round(float(np.percentile(merit_ls, 10)), 4),
+                "80% > ": round(float(np.percentile(merit_ls, 20)), 4),
+                "70% > ": round(float(np.percentile(merit_ls, 30)), 4),
+                "60% > ": round(float(np.percentile(merit_ls, 60)), 4),
+                "50% > ": round(float(np.percentile(merit_ls, 50)), 4),
+                "40% > ": round(float(np.percentile(merit_ls, 60)), 4),
+                "30% > ": round(float(np.percentile(merit_ls, 70)), 4),
+                "20% > ": round(float(np.percentile(merit_ls, 80)), 4),
+                "10% > ": round(float(np.percentile(merit_ls, 90)), 4),
+                "5% > ": round(float(np.percentile(merit_ls, 95)), 4),
             },
-            "yield_rates": {
-                ">95%": f"{round(float(yield_95 * 100.0), 4)}%",
-                ">90%": f"{round(float(yield_90 * 100.0), 4)}%", 
-                ">80%": f"{round(float(yield_80 * 100.0), 4)}%",
+            "merit_percentile": {
+                "99% < ": round(float(np.percentile(merit_ls, 99)), 4),
+                "95% < ": round(float(np.percentile(merit_ls, 95)), 4),
+                "90% < ": round(float(np.percentile(merit_ls, 90)), 4),
+                "80% < ": round(float(np.percentile(merit_ls, 80)), 4),
+                "70% < ": round(float(np.percentile(merit_ls, 70)), 4),
+                "60% < ": round(float(np.percentile(merit_ls, 60)), 4),
+                "50% < ": round(float(np.percentile(merit_ls, 50)), 4),
+                "40% < ": round(float(np.percentile(merit_ls, 60)), 4),
+                "30% < ": round(float(np.percentile(merit_ls, 70)), 4),
+                "20% < ": round(float(np.percentile(merit_ls, 80)), 4),
+                "10% < ": round(float(np.percentile(merit_ls, 90)), 4),
+                "5% < ": round(float(np.percentile(merit_ls, 95)), 4),
             },
         }
-        print(results)
         return results
+
+    def tolerancing_wavefront(self, tolerance_params=None):
+        """Use wavefront differential method to compute the tolerance. 
+        
+        Wavefront differential method is proposed in [1], while the detailed implementation remains unknown. I (Xinge Yang) assume a symbolic differentiation is used to compute the gradient/Jacobian of the wavefront error. With AutoDiff, we can easily calculate Jacobian with gradient backpropagation, therefore I leave the implementation of this method as future work.
+
+        Args:
+            tolerance_params (dict): Tolerance parameters
+
+        Returns:
+            dict: Wavefront tolerance analysis results
+
+        References:
+            [1] Optical Design Tolerancing. CODE V.
+        """
+        pass
