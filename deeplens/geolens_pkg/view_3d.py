@@ -14,6 +14,7 @@ from pyvista import Plotter, PolyData, merge
 
 from deeplens.optics import Ray
 from deeplens.optics.basics import DEFAULT_WAVE
+from deeplens.optics.geometric_surface import Aperture
 
 # ==========================================================
 # Mesh class
@@ -483,13 +484,13 @@ class GeoLensVis3D:
         for i, surf in enumerate(self.surfaces):
             # Create the surface mesh (list of Surface objects)
             surf_meshes.append(surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms))
-                
+                    
             # Add the surface to the element group
             element_group.append(i)
             if surf.mat2.name == "air":
                 element_groups.append(element_group)
                 element_group = []
-        
+            
         # Create the bridge meshes (list of FaceMesh objects)
         for i, pair in enumerate(element_groups):
             if len(pair) == 1:
@@ -566,7 +567,8 @@ class GeoLensVis3D:
 
         # Draw meshes
         for surf in surf_meshes:
-            self.draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
+            if not isinstance(surf, Aperture):
+                self.draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
 
         for bridge in bridge_meshes:
             self.draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
@@ -590,8 +592,8 @@ class GeoLensVis3D:
     def save_lens_obj(
         self,
         save_dir: str,
-        mesh_rings: int = 128,
-        mesh_arms: int = 256,
+        mesh_rings: int = 64,
+        mesh_arms: int = 512,
         save_rays: bool = False,
         fovs: List[float] = [0.0],
         fov_phis: List[float] = [0.0],
@@ -600,6 +602,8 @@ class GeoLensVis3D:
         save_elements: bool = True,
     ):
         """Save lens geometry and rays as .obj files using pyvista.
+
+        Note: use #F2F7FFFF as the color for lens when rendering in Blender.
         
         Args:
             lens (GeoLens): The lens object.
@@ -620,6 +624,7 @@ class GeoLensVis3D:
             mesh_rings, mesh_arms
         )
 
+        # Save individual lens elements
         if save_elements:
             bridge_idx = 0
             for i, pair in enumerate(element_groups):
@@ -649,7 +654,7 @@ class GeoLensVis3D:
                     raise ValueError(f"Invalid bridge group length: {len(pair)}")
 
         # Merge all surfaces and bridges, and save as single lens.obj file
-        surf_polydata = [surf.get_polydata() for surf in surf_meshes]
+        surf_polydata = [surf.get_polydata() for surf in surf_meshes if not isinstance(surf, Aperture)]
         bridge_polydata = [bridge.get_polydata() for bridge in bridge_meshes]
         lens_polydata = surf_polydata + bridge_polydata
         lens_polydata = merge(lens_polydata)

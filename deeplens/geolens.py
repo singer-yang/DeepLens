@@ -62,7 +62,7 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTolerance):
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTolerance, GeoLensVis3D):
     def __init__(
         self,
         filename=None,

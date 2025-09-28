@@ -665,7 +665,7 @@ class Surface(DeepObj):
         vertices = np.zeros((n_vertices, 3), dtype=np.float32)
         
         # Center vertex
-        vertices[0] = [0.0, 0.0, self.surface_with_offset(0.0, 0.0)]
+        vertices[0] = [0.0, 0.0, self.surface_with_offset(0.0, 0.0).item()]
         
         # Create meshgrid and flatten
         rings_mesh, arms_mesh = np.meshgrid(
@@ -678,7 +678,7 @@ class Surface(DeepObj):
         # Calculate x, y, z coordinates
         x_values = rings_flat * np.cos(arms_flat)
         y_values = rings_flat * np.sin(arms_flat)
-        z_values = self.surface_with_offset(x_values, y_values)
+        z_values = self.surface_with_offset(x_values, y_values).cpu().numpy()
         
         # Fill vertices array
         vertices[1:, 0] = x_values
