@@ -67,7 +67,7 @@ class Camera(Renderer):
         super().__init__(device=device)
 
         # Sensor
-        self.sensor = RGBSensor.from_json(sensor_file)
+        self.sensor = RGBSensor(sensor_file)
         self.sensor.to(device)
         sensor_res = self.sensor.res
         sensor_size = self.sensor.size

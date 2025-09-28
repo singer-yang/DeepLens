@@ -24,9 +24,8 @@ from datetime import datetime
 import lpips
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
-import torch.optim as optim
 import torch.nn as nn
+import torch.optim as optim
 import yaml
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
@@ -258,8 +257,8 @@ class Trainer:
         # Convert to RGB (with random ISP) for loss computation
         sensor = self.camera.sensor
         sensor.sample_augmentation()
-        outputs_rgb = sensor.process2rgb(outputs)
-        targets_rgb = sensor.process2rgb(targets)
+        outputs_rgb = sensor.process2rgb(outputs, in_type="rggb")
+        targets_rgb = sensor.process2rgb(targets, in_type="rggb")
 
         # Loss in RGB space (pixel loss and perceptual loss)
         l1_loss = self.l1_loss(outputs_rgb, targets_rgb)
@@ -283,8 +282,8 @@ class Trainer:
         # Convert to RGB (with default ISP)
         sensor = self.camera.sensor
         sensor.reset_augmentation()
-        outputs_rgb = sensor.process2rgb(outputs)
-        targets_rgb = sensor.process2rgb(targets)
+        outputs_rgb = sensor.process2rgb(outputs, in_type="rggb")
+        targets_rgb = sensor.process2rgb(targets, in_type="rggb")
 
         # Calculate metrics
         lpips_score = self.lpips_metric(outputs_rgb * 2 - 1, targets_rgb * 2 - 1)
@@ -338,9 +337,9 @@ class Trainer:
 
                     sensor = self.camera.sensor
                     sensor.reset_augmentation()
-                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :])
-                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :])
-                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :])
+                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :], in_type="rggb")
+                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :], in_type="rggb")
+                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :], in_type="rggb")
                     save_image(
                         torch.cat([inputs_rgb, outputs_rgb, targets_rgb], dim=2),
                         f"{self.args['result_dir']}/train_epoch{epoch}_batch{i}.png",
@@ -383,9 +382,9 @@ class Trainer:
                     # Convert to RGB (with default ISP)
                     sensor = self.camera.sensor
                     sensor.reset_augmentation()
-                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :])
-                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :])
-                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :])
+                    inputs_rgb = sensor.process2rgb(inputs[:, :4, :, :], in_type="rggb")
+                    outputs_rgb = sensor.process2rgb(outputs.detach()[:, :4, :, :], in_type="rggb")
+                    targets_rgb = sensor.process2rgb(targets[:, :4, :, :], in_type="rggb")
 
                     # Save images
                     save_image(
