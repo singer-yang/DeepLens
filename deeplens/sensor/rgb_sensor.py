@@ -1,10 +1,24 @@
-import torch
+# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+#
+# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
+#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
+#     The material is provided as-is, with no warranties whatsoever.
+#     If you publish any code, data, or scientific work based on this, please cite our work.
 
-from .sensor import Sensor
-from .isp import InvertibleISP
+"""RGB sensor with ISP. It is used to convert between RAW bayer image and RGB image."""
+
+import json
+import math
+
+import torch
+import json
+
+from deeplens.sensor import Sensor
+from deeplens.sensor.isp import InvertibleISP
+
 
 class RGBSensor(Sensor):
-    """RGB sensor. Unprocess and process in RAW RGB space."""
+    """RGB sensor."""
 
     def __init__(
         self,
@@ -13,6 +27,9 @@ class RGBSensor(Sensor):
         res=(4000, 3000),
         size=(8.0, 6.0),
         bayer_pattern="rggb",
+        color_matrix=None,
+        gamma_param=2.2,
+        white_balance=(2.0, 1.0, 1.8),
         iso_base=100,
         read_noise_std=0.5,
         shot_noise_std_alpha=0.4,
@@ -21,6 +38,7 @@ class RGBSensor(Sensor):
         red_response=None,
         green_response=None,
         blue_response=None,
+        device=None,
     ):
         super().__init__(
             bit=bit,
@@ -31,13 +49,7 @@ class RGBSensor(Sensor):
             read_noise_std=read_noise_std,
             shot_noise_std_alpha=shot_noise_std_alpha,
             shot_noise_std_beta=shot_noise_std_beta,
-        )
-
-        # Initialize ISP
-        self.isp = InvertibleISP(
-            bit=bit,
-            black_level=black_level,
-            bayer_pattern=bayer_pattern,
+            device=device,
         )
 
         # Initialize spectral response curves
@@ -49,6 +61,23 @@ class RGBSensor(Sensor):
             self.red_response = torch.tensor(red_response) / sum(green_response)
             self.green_response = torch.tensor(green_response) / sum(green_response)
             self.blue_response = torch.tensor(blue_response) / sum(green_response)
+
+        # Initialize ISP
+        self.isp = InvertibleISP(
+            bit=bit,
+            black_level=black_level,
+            bayer_pattern=bayer_pattern,
+            white_balance=white_balance,
+            color_matrix=color_matrix,
+            gamma_param=gamma_param,
+        )
+
+    @classmethod
+    def from_json(cls, json_path):
+        """Create a sensor from a JSON file."""
+        with open(json_path, "r") as f:
+            config = json.load(f)
+        return cls.from_config(config)
 
     @classmethod
     def from_config(cls, config):
@@ -62,20 +91,28 @@ class RGBSensor(Sensor):
             An instance of RGBSensor initialized with the config parameters
         """
         # Extract parameters with defaults
-        res = config.get("res", (4000, 3000))
-        size = config.get("size", (8.0, 6.0))
+        res = config.get("sensor_res", (4000, 3000))
+        size = config.get("sensor_size", (8.0, 6.0))
         bit = config.get("bit", 10)
         black_level = config.get("black_level", 64)
+        bayer_pattern = config.get("bayer_pattern", "rggb")
+
+        # ISP parameters
+        white_balance = config.get("white_balance_d50", (2.0, 1.0, 1.8))
+        color_matrix = config.get("color_matrix_d50", None)
+        gamma_param = config.get("gamma_param", 2.2)
+
+        # Noise parameters
         iso_base = config.get("iso_base", 100)
         read_noise_std = config.get("read_noise_std", 0.5)
         shot_noise_std_alpha = config.get("shot_noise_std_alpha", 0.4)
-        bayer_pattern = config.get("bayer_pattern", "rggb")
-
+        shot_noise_std_beta = config.get("shot_noise_std_beta", 0.0)
+        
         # Get spectral response curves
         wavelengths = config.get("wavelengths", None)
-        red_response = config.get("red_response", None)
-        green_response = config.get("green_response", None)
-        blue_response = config.get("blue_response", None)
+        red_response = config.get("red_spectral_response", None)
+        green_response = config.get("green_spectral_response", None)
+        blue_response = config.get("blue_spectral_response", None)
 
         # Create and return a new sensor instance
         return cls(
@@ -86,13 +123,17 @@ class RGBSensor(Sensor):
             iso_base=iso_base,
             read_noise_std=read_noise_std,
             shot_noise_std_alpha=shot_noise_std_alpha,
+            shot_noise_std_beta=shot_noise_std_beta,
             bayer_pattern=bayer_pattern,
+            white_balance=white_balance,
+            color_matrix=color_matrix,
+            gamma_param=gamma_param,
             wavelengths=wavelengths,
             red_response=red_response,
             green_response=green_response,
             blue_response=blue_response,
         )
-    
+
     def to(self, device):
         super().to(device)
         if self.wavelengths is not None:
@@ -124,9 +165,15 @@ class RGBSensor(Sensor):
                 ),
                 device=img_spectral.device,
             )
-            img_raw[:, 0, :, :] = (img_spectral * self.red_response.view(1, -1, 1, 1)).sum(dim=1)
-            img_raw[:, 1, :, :] = (img_spectral * self.green_response.view(1, -1, 1, 1)).sum(dim=1)
-            img_raw[:, 2, :, :] = (img_spectral * self.blue_response.view(1, -1, 1, 1)).sum(dim=1)
+            img_raw[:, 0, :, :] = (
+                img_spectral * self.red_response.view(1, -1, 1, 1)
+            ).sum(dim=1)
+            img_raw[:, 1, :, :] = (
+                img_spectral * self.green_response.view(1, -1, 1, 1)
+            ).sum(dim=1)
+            img_raw[:, 2, :, :] = (
+                img_spectral * self.blue_response.view(1, -1, 1, 1)
+            ).sum(dim=1)
         else:
             assert img_spectral.shape[1] == 3, (
                 "No spectral response curves provided, input image must have 3 channels"
@@ -181,20 +228,20 @@ class RGBSensor(Sensor):
 
         return image
 
-    def raw2bayer(self, img_raw):
-        """Unprocess the raw image from [0, 1] to [~black_level, 2**bit - 1].
+    def linrgb2bayer(self, img_linrgb):
+        """Unprocess the linear RGB image from [0, 1] to [~black_level, 2**bit - 1].
 
         Args:
-            img_raw: Tensor of shape (B, 3, H, W), range [0, 1]
+            img_linrgb: Tensor of shape (B, 3, H, W), range [0, 1]
 
         Returns:
             bayer_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
         """
         black_level = self.black_level
         bit = self.bit
-        
-        bayer_float = self.isp.demosaic.reverse(img_raw)
-        bayer_nbit = (bayer_float * (2**bit - 1 - black_level) + black_level)
+
+        bayer_float = self.isp.demosaic.reverse(img_linrgb)
+        bayer_nbit = bayer_float * (2**bit - 1 - black_level) + black_level
         bayer_nbit = torch.round(bayer_nbit)
         return bayer_nbit
 
@@ -316,4 +363,3 @@ class RGBSensor(Sensor):
             bayer = bayer.squeeze(0)
 
         return bayer
-
