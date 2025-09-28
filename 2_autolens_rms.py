@@ -122,7 +122,7 @@ def curriculum_design(
                     aper_final,
                 )
                 self.surfaces[self.aper_idx].update_r(aper_r)
-                self.update_float_setting()
+                self.post_computation()
 
                 # Correct lens shape and evaluate current design
                 if i > 0:
