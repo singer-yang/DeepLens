@@ -7,9 +7,9 @@ from deeplens.optics.geometric_surface.base import Surface
 
 
 class Plane(Surface):
-    def __init__(self, r, d, mat2, is_square=False, device="cpu"):
+    def __init__(self, r, d, mat2, is_square=False, origin=None, vec_local=[0., 0., 1.], device="cpu"):
         """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
-        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, origin=origin, vec_local=vec_local, device=device)
         self.l = r * np.sqrt(2)
 
     @classmethod
@@ -17,9 +17,10 @@ class Plane(Surface):
         return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
 
     def intersect(self, ray, n=1.0):
-        """Solve ray-surface intersection and update ray data."""
+        """Solve ray-surface intersection and update ray data in local coordinate system."""
         # Solve intersection
-        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        t = (0. - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         if self.is_square:
             valid = (
