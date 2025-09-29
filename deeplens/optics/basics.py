@@ -35,7 +35,7 @@ SPP_CALC = 1024 # spp for some computation which doesnot need to be very accurat
 SPP_RENDER = 32 # spp for rendering
 SPP_PARAXIAL = 32 # spp for paraxial
 
-PSF_KS = 101 # kernel size for psf calculation, better to be odd number
+PSF_KS = 128 # kernel size for psf calculation, better to be odd number
 GEO_GRID = 21  # grid number for PSF map
 
 DELTA = 1e-6

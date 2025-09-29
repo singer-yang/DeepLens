@@ -1854,7 +1854,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Render an image, compute PSNR and SSIM
         if render:
             depth = DEPTH if depth == float("inf") else depth
-            img_org = cv.cvtColor(cv.imread("./datasets/IQ/img1.png"), cv.COLOR_BGR2RGB)
+            img_org = cv.cvtColor(cv.imread("./datasets/IQ/NBS_1963_1k.png"), cv.COLOR_BGR2RGB)
             self.analysis_rendering(
                 img_org,
                 depth=depth,
