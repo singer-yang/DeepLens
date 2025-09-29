@@ -14,12 +14,16 @@ EPSILON = 1e-12  # [float], small value to avoid division by zero
 
 
 class Surface(DeepObj):
-    def __init__(self, r, d, mat2, is_square=False, surf_idx=None, device="cpu"):
+    def __init__(self, r, d, mat2, is_square=False, surf_idx=None, origin=None, vec_local=[0., 0., 1.], device="cpu"):
         super(Surface, self).__init__()
         self.surf_idx = surf_idx
 
         # Surface
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
+        if origin is None:
+            self.origin = torch.tensor([0.0, 0.0, self.d.item()])
+        else:
+            self.origin = torch.tensor(origin)
         
         # Next material
         self.mat2 = Material(mat2)
@@ -28,14 +32,20 @@ class Surface(DeepObj):
         self.r = float(r)
         self.is_square = is_square
         if is_square:
-            self.h = float(r * np.sqrt(2))
-            self.w = float(r * np.sqrt(2))
+            # Note: use incircle
+            # self.h = float(r * np.sqrt(2))
+            # self.w = float(r * np.sqrt(2))
+            self.h = 2 * self.r
+            self.w = 2 * self.r
 
         # Newton method parameters
         self.newton_maxiter = 10  # [int], maximum number of Newton iterations
         self.newton_convergence = 50.0 * 1e-6  # [mm], Newton method solution threshold
         self.newton_step_bound = self.r / 5  # [mm], maximum step size in each Newton iteration
 
+        # Coordinate system direction vector
+        self.vec_local = F.normalize(torch.tensor(vec_local), p=2, dim=-1)
+        self.vec_global = F.normalize(torch.tensor([0., 0., 1.]), p=2, dim=-1)
 
         self.tolerancing = False
         self.device = device if device is not None else torch.device("cpu")
@@ -53,7 +63,8 @@ class Surface(DeepObj):
     # =====================================================================
     def ray_reaction(self, ray, n1, n2, refraction=True):
         """Compute output ray after intersection and refraction with a surface."""
-        # ray = self.to_local_coord(ray)
+        # Rotate ray to local coordinate system
+        ray = self.to_local_coord(ray)
 
         # Intersection
         ray = self.intersect(ray, n1)
@@ -65,7 +76,9 @@ class Surface(DeepObj):
             # Reflection
             ray = self.reflect(ray)
 
-        # ray = self.to_global_coord(ray)
+        # Rotate ray to global coordinate system
+        ray = self.to_global_coord(ray)
+        
         return ray
 
     def intersect(self, ray, n=1.0):
@@ -117,7 +130,8 @@ class Surface(DeepObj):
         # Initial guess of t
         # Note: Sometimes the shape of aspheric surface is too ambornal, 
         # this step will hit the back surface region and cause error.
-        t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
+        # t = (d_surf - ray.o[..., 2]) / ray.d[..., 2]
+        t = (0. - ray.o[..., 2]) / ray.d[..., 2]
 
         # 1. Non-differentiable Newton's iterations to find the intersection points
         with torch.no_grad():
@@ -135,7 +149,7 @@ class Surface(DeepObj):
                 new_x, new_y = new_o[..., 0], new_o[..., 1]
                 valid = self.is_within_data_range(new_x, new_y) & (ray.valid > 0)
 
-                ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
+                ft = self.sag(new_x, new_y, valid) - new_o[..., 2] #+ d_surf
                 dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
                 dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
@@ -150,7 +164,7 @@ class Surface(DeepObj):
         new_x, new_y = new_o[..., 0], new_o[..., 1]
         valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
-        ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
+        ft = self.sag(new_x, new_y, valid) - new_o[..., 2] #+ d_surf
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
         dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
@@ -165,13 +179,13 @@ class Surface(DeepObj):
             valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
             # Solution accurate enough
-            ft = self.sag(new_x, new_y, valid) + d_surf - new_o[..., 2]
+            ft = self.sag(new_x, new_y, valid) - new_o[..., 2] #+ d_surf
             valid = valid & (torch.abs(ft) < newton_convergence)
 
         return t, valid
 
     def refract(self, ray, n):
-        """Calculate refracted ray according to Snell's law.
+        """Calculate refracted ray according to Snell's law in local coordinate system.
 
         Normal vector points from the surface toward the side where the light is coming from.
 
@@ -209,7 +223,7 @@ class Surface(DeepObj):
         return ray
 
     def reflect(self, ray):
-        """Calculate reflected ray.
+        """Calculate reflected ray in local coordinate system.
 
         Normal vector points from the surface toward the side where the light is coming from.
 
@@ -238,7 +252,7 @@ class Surface(DeepObj):
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at the intersection point.
+        """Calculate surface normal vector at the intersection point in local coordinate system.
 
         Normal vector points from the surface toward the side where the light is coming from.
 
@@ -256,7 +270,7 @@ class Surface(DeepObj):
         return n_vec
 
     def to_local_coord(self, ray):
-        """Transform ray to local coordinate system.
+        """Transform ray to local coordinate system (shift first, then rotate).
 
         Args:
             ray (Ray): input ray in global coordinate system.
@@ -264,12 +278,21 @@ class Surface(DeepObj):
         Returns:
             ray (Ray): transformed ray in local coordinate system.
         """
-        raise NotImplementedError(
-            "to_local_coord() is not implemented for {}".format(self.__class__.__name__)
-        )
+        # Shift ray origin to surface origin
+        ray.o = ray.o - self.origin
+        
+        # Transform ray origin and direction
+        if torch.abs(torch.dot(self.vec_local, self.vec_global) - 1.0) > EPSILON:
+            # Rotate FROM local orientation TO global orientation
+            R = self._get_rotation_matrix(self.vec_local, self.vec_global)
+            ray.o = self._apply_rotation(ray.o, R)
+            ray.d = self._apply_rotation(ray.d, R)
+            ray.d = F.normalize(ray.d, p=2, dim=-1)
+        
+        return ray
 
     def to_global_coord(self, ray):
-        """Transform ray to global coordinate system.
+        """Transform ray to global coordinate system (rotate first, then shift).
 
         Args:
             ray (Ray): input ray in local coordinate system.
@@ -277,11 +300,92 @@ class Surface(DeepObj):
         Returns:
             ray (Ray): transformed ray in global coordinate system.
         """
-        raise NotImplementedError(
-            "to_global_coord() is not implemented for {}".format(
-                self.__class__.__name__
-            )
-        )
+        # Transform ray origin and direction
+        if torch.abs(torch.dot(self.vec_local, self.vec_global) - 1.0) > EPSILON:
+            # Rotate FROM global orientation TO local orientation
+            R = self._get_rotation_matrix(self.vec_global, self.vec_local)
+            ray.o = self._apply_rotation(ray.o, R)
+            ray.d = self._apply_rotation(ray.d, R)
+            ray.d = F.normalize(ray.d, p=2, dim=-1)
+        
+        # Shift ray origin back to global coordinates
+        ray.o = ray.o + self.origin
+
+        return ray
+
+    def _get_rotation_matrix(self, vec_from, vec_to):
+        """Calculate rotation matrix to rotate vec_from to vec_to.
+        
+        Args:
+            vec_from (tensor): source direction vector [3]
+            vec_to (tensor): target direction vector [3]
+            
+        Returns:
+            R (tensor): rotation matrix [3, 3]
+        """
+        # CRITICAL: Normalize input vectors
+        vec_from = F.normalize(vec_from.to(self.device), p=2, dim=-1)
+        vec_to = F.normalize(vec_to.to(self.device), p=2, dim=-1)
+        
+        # Check if vectors are already aligned
+        dot_product = torch.dot(vec_from, vec_to)
+        if torch.abs(dot_product - 1.0) < EPSILON:
+            # Vectors are already aligned, return identity matrix
+            return torch.eye(3, device=self.device)
+        
+        if torch.abs(dot_product + 1.0) < EPSILON:
+            # Vectors are opposite, need 180-degree rotation
+            # Find a perpendicular vector
+            if torch.abs(vec_from[0]) < 0.9:
+                perp = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+            else:
+                perp = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+            
+            # Get rotation axis by cross product
+            axis = torch.linalg.cross(vec_from, perp)
+            axis = F.normalize(axis, p=2, dim=-1)
+            
+            # 180-degree rotation matrix
+            R = 2.0 * torch.outer(axis, axis) - torch.eye(3, device=self.device)
+            return R
+        
+        # General case: use Rodrigues' rotation formula
+        # For normalized vectors: v × u = sin(θ) * k (where k is unit rotation axis)
+        # and v · u = cos(θ)
+        v_cross_u = torch.linalg.cross(vec_from, vec_to)
+        cos_angle = dot_product
+        
+        # Skew-symmetric matrix for cross product v × u (not normalized axis!)
+        K = torch.tensor([
+            [0, -v_cross_u[2], v_cross_u[1]],
+            [v_cross_u[2], 0, -v_cross_u[0]],
+            [-v_cross_u[1], v_cross_u[0], 0]
+        ], device=self.device)
+        
+        # Rodrigues' formula: R = I + K + K²/(1 + cos(θ))
+        # This is equivalent to: R = I + sin(θ)K + (1-cos(θ))K²
+        identity = torch.eye(3, device=self.device)
+        R = identity + K + torch.mm(K, K) / (1 + cos_angle)
+        
+        return R
+    
+    def _apply_rotation(self, vectors, R):
+        """Apply rotation matrix to vectors.
+        
+        Args:
+            vectors (tensor): input vectors [..., 3]
+            R (tensor): rotation matrix [3, 3]
+            
+        Returns:
+            rotated_vectors (tensor): rotated vectors [..., 3]
+        """
+        original_shape = vectors.shape
+        # Reshape to [..., 3] for matrix multiplication
+        vectors_flat = vectors.view(-1, 3)
+        # Apply rotation: v' = R @ v (transpose for batch operation)
+        rotated_flat = torch.mm(vectors_flat, R.t())
+        # Reshape back to original shape
+        return rotated_flat.view(original_shape)
 
     # =====================================================================
     # Computation functions
@@ -748,9 +852,8 @@ class Surface(DeepObj):
             self.faces
         ])
         return PolyData(self.vertices, formatted_faces)
-    
 
-    # =========================================
+    # =====================================================================
     # IO
     # =====================================================================
     def surf_dict(self):

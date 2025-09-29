@@ -37,7 +37,8 @@ class ThinLens(Surface):
     def intersect(self, ray, n=1.0):
         """Solve ray-surface intersection and update rays."""
         # Solve intersection
-        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        t = (0. - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
             ray.valid > 0
