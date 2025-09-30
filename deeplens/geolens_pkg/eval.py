@@ -454,6 +454,13 @@ class GeoLensEval:
     # ================================================================
     # MTF
     # ================================================================
+    def mtf(self, fov, wvln=DEFAULT_WAVE):
+        """Calculate MTF at a specific field of view."""
+        point = [0, -fov / self.rfov, DEPTH]
+        psf = self.psf(points=point, recenter=True, wvln=wvln)
+        freq, mtf_tan, mtf_sag = self.psf2mtf(psf, pixel_size=self.pixel_size)
+        return freq, mtf_tan, mtf_sag
+    
     @staticmethod
     def psf2mtf(psf, pixel_size):
         """Calculate MTF from PSF.
