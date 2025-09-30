@@ -4,12 +4,14 @@ import torch
 import torch.nn.functional as F
 
 from deeplens.optics.geometric_surface.base import Surface
+from deeplens.optics.geometric_surface.plane import Plane
 
 
-class ThinLens(Surface):
+# class ThinLens(Surface):
+class ThinLens(Plane):
     def __init__(self, r, d, f=100.0, device="cpu"):
         """Thin lens surface."""
-        Surface.__init__(self, r, d, mat2="air", is_square=False, device=device)
+        Plane.__init__(self, r, d, mat2="air", is_square=False, device=device)
         self.f = torch.tensor(f)
         
     def set_f(self,f):
@@ -34,25 +36,25 @@ class ThinLens(Surface):
 
         return params
 
-    def intersect(self, ray, n=1.0):
-        """Solve ray-surface intersection and update rays."""
-        # Solve intersection
-        # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
-        t = (0. - ray.o[..., 2]) / ray.d[..., 2]
-        new_o = ray.o + t.unsqueeze(-1) * ray.d
-        valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-            ray.valid > 0
-        )
+    # def intersect(self, ray, n=1.0):
+    #     """Solve ray-surface intersection and update rays."""
+    #     # Solve intersection
+    #     # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+    #     t = (0. - ray.o[..., 2]) / ray.d[..., 2]
+    #     new_o = ray.o + t.unsqueeze(-1) * ray.d
+    #     valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
+    #         ray.valid > 0
+    #     )
 
-        # Update ray position
-        new_o = ray.o + ray.d * t.unsqueeze(-1)
-        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
+    #     # Update ray position
+    #     new_o = ray.o + ray.d * t.unsqueeze(-1)
+    #     ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+    #     ray.valid = ray.valid * valid
 
-        if ray.coherent:
-            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
+    #     if ray.coherent:
+    #         ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
 
-        return ray
+    #     return ray
 
     def refract(self, ray, n=1.0):
         """For a thin lens, all rays will converge to z = f plane. Therefore we trace the chief-ray (parallel-shift to surface center) to find the final convergence point for each ray.
