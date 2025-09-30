@@ -24,6 +24,8 @@ class Surface(DeepObj):
             self.origin = torch.tensor([0.0, 0.0, self.d.item()])
         else:
             self.origin = torch.tensor(origin)
+        
+        # Surface direction vector in global coordinate system
         self.vec_local = F.normalize(torch.tensor(vec_local), p=2, dim=-1)
         self.vec_global = torch.tensor([0., 0., 1.])
         

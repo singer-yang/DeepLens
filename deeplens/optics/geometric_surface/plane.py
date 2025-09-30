@@ -1,6 +1,5 @@
 """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
 
-import numpy as np
 import torch
 
 from deeplens.optics.geometric_surface.base import Surface
@@ -21,7 +20,6 @@ class Plane(Surface):
             - ThinLens.
         """
         Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, origin=origin, vec_local=vec_local, device=device)
-        self.l = r * np.sqrt(2)
 
     @classmethod
     def init_from_dict(cls, surf_dict):
@@ -97,7 +95,8 @@ class Plane(Surface):
     def surf_dict(self):
         surf_dict = {
             "type": "Plane",
-            "(l)": self.l,
+            "(w)": self.w,
+            "(h)": self.h,
             "r": self.r,
             "(d)": round(self.d.item(), 4),
             "is_square": True,
