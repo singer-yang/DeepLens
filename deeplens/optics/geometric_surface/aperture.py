@@ -4,12 +4,14 @@ import numpy as np
 import torch
 
 from deeplens.optics.geometric_surface.base import Surface
+from deeplens.optics.geometric_surface.plane import Plane
 
 
-class Aperture(Surface):
+# class Aperture(Surface):
+class Aperture(Plane):
     def __init__(self, r, d, diffraction=False, surf_idx=None, device="cpu"):
         """Aperture surface."""
-        Surface.__init__(self, r, d, mat2="air", is_square=False, surf_idx=surf_idx, device=device)
+        Plane.__init__(self, r, d, mat2="air", is_square=False, surf_idx=surf_idx, device=device)
         self.diffraction = diffraction
         
         self.tolerancing = False
@@ -27,36 +29,43 @@ class Aperture(Surface):
 
     def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
         """Compute output ray after intersection and refraction."""
-        # Intersection
-        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
-        new_o = ray.o + t.unsqueeze(-1) * ray.d
-        valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
-            ray.valid > 0
-        )
-
-        # Update position
-        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
-
-        # Update phase
-        if ray.coherent:
-            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
-
-        # Diffraction
-        if self.diffraction:
-            raise Exception("Diffraction is not implemented for aperture.")
-
+        ray = self.to_local_coord(ray)
+        ray = self.intersect(ray)
+        ray = self.to_global_coord(ray)
         return ray
+    
+    # def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
+    #     """Compute output ray after intersection and refraction."""
+    #     # Intersection
+    #     t = (0.0 - ray.o[..., 2]) / ray.d[..., 2]
+    #     new_o = ray.o + t.unsqueeze(-1) * ray.d
+    #     valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r) & (
+    #         ray.valid > 0
+    #     )
 
-    def _sag(self, x, y):
-        """Compute surface height (always zero for aperture)."""
-        return torch.zeros_like(x)
+    #     # Update position
+    #     ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+    #     ray.valid = ray.valid * valid
 
-    def _dfdxy(self, x, y):
-        """Compute derivatives of sag to x and y (always zero for flat aperture)."""
-        dfdx = torch.zeros_like(x)
-        dfdy = torch.zeros_like(y)
-        return dfdx, dfdy
+    #     # Update phase
+    #     if ray.coherent:
+    #         ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
+
+    #     # Diffraction
+    #     if self.diffraction:
+    #         raise Exception("Diffraction is not implemented for aperture.")
+
+    #     return ray
+
+    # def _sag(self, x, y):
+    #     """Compute surface height (always zero for aperture)."""
+    #     return torch.zeros_like(x)
+
+    # def _dfdxy(self, x, y):
+    #     """Compute derivatives of sag to x and y (always zero for flat aperture)."""
+    #     dfdx = torch.zeros_like(x)
+    #     dfdy = torch.zeros_like(y)
+    #     return dfdx, dfdy
 
     # =======================================
     # Visualization

@@ -3,9 +3,11 @@ import numpy as np
 import torch
 
 from deeplens.optics.geometric_surface.base import Surface
+from deeplens.optics.geometric_surface.plane import Plane
 
 
-class Mirror(Surface):
+# class Mirror(Surface):
+class Mirror(Plane):
     def __init__(self, r, d, surf_idx=None, origin=None, vec_local=[0., 0., 1.], mat2=None, is_square=True, device="cpu"):
         """Mirror surface."""
         Surface.__init__(self, r=r, d=d, mat2="air", is_square=is_square, origin=origin, vec_local=vec_local, device=device)
@@ -15,29 +17,29 @@ class Mirror(Surface):
         surf_idx = surf_dict.get("surf_idx", None)
         return cls(surf_dict["r"], surf_dict["d"], surf_idx=surf_idx)
 
-    def intersect(self, ray, n=None):
-        """Solve ray-surface intersection and update ray data."""
-        w, h = self.w, self.h
+    # def intersect(self, ray, n=None):
+    #     """Solve ray-surface intersection and update ray data."""
+    #     w, h = self.w, self.h
         
-        # Solve intersection
-        # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
-        t = (0. - ray.o[..., 2]) / ray.d[..., 2]
-        new_o = ray.o + t.unsqueeze(-1) * ray.d
-        valid = (
-            (torch.abs(new_o[..., 0]) < w / 2)
-            & (torch.abs(new_o[..., 1]) < h / 2)
-            & (ray.valid > 0)
-        )
+    #     # Solve intersection
+    #     # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+    #     t = (0. - ray.o[..., 2]) / ray.d[..., 2]
+    #     new_o = ray.o + t.unsqueeze(-1) * ray.d
+    #     valid = (
+    #         (torch.abs(new_o[..., 0]) < w / 2)
+    #         & (torch.abs(new_o[..., 1]) < h / 2)
+    #         & (ray.valid > 0)
+    #     )
     
-        # Update ray position
-        new_o = ray.o + ray.d * t.unsqueeze(-1)
-        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
+    #     # Update ray position
+    #     new_o = ray.o + ray.d * t.unsqueeze(-1)
+    #     ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
+    #     ray.valid = ray.valid * valid
 
-        if ray.coherent:
-            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl)
+    #     if ray.coherent:
+    #         ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl)
 
-        return ray
+    #     return ray
 
     def ray_reaction(self, ray, n1=None, n2=None):
         """Compute output ray after intersection and reflection with the mirror surface."""
@@ -47,10 +49,10 @@ class Mirror(Surface):
         ray = self.to_global_coord(ray)
         return ray
 
-    def normal_vec(self, ray):
-        """Calculate surface normal vector at the intersection point in local coordinate system."""
-        n_vec = torch.tensor([0., 0., 1.], device=ray.device)
-        return n_vec
+    # def normal_vec(self, ray):
+    #     """Calculate surface normal vector at the intersection point in local coordinate system."""
+    #     n_vec = torch.tensor([0., 0., -1.], device=ray.device)
+    #     return n_vec
 
     # =========================================
     # IO

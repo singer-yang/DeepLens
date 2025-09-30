@@ -10,20 +10,22 @@ import torch.nn.functional as F
 from deeplens.optics.basics import DeepObj
 from deeplens.optics.materials import Material
 
-EPSILON = 1e-12  # [float], small value to avoid division by zero
-
+EPSILON = 1e-12  # a small value to avoid division by zero
 
 class Surface(DeepObj):
     def __init__(self, r, d, mat2, is_square=False, surf_idx=None, origin=None, vec_local=[0., 0., 1.], device="cpu"):
         super(Surface, self).__init__()
         self.surf_idx = surf_idx
 
-        # Surface
+        # Surface origin and direction vector
+        # FIXME: here is an ambiguity during optimization, because optimizing d will not change the origin
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         if origin is None:
             self.origin = torch.tensor([0.0, 0.0, self.d.item()])
         else:
             self.origin = torch.tensor(origin)
+        self.vec_local = F.normalize(torch.tensor(vec_local), p=2, dim=-1)
+        self.vec_global = torch.tensor([0., 0., 1.])
         
         # Next material
         self.mat2 = Material(mat2)
@@ -32,20 +34,14 @@ class Surface(DeepObj):
         self.r = float(r)
         self.is_square = is_square
         if is_square:
-            # Note: use incircle
-            # self.h = float(r * np.sqrt(2))
-            # self.w = float(r * np.sqrt(2))
+            # r is the incircle radius
             self.h = 2 * self.r
             self.w = 2 * self.r
 
         # Newton method parameters
         self.newton_maxiter = 10  # [int], maximum number of Newton iterations
-        self.newton_convergence = 50.0 * 1e-6  # [mm], Newton method solution threshold
-        self.newton_step_bound = self.r / 5  # [mm], maximum step size in each Newton iteration
-
-        # Coordinate system direction vector
-        self.vec_local = F.normalize(torch.tensor(vec_local), p=2, dim=-1)
-        self.vec_global = F.normalize(torch.tensor([0., 0., 1.]), p=2, dim=-1)
+        self.newton_convergence = 50.0 * 1e-6  # [mm], Newton method convergence threshold
+        self.newton_step_bound = self.r / 5  # [mm], maximum step size in each iteration
 
         self.tolerancing = False
         self.device = device if device is not None else torch.device("cpu")
@@ -63,7 +59,7 @@ class Surface(DeepObj):
     # =====================================================================
     def ray_reaction(self, ray, n1, n2, refraction=True):
         """Compute output ray after intersection and refraction with a surface."""
-        # Rotate ray to local coordinate system
+        # Transform ray to local coordinate system
         ray = self.to_local_coord(ray)
 
         # Intersection
@@ -76,13 +72,13 @@ class Surface(DeepObj):
             # Reflection
             ray = self.reflect(ray)
 
-        # Rotate ray to global coordinate system
+        # Transform ray to global coordinate system
         ray = self.to_global_coord(ray)
         
         return ray
 
     def intersect(self, ray, n=1.0):
-        """Solve ray-surface intersection and update ray position and opl.
+        """Solve ray-surface intersection in local coordinate system. Update ray position and opl.
 
         Args:
             ray (Ray): input ray.
@@ -97,18 +93,15 @@ class Surface(DeepObj):
         ray.valid = ray.valid * valid
 
         if ray.coherent:
-            if t.min() > 100 and torch.get_default_dtype() == torch.float32:
-                raise Exception(
-                    "Using float32 may cause precision problem at long propagation distance."
-                )
-            ray.opl = torch.where(
-                valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl
-            )
+            if t.abs().max() > 100 and torch.get_default_dtype() == torch.float32:
+                raise Exception("Using float32 may cause precision problem for OPL calculation.")
+            new_opl = ray.opl + n * t.unsqueeze(-1)
+            ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
         return ray
 
     def newtons_method(self, ray):
-        """Solve intersection by Newton's method.
+        """Solve intersection by Newton's method in local coordinate system.
 
         Args:
             ray (Ray): input ray.
@@ -149,14 +142,12 @@ class Surface(DeepObj):
                 new_x, new_y = new_o[..., 0], new_o[..., 1]
                 valid = self.is_within_data_range(new_x, new_y) & (ray.valid > 0)
 
-                ft = self.sag(new_x, new_y, valid) - new_o[..., 2] #+ d_surf
+                ft = self.sag(new_x, new_y, valid) - new_o[..., 2]
                 dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
                 dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
                 dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
                 t = t - torch.clamp(
-                    ft / (dfdt + EPSILON),
-                    -newton_step_bound,
-                    newton_step_bound,
+                    ft / (dfdt + EPSILON), -newton_step_bound, newton_step_bound
                 )
 
         # 2. One more Newton iteration (differentiable) to gain gradients
@@ -164,7 +155,7 @@ class Surface(DeepObj):
         new_x, new_y = new_o[..., 0], new_o[..., 1]
         valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
-        ft = self.sag(new_x, new_y, valid) - new_o[..., 2] #+ d_surf
+        ft = self.sag(new_x, new_y, valid) - new_o[..., 2]
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
         dfdx, dfdy, dfdz = self.dfdxyz(new_x, new_y, valid)
         dfdt = dfdx * dxdt + dfdy * dydt + dfdz * dzdt
@@ -179,7 +170,7 @@ class Surface(DeepObj):
             valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
 
             # Solution accurate enough
-            ft = self.sag(new_x, new_y, valid) - new_o[..., 2] #+ d_surf
+            ft = self.sag(new_x, new_y, valid) - new_o[..., 2]
             valid = valid & (torch.abs(ft) < newton_convergence)
 
         return t, valid
@@ -266,11 +257,14 @@ class Surface(DeepObj):
         nx, ny, nz = self.dfdxyz(x, y)
         n_vec = torch.stack((nx, ny, nz), axis=-1)
         n_vec = F.normalize(n_vec, p=2, dim=-1)
-        n_vec = torch.where(ray.is_forward, n_vec, -n_vec)
+        
+        is_forward = torch.sum(ray.d * self.vec_local, dim=-1, keepdim=True) > 0
+        breakpoint()
+        n_vec = torch.where(is_forward, n_vec, -n_vec)
         return n_vec
 
     def to_local_coord(self, ray):
-        """Transform ray to local coordinate system (shift first, then rotate).
+        """Transform ray to local coordinate system.
 
         Args:
             ray (Ray): input ray in global coordinate system.
@@ -281,10 +275,10 @@ class Surface(DeepObj):
         # Shift ray origin to surface origin
         ray.o = ray.o - self.origin
         
-        # Transform ray origin and direction
+        # Rotate ray origin and direction
         if torch.abs(torch.dot(self.vec_local, self.vec_global) - 1.0) > EPSILON:
-            # Rotate FROM local orientation TO global orientation
             R = self._get_rotation_matrix(self.vec_local, self.vec_global)
+            # R = self._get_rotation_matrix(self.vec_global, self.vec_local)
             ray.o = self._apply_rotation(ray.o, R)
             ray.d = self._apply_rotation(ray.d, R)
             ray.d = F.normalize(ray.d, p=2, dim=-1)
@@ -292,7 +286,7 @@ class Surface(DeepObj):
         return ray
 
     def to_global_coord(self, ray):
-        """Transform ray to global coordinate system (rotate first, then shift).
+        """Transform ray to global coordinate system.
 
         Args:
             ray (Ray): input ray in local coordinate system.
@@ -300,10 +294,10 @@ class Surface(DeepObj):
         Returns:
             ray (Ray): transformed ray in global coordinate system.
         """
-        # Transform ray origin and direction
+        # Rotate ray origin and direction
         if torch.abs(torch.dot(self.vec_local, self.vec_global) - 1.0) > EPSILON:
-            # Rotate FROM global orientation TO local orientation
             R = self._get_rotation_matrix(self.vec_global, self.vec_local)
+            # R = self._get_rotation_matrix(self.vec_local, self.vec_global)
             ray.o = self._apply_rotation(ray.o, R)
             ray.d = self._apply_rotation(ray.d, R)
             ray.d = F.normalize(ray.d, p=2, dim=-1)
@@ -391,10 +385,12 @@ class Surface(DeepObj):
     # Computation functions
     # =====================================================================
     def sag(self, x, y, valid=None):
-        """Calculate sag (z) of the surface: z = f(x, y). Valid term is used to avoid NaN when x, y are super large, which happens in spherical and aspherical surfaces.
+        """Calculate sag (z) of the surface: z = f(x, y). 
+        
+        Valid term is used to avoid NaN when x, y exceed the data range, which happens in spherical and aspherical surfaces.
 
-        Notes:
-            If you want to calculate r = sqrt(x**2, y**2), this may cause an NaN error during back-propagation when calculating dr/dx = x / sqrt(x**2 + y**2). So be careful for this!"""
+        Calculating r = sqrt(x**2, y**2) may cause an NaN error during back-propagation. Because dr/dx = x / sqrt(x**2 + y**2), NaN will occur when x=y=0.
+        """
         if valid is None:
             valid = self.is_valid(x, y)
 
@@ -402,7 +398,7 @@ class Surface(DeepObj):
         return self._sag(x, y)
 
     def _sag(self, x, y):
-        """Calculate sag (z) of the surface. z = f(x, y)
+        """Calculate sag (z) of the surface: z = f(x, y).
 
         Args:
             x (tensor): x coordinate
@@ -420,8 +416,8 @@ class Surface(DeepObj):
         """Compute derivatives of surface function. Surface function: f(x, y, z): sag(x, y) - z = 0. This function is used in Newton's method and normal vector calculation.
 
         There are several methods to compute derivatives of surfaces:
-            [1] Analytical derivatives: This is the function implemented here. But the current implementation only works for surfaces which can be written as z = sag(x, y). For implicit surfaces, we need to compute derivatives (df/dx, df/dy, df/dz).
-            [2] Numerical derivatives: Use finite difference method to compute derivatives. This can be used for those very complex surfaces, for example, NURBS. But it may not be accurate when the surface is very steep.
+            [1] Analytical derivatives: The current implementation is based on this method. But the implementation only works for surfaces which can be written as z = sag(x, y). For implicit surfaces, we need to compute derivatives (df/dx, df/dy, df/dz).
+            [2] Numerical derivatives: Use finite difference method to compute derivatives. This can be used for those very complex surfaces, for example, NURBS. But it may suffer from numerical instability when the surface is very steep.
             [3] Automatic differentiation: Use torch.autograd to compute derivatives. This can work for almost all the surfaces and is accurate, but it requires an extra backward pass to compute the derivatives of the surface function.
         """
         if valid is None:
@@ -674,77 +670,6 @@ class Surface(DeepObj):
             linestyle=linestyle,
             linewidth=0.75,
         )
-
-    # def draw_widget3D(self, ax, color="lightblue", res=128):
-    #     """Draw the surface in a 3D plot."""
-    #     raise Exception("draw_widget3D() is deprecated.")
-    #     if self.is_square:
-    #         x = torch.linspace(-self.r, self.r, res, device=self.device)
-    #         y = torch.linspace(-self.r, self.r, res, device=self.device)
-    #         X, Y = torch.meshgrid(x, y, indexing="ij")
-    #     else:
-    #         r_coords = torch.linspace(0, self.r, res // 2, device=self.device)
-    #         theta_coords = torch.linspace(0, 2 * torch.pi, res, device=self.device)
-    #         R, Theta = torch.meshgrid(r_coords, theta_coords, indexing="ij")
-    #         X = R * torch.cos(Theta)
-    #         Y = R * torch.sin(Theta)
-
-    #     # Calculate z coordinates
-    #     Z = self.surface_with_offset(X, Y, valid_check=False)
-
-    #     # Convert to numpy for plotting
-    #     X_np = X.cpu().detach().numpy()
-    #     Y_np = Y.cpu().detach().numpy()
-    #     Z_np = Z.cpu().detach().numpy()
-
-    #     # Plot the surface
-    #     surf = ax.plot_surface(
-    #         Z_np,
-    #         X_np,
-    #         Y_np,
-    #         alpha=0.5,
-    #         color=color,
-    #         edgecolor="none",
-    #         rcount=res,
-    #         ccount=res,
-    #         antialiased=True,
-    #     )
-
-    #     # Draw the edge
-    #     if self.is_square:
-    #         # Draw square edge
-    #         w_half, h_half = self.w / 2, self.h / 2
-    #         edge_x_vals = [-w_half, w_half, w_half, -w_half, -w_half]
-    #         edge_y_vals = [h_half, h_half, -h_half, -h_half, h_half]
-    #         edge_x = []
-    #         edge_y = []
-    #         edge_z = []
-    #         # Sample points along the square edges
-    #         for i in range(4):
-    #             x_start, x_end = edge_x_vals[i], edge_x_vals[i + 1]
-    #             y_start, y_end = edge_y_vals[i], edge_y_vals[i + 1]
-    #             num_steps = res // 4
-    #             xs = torch.linspace(x_start, x_end, num_steps, device=self.device)
-    #             ys = torch.linspace(y_start, y_end, num_steps, device=self.device)
-    #             zs = self.surface_with_offset(xs, ys)
-    #             edge_x.extend(xs.cpu().numpy())
-    #             edge_y.extend(ys.cpu().numpy())
-    #             edge_z.extend(zs.cpu().numpy())
-    #         ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
-    #     else:
-    #         # Draw circular edge
-    #         theta = torch.linspace(0, 2 * torch.pi, res, device=self.device)
-    #         edge_x = self.r * torch.cos(theta)
-    #         edge_y = self.r * torch.sin(theta)
-    #         edge_z_tensor = self.surface_with_offset(
-    #             edge_x,
-    #             edge_y,
-    #             valid_check=False,
-    #         )
-    #         edge_z = edge_z_tensor.cpu().numpy()
-    #         ax.plot(edge_z, edge_x, edge_y, color=color, linewidth=1.0, alpha=1.0)
-
-    #     return surf
 
     def create_mesh(self, n_rings=32, n_arms=128, color=[0.06, 0.3, 0.6]):
         """Create triangulated surface mesh.
