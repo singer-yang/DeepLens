@@ -136,7 +136,7 @@ def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths):
         h_low  = (i * H) // grid_h
         h_high = ((i + 1) * H) // grid_h
 
-        for j in range(grid_w):
+        for j in range(grid_w):            
             w_low  = (j * W) // grid_w
             w_high = ((j + 1) * W) // grid_w
 
