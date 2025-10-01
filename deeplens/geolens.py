@@ -1000,13 +1000,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Args:
             depth (float, optional): Depth of the point source plane. Defaults to DEPTH.
-            grid (int, optional): Grid size. Defaults to 7.
-            ks (int, optional): Kernel size. Defaults to 51.
+            grid (int, tuple): Grid size (grid_w, grid_h). Defaults to 7.
+            ks (int, optional): Kernel size. Defaults to PSF_KS.
             spp (int, optional): Sample per pixel. Defaults to None.
             recenter (bool, optional): Recenter the PSF using chief ray. Defaults to True.
 
         Returns:
-            psf_map: Shape of [grid*ks, grid*ks].
+            psf_map: Shape of [grid_h, grid_w, 1, ks, ks].
         """
         if isinstance(grid, int):
             grid = (grid, grid)
@@ -1014,9 +1014,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         points = points.reshape(-1, 3)
         psfs = self.psf(
             points=points, ks=ks, recenter=recenter, spp=spp, wvln=wvln
-        ).unsqueeze(1)  # shape [grid**2, 1, ks, ks]
+        ).unsqueeze(1)  # shape [grid_h * grid_w, 1, ks, ks]
 
-        psf_map = psfs.reshape(grid[0], grid[1], 1, ks, ks)
+        psf_map = psfs.reshape(grid[1], grid[0], 1, ks, ks)
         return psf_map
 
     # ====================================================================================
