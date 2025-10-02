@@ -16,7 +16,7 @@ temp/*
 
 lenses/pancake/
 datasets/BSDS300/
-
+*.out
 
 # add my own files
 *.ipynb

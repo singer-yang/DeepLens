@@ -596,7 +596,6 @@ class Lens(DeepObj):
                 psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
                 psf_maps.append(psf_map)
             psf_map = torch.stack(psf_maps, dim=2) # shape [grid_h, grid_w, num_depth, 3, ks, ks]
-            breakpoint()
             
             # Image simulation
             img_render = conv_psf_map_depth_interp(img_obj, depth_map, psf_map, depths_ref)
@@ -604,7 +603,7 @@ class Lens(DeepObj):
 
         elif method == "psf_pixel":
             # Render full resolution image with pixel-wise PSF convolution. This method is computationally expensive.
-            psf_ks = kwargs.get("psf_ks", 21)
+            psf_ks = kwargs.get("psf_ks", 32)
             assert img_obj.shape[0] == 1, "Now only support batch size 1"
 
             # Calculate points in the object space
