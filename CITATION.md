@@ -1,6 +1,6 @@
 ## Cite DeepLens papers
 
-**Differentiable optics** was developed by the KAUST Computational Imaging Group (https://vccimaging.org/). The first version of differentiable ray tracer was implemented by [Dr. Congli Wang](https://congliwang.github.io/) on Mitsuba2 in the following paper:
+**Differentiable optics** was developed by the KAUST Computational Imaging Group (https://vccimaging.org/). The first version of differentiable ray tracer was implemented by [Dr. Congli Wang](https://congliwang.github.io/) on [Mitsuba2](https://github.com/mitsuba-renderer/mitsuba2) in the following paper:
 
 ```bibtex
 @article{sun2021end,
@@ -14,7 +14,7 @@
 }
 ```
 
-Later, Dr. Congli Wang implemented the first PyTorch version of differentiable ray tracer (**dO**) in the following paper:
+Later, Dr. Congli Wang implemented the first PyTorch version of differentiable ray tracer ([**dO**](https://github.com/vccimaging/DiffOptics)) in the following paper:
 
 ```bibtex
 @article{wang2022differentiable,
@@ -28,7 +28,7 @@ Later, Dr. Congli Wang implemented the first PyTorch version of differentiable r
 }
 ```
 
-Currently, [Xinge Yang](https://singer-yang.github.io/) is building and maintaining **DeepLens**. The automated lens design work demonstrates the outstanding capability of differentiable optics compared to classical optical design in the following paper:
+Currently, [Xinge Yang](https://singer-yang.github.io/) is building and maintaining [**DeepLens**](https://github.com/singer-yang/DeepLens/). The automated lens design work demonstrates the outstanding capability of differentiable optics compared to classical optical design in the following paper:
 
 ```bibtex
 @article{yang2024curriculum,
