@@ -13,7 +13,7 @@ import torch
 from pyvista import Plotter, PolyData, merge
 
 from deeplens.optics import Ray
-from deeplens.optics.basics import DEFAULT_WAVE
+from deeplens.basics import DEFAULT_WAVE
 from deeplens.optics.geometric_surface import Aperture
 
 # ==========================================================

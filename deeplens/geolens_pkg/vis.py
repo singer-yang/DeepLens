@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from deeplens.optics.basics import DEFAULT_WAVE, DEPTH, WAVE_RGB
+from deeplens.basics import DEFAULT_WAVE, DEPTH, WAVE_RGB
 from deeplens.optics.ray import Ray
 
 

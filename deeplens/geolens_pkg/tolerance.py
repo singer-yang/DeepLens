@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from deeplens.optics.basics import DEPTH
+from deeplens.basics import DEPTH
 
 
 class GeoLensTolerance:

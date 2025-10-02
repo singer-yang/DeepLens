@@ -25,7 +25,7 @@ import torch
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
-from deeplens.optics.basics import (
+from deeplens.basics import (
     DEFAULT_WAVE,
     DEPTH,
     EPSILON,

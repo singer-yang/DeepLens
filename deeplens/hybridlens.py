@@ -21,7 +21,7 @@ import torch.nn.functional as F
 
 from deeplens.geolens import GeoLens
 from deeplens.lens import Lens
-from deeplens.optics.basics import (
+from deeplens.basics import (
     SPP_COHERENT,
     PSF_KS,
     DEFAULT_WAVE,

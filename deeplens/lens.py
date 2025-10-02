@@ -14,7 +14,7 @@ import torch
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
-from deeplens.optics.basics import (
+from deeplens.basics import (
     BLUE_RESPONSE,
     DEFAULT_WAVE,
     DEPTH,

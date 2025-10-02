@@ -27,7 +27,7 @@ from deeplens.geolens_pkg.tolerance import GeoLensTolerance
 from deeplens.geolens_pkg.vis import GeoLensVis
 from deeplens.geolens_pkg.view_3d import GeoLensVis3D
 from deeplens.lens import Lens
-from deeplens.optics.basics import (
+from deeplens.basics import (
     DEFAULT_WAVE,
     DELTA_PARAXIAL,
     DEPTH,
