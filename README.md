@@ -1,39 +1,35 @@
 <div style="text-align:center;">
-    <img src="imgs/logo.png"/>
+    <img src="assets/logo.png"/>
 </div>
 
-**DeepLens** is an open-source differentiable optics simulator. It is developed for (1) differentiable optical design and (2) end-to-end computational cameras. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
+**DeepLens** is a differentiable optical lens simulator. It is developed for (1) differentiable optical design, (2) end-to-end optics-vision co-design, and (3) photorealistic image simulation. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
 
-## Contact
+<!-- ## Contact
 
-* Welcome to contribute to DeepLens! If you don't know where to start, check out some [open questions](https://github.com/users/singer-yang/projects/2).
+* Welcome to contribute to DeepLens! Please see our [Contributing Guide](CONTRIBUTING.md) for more details. If you don't know where to start, check out some [open questions](https://github.com/users/singer-yang/projects/2).
 * Contact Xinge Yang (xinge.yang@kaust.edu.sa) for any inquiries. DeepLens is also looking for sponsors!
 * We have a [Slack group](https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw) and a WeChat group (add singeryang1999 to join) for discussion.
-* The DeepLens paper is published in [Nature Communications](https://www.nature.com/articles/s41467-024-50835-7)!
+* The DeepLens paper is published in [Nature Communications](https://www.nature.com/articles/s41467-024-50835-7)! -->
 
-## What is DeepLens
+## Mission
 
-DeepLens combines **deep learning** and **optical design** for:
-
-1. More powerful **optical design algorithms** enhanced by deep learning.
+1. Next-generation **optical design software** enhanced by differentiable optimization.
 2. Next-generation **computational cameras** integrating optical encoding with deep learning decoding.
 
 ## Key Features
 
-DeepLens differs from other optical software in:
+1. **Differentiable Optics.** DeepLens leverages gradient backpropagation and differentiable optimization, demonstrating outstanding optimization power compared to classical optical design.
+2. **Automated Lens Design.** Enables automated lens design using curriculum learning, optical regularization losses, and GPU acceleration.
+3. **Hybrid Refractive-Diffractive Optics.** Supports accurate simulation and optimization of hybrid refractive-diffractive lenses (e.g., DOEs, metasurfaces).
+4. **Accurate Image Simulation.** Delivers photorealistic, spatially-varying image simulations, verified against commercial software and real-world experiments.
+5. **Optics-Vision Co-Design.** Supports end-to-end differentiability from optics, sensor, and ISP to vision algorithms, enabling comprehensive optics-vision co-design.
 
-1. **Differentiable** design with outstanding optimization capabilities.
-2. **Open-source** optical simulator (ray-tracing, wave optics) with validated accuracy.
-3. **End-to-end imaging** with sensor and image signal processing (ISP) simulation.
-4. **GPU parallelization** with customized core functions.
+Additional features (available via collaboration):
 
-Additional features:
-
-1. **Physical optics** simulations including polarization tracing and film design.
-2. **Complex optical systems** including non-sequential and non-coaxial optics.
-3. **Neural representations** for efficient implicit optical models.
-4. **Faster and better efficience** through GPU kernel customization.
-5. **Large-scale** optimization with multi-machine distribution.
+1. **Polarization Ray Tracing.** Provides polarization ray tracing and differentiable optimization of coating films.
+2. **Non-Sequential Ray Tracing.** Includes a differentiable non-sequential ray tracing model for stray light analysis and optimization.
+3. **Kernel Acceleration.** Achieves >10x speedup and >90% GPU memory reduction with custom GPU kernels across NVIDIA and AMD platforms.
+4. **Distributed Optimization.** Supports distributed simulation and optimization for billions of rays and high-resolution (100k x 100k) diffractive computations.
 
 ## Applications
 
@@ -44,8 +40,8 @@ Fully automated lens design from scratch. Try it with [AutoLens](https://github.
 [![paper](https://img.shields.io/badge/NatComm-2024-orange)](https://www.nature.com/articles/s41467-024-50835-7) [![quickstart](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/AutoLens)
 
 <div align="center">
-    <img src="imgs/autolens1.gif" alt="AutoLens" height="270px"/>
-    <img src="imgs/autolens2.gif" alt="AutoLens" height="270px"/>
+    <img src="assets/autolens1.gif" alt="AutoLens" height="270px"/>
+    <img src="assets/autolens2.gif" alt="AutoLens" height="270px"/>
 </div>
 
 #### 2. End-to-End lens design
@@ -55,7 +51,7 @@ Lens-network co-design from scratch using final images (or classification/detect
 [![paper](https://img.shields.io/badge/NatComm-2024-orange)](https://www.nature.com/articles/s41467-024-50835-7)
 
 <div align="center">
-    <img src="imgs/end2end.gif" alt="End2End" height="150px"/>
+    <img src="assets/end2end.gif" alt="End2End" height="150px"/>
 </div>
 
 #### 3. Implicit Lens Representation
@@ -65,7 +61,7 @@ A surrogate network for fast (aberration + defocus) image simulation.
 [![paper](https://img.shields.io/badge/TPAMI-2023-orange)](https://ieeexplore.ieee.org/document/10209238) [![link](https://img.shields.io/badge/Project-green)](https://github.com/vccimaging/Aberration-Aware-Depth-from-Focus)
 
 <div align="center">
-    <img src="imgs/implicit_net.png" alt="Implicit" height="150px"/>
+    <img src="assets/implicit_net.png" alt="Implicit" height="150px"/>
 </div>
 
 #### 4. Hybrid Refractive-Difractive Lens Model
@@ -75,21 +71,21 @@ Design hybrid refractive-diffractive lenses with a new ray-wave model.
 [![report](https://img.shields.io/badge/SiggraphAsia-2024-orange)](https://arxiv.org/abs/2406.00834)
 
 <div align="center">
-    <img src="imgs/hybridlens.png" alt="Implicit" height="200px"/>
+    <img src="assets/hybridlens.png" alt="Implicit" height="200px"/>
 </div>
 
 ## How to use
 
-We recommend cloning this repository and writing your code directly within it:
+Clone this repo:
 
 ```
-git clone deeplens
-cd deeplens
+git clone https://github.com/singer-yang/DeepLens
+cd DeepLens
 ```
 
 Create a conda environment:
 ```
-conda env create -f environment.yml -n deeplens
+conda env create -f environment.yml -n deeplens_env
 ```
 or
 ```
@@ -102,7 +98,6 @@ pip install -r requirements.txt
 Run the demo code:
 ```
 python 0_hello_deeplens.py
-python your_optical_design_pipeline.py
 ```
 
 DeepLens repo is structured as follows:
@@ -115,21 +110,44 @@ DeepLens/
 |   ├── sensor/ (sensor simulation)
 |   ├── network/ (network architectures)
 |   ├── ...
-|   ├── geolens.py (refractive lens system using ray tracing)
-|   ├── diffraclens.py (diffractive lens system using wave optics)
-|   └── your_own_optical_system.py (your own optical system)
+|   ├── geolens.py (refractive lens with ray tracing model)
+|   ├── diffraclens.py (diffractive lens with wave optics model)
+|   └── your_own_optical_system.py (your own optical lens)
 │
 ├── 0_hello_deeplens.py (code tutorials)
 ├── ...
-└── your_optical_design_pipeline.py (your own optical design pipeline)
+└── write_your_own_code.py
 ```
 
-## Reference
+## Community
 
-This code is first developed by [Dr. Congli Wang](https://congliwang.github.io/) (previously named **dO**), then developed (currently named **DeepLens**) and maintained by [Xinge Yang](https://singer-yang.github.io/). 
+Join our [Slack](https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw) workspace and WeChat Group (singeryang1999) to connect with our core contributors, receive the latest industry updates, and be part of our community. For any inquiries, contact Xinge Yang (xinge.yang@kaust.edu.sa).
 
-If you use DeepLens in your research, please cite the corresponding papers:
+## Contribution
 
-- [TCI 2022] dO: A differentiable engine for deep lens design of computational imaging systems. [Paper](https://ieeexplore.ieee.org/document/9919421), [BibTex](./misc/do_bibtex.txt)
-- [NatComm 2024] Curriculum Learning for ab initio Deep Learned Refractive Optics. [Paper](https://www.nature.com/articles/s41467-024-50835-7), [BibTex](./misc/deeplens_bibtex.txt)
-- [SiggraphAsia 2024] End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model. [Paper](https://arxiv.org/abs/2406.00834), [BibTex](./misc/hybridlens_bibtex.txt)
+We welcome all contributions. To get started, please read our [Contributing Guide](./CONTRIBUTING.md) or check out [open questions](https://github.com/users/singer-yang/projects/2). All project participants are expected to adhere to our [Code of Conduct](./CODE_OF_CONDUCT.md). A list of contributors can be viewed in [Contributors](./CONTRIBUTORS.md) and below:
+
+<a href="https://github.com/singer-yang/DeepLens/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=singer-yang/DeepLens" />
+</a>
+
+## License
+
+DeepLens is released under the [Creative Commons Attribution-NonCommercial 4.0 International License](./LICENSE). This means the project can be used for non-commercial purposes with attribution. 
+
+## Citations
+
+If you use DeepLens in your research, please cite the paper. See more in [History of DeepLens](./CITATION.md).
+
+```bibtex
+@article{yang2024curriculum,
+  title={Curriculum learning for ab initio deep learned refractive optics},
+  author={Yang, Xinge and Fu, Qiang and Heidrich, Wolfgang},
+  journal={Nature communications},
+  volume={15},
+  number={1},
+  pages={6572},
+  year={2024},
+  publisher={Nature Publishing Group UK London}
+}
+```
