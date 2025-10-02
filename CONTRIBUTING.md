@@ -31,9 +31,18 @@ conda activate deeplens_env
 pip install -r requirements.txt
 ```
 
+## Code Formatting
+
+We encourage contributors to format their code with [ruff](https://docs.astral.sh/ruff/) to maintain consistent code style across the project. You can install ruff and format your code with:
+
+```
+pip install ruff
+ruff format .
+```
+
 ## Contribution Opportunities
 
-A great place to start looking for contribution ideas is the project's issue tracker on GitHub. Look for issues with labels like "good first issue" or "help wanted". You can also check out the [open questions project board](https://github.com/users/singer-yang/projects/2) mentioned in the README.
+A great place to start looking for contribution ideas is the project's issue tracker on GitHub. You can check out the [open questions project board](https://github.com/users/singer-yang/projects/2) mentioned in the README.
 
 ## Proposing Major Changes
 
