@@ -5,7 +5,41 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Classical optical performance evaluation for GeoLens. Accuracy aligned with Zemax."""
+"""Classical optical performance evaluation for geometric lens systems. Accuracy aligned with Zemax.
+
+Functions:
+    Spot Diagram:
+        - draw_spot_radial(): Draw spot diagrams at different field angles along meridional direction
+        - draw_spot_map(): Draw spot diagram grid at different field angles
+
+    RMS Error:
+        - rms_map_rgb(): Calculate RMS spot error map for RGB wavelengths
+        - rms_map(): Calculate RMS spot error map for a specific wavelength
+
+    Distortion:
+        - calc_distortion_2D(): Calculate distortion at a specific field angle
+        - draw_distortion_radial(): Draw distortion curve vs field angle (Zemax format)
+        - distortion_map(): Compute distortion map at a given depth
+        - draw_distortion(): Draw distortion map visualization
+
+    MTF (Modulation Transfer Function):
+        - mtf(): Calculate MTF at a specific field of view
+        - psf2mtf(): Convert PSF to MTF (static method)
+        - draw_mtf(): Draw grid of MTF curves for multiple depths/FOVs and RGB wavelengths
+
+    Vignetting:
+        - vignetting(): Compute vignetting map
+        - draw_vignetting(): Draw vignetting visualization
+
+    Wavefront & Aberration (placeholders):
+        - wavefront_error(): Compute wavefront error
+        - field_curvature(): Compute field curvature
+        - aberration_histogram(): Compute aberration histogram
+
+    Chief Ray & Ray Aiming:
+        - calc_chief_ray(): Compute chief ray for an incident angle
+        - calc_chief_ray_infinite(): Compute chief ray for infinite object distance
+"""
 
 import math
 
@@ -184,7 +218,8 @@ class GeoLensEval:
             # Calculate RMS relative to green centroid, shape [num_grid, num_grid]
             rms_map = torch.sqrt(
                 (
-                    ((ray_xy - ray_xy_center_green.unsqueeze(-2)) ** 2).sum(-1) * ray_valid
+                    ((ray_xy - ray_xy_center_green.unsqueeze(-2)) ** 2).sum(-1)
+                    * ray_valid
                 ).sum(-1)
                 / (ray_valid.sum(-1) + EPSILON)
             )
@@ -220,9 +255,9 @@ class GeoLensEval:
         ray_valid = ray.valid  # Shape [num_grid, num_grid, spp]
 
         # Calculate centroid for each field point for this wavelength
-        ray_xy_center = (ray_xy * ray_valid.unsqueeze(-1)).sum(-2) / ray_valid.sum(-1).add(
-            EPSILON
-        ).unsqueeze(-1)
+        ray_xy_center = (ray_xy * ray_valid.unsqueeze(-1)).sum(-2) / ray_valid.sum(
+            -1
+        ).add(EPSILON).unsqueeze(-1)
         # Shape [num_grid, num_grid, 2]
 
         # Calculate RMS error relative to its own centroid, shape [num_grid, num_grid]
@@ -460,7 +495,7 @@ class GeoLensEval:
         psf = self.psf(points=point, recenter=True, wvln=wvln)
         freq, mtf_tan, mtf_sag = self.psf2mtf(psf, pixel_size=self.pixel_size)
         return freq, mtf_tan, mtf_sag
-    
+
     @staticmethod
     def psf2mtf(psf, pixel_size):
         """Calculate MTF from PSF.
@@ -574,12 +609,16 @@ class GeoLensEval:
 
                 # Draw Nyquist frequency
                 ax.axvline(
-                    x=nyquist_freq, color="k", linestyle=":", linewidth=1.2, label="Nyquist"
+                    x=nyquist_freq,
+                    color="k",
+                    linestyle=":",
+                    linewidth=1.2,
+                    label="Nyquist",
                 )
 
                 # Set title and label for subplot
                 fov_deg = round(fov_relative * self.rfov * 180 / np.pi, 1)
-                depth_str = ("inf" if depth == float("inf") else f"{depth}")
+                depth_str = "inf" if depth == float("inf") else f"{depth}"
                 ax.set_title(f"Depth: {depth_str}mm, FOV: {fov_deg}deg", fontsize=8)
                 ax.set_xlabel("Spatial Frequency [cycles/mm]", fontsize=8)
                 ax.set_ylabel("MTF", fontsize=8)

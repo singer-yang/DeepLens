@@ -5,7 +5,24 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Visualization functions for GeoLens."""
+"""Visualization functions for GeoLens.
+
+Functions:
+    Ray Sampling (2D):
+        - sample_parallel_2D(): Sample parallel rays (2D) in object space
+        - sample_point_source_2D(): Sample point source rays (2D) in object space
+
+    2D Layout Visualization:
+        - draw_layout(): Plot 2D lens layout with ray tracing
+        - draw_lens_2d(): Draw lens layout in a 2D plot
+        - draw_ray_2d(): Plot ray paths
+
+    3D Layout Visualization:
+        - draw_layout_3d(): Draw 3D layout of the lens system
+
+    3D Barrier Generation:
+        - create_barrier(): Create a 3D barrier for the lens system
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -186,7 +203,9 @@ class GeoLensVis:
         # Draw lens layout
         if not multi_plot:
             colors_list = ["#CC0000", "#006600", "#0066CC"]
-            fov_ls = np.linspace(0, float(np.rad2deg(self.real_rfov) * 0.99), num=num_views)
+            fov_ls = np.linspace(
+                0, float(np.rad2deg(self.real_rfov) * 0.99), num=num_views
+            )
             ax, fig = self.draw_lens_2d(zmx_format=zmx_format)
 
             for i, fov in enumerate(fov_ls):
@@ -375,6 +394,9 @@ class GeoLensVis:
         Returns:
             fig, ax: Matplotlib figure and axis objects
         """
+        raise Exception(
+            "This function is deprecated. Please use the draw_lens_3d function in the view_3d module instead."
+        )
         fig = plt.figure(figsize=(10, 6))
         ax = fig.add_subplot(111, projection="3d")
 
