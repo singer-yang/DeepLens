@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from torchvision.utils import save_image
 
 from deeplens.lens import Lens
-from deeplens.optics.basics import DEPTH, DEFAULT_WAVE
+from deeplens.basics import DEPTH, DEFAULT_WAVE
 from deeplens.optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
 from deeplens.optics.psf import conv_psf
 from deeplens.optics.wave import ComplexWave

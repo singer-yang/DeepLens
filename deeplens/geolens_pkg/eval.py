@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from deeplens.optics.basics import (
+from deeplens.basics import (
     DEFAULT_WAVE,
     DEPTH,
     EPSILON,

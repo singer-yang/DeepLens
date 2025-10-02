@@ -20,7 +20,7 @@ from torch.fft import fft2, fftshift, ifft2, ifftshift
 from torchvision.utils import save_image
 from tqdm import tqdm
 
-from deeplens.optics.basics import DELTA, DeepObj
+from deeplens.basics import DELTA, DeepObj
 
 
 # ===================================

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from deeplens.optics.basics import DeepObj
+from deeplens.basics import DeepObj
 from deeplens.optics.materials import Material
 
 EPSILON = 1e-12  # [float], small value to avoid division by zero
