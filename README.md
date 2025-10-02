@@ -22,7 +22,7 @@ Additional features (available via collaboration):
 1. **Polarization Ray Tracing.** Provides polarization ray tracing and differentiable optimization of coating films.
 2. **Non-Sequential Ray Tracing.** Includes a differentiable non-sequential ray tracing model for stray light analysis and optimization.
 3. **Kernel Acceleration.** Achieves >10x speedup and >90% GPU memory reduction with custom GPU kernels across NVIDIA and AMD platforms.
-4. **Distributed Optimization.** Supports distributed simulation and optimization for billions of rays and high-resolution (100k x 100k) diffractive computations.
+4. **Distributed Optimization.** Supports distributed simulation and optimization for billions of rays and high-resolution (>100k x 100k) diffractive computations.
 
 ## Applications
 
