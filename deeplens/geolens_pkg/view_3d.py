@@ -5,6 +5,37 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
+"""3D visualization for geometric lens systems.
+
+Classes:
+    Mesh Classes:
+        - CrossPoly: Base class for meshes
+        - LineMesh: Line mesh with vertices and lines
+        - Curve: A curve mesh with vertices and lines (for ray meshes)
+        - Circle: A circle mesh with normal direction and radius
+        - FaceMesh: A face mesh with vertices and faces (for bridge meshes)
+        - RectangleMesh: A rectangle mesh (for sensor meshes)
+    
+    Visualization:
+        - GeoLensVis3D: GeoLens utility class for visualizing the lens geometry and rays in 3D
+
+Functions:
+    Mesh Utilities:
+        - bridge(): Bridge two curves with triangulated faces
+    
+    Ray Visualization:
+        - curve_list_to_polydata(): Convert a list of Curve objects to a list of PolyData objects
+        - geolens_ray_poly(): Sample parallel rays to draw the lens setup
+        - sample_parallel_3D(): Sample 2D parallel rays
+        - curve_from_trace(): Trace the ray and return the Curve
+    
+    GeoLensVis3D Methods:
+        - draw_mesh(): Draw a mesh to the plotter (static method)
+        - create_mesh(): Create all lens/bridge/sensor/aperture meshes
+        - draw_lens_3d(): Draw lens 3D layout with rays using pyvista
+        - save_lens_obj(): Save lens geometry and rays as .obj files using pyvista
+"""
+
 import os
 from typing import List
 

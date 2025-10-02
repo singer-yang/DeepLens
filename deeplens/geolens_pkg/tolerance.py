@@ -5,6 +5,23 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
+"""Tolerance analysis for geometric lens design.
+
+References:
+    [1] Jun Dai, Liqun Chen, Xinge Yang, Yuyao Hu, Jinwei Gu, Tianfan Xue, "Tolerance-Aware Deep Optics," arXiv preprint arXiv:2502.04719, 2025.
+
+Functions:
+    Tolerance Setup:
+        - init_tolerance(): Initialize tolerance parameters for the lens
+        - sample_tolerance(): Sample a random manufacturing error for the lens
+        - zero_tolerance(): Clear manufacturing error for the lens
+
+    Tolerance Analysis Methods:
+        - tolerancing_sensitivity(): Use sensitivity analysis (1st order gradient) to compute the tolerance score
+        - tolerancing_monte_carlo(): Use Monte Carlo simulation to compute the tolerance
+        - tolerancing_wavefront(): Use wavefront differential method to compute the tolerance
+"""
+
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -96,6 +113,7 @@ class GeoLensTolerance:
             [1] https://optics.ansys.com/hc/en-us/articles/43071088477587-How-to-analyze-your-tolerance-results
             [2] Optical Design Tolerancing. CODE V.
         """
+
         def merit_func(lens, fov=0.0, depth=DEPTH):
             # Calculate MTF at a specific field of view
             point = [0, -fov / lens.rfov, depth]
@@ -170,8 +188,8 @@ class GeoLensTolerance:
         return results
 
     def tolerancing_wavefront(self, tolerance_params=None):
-        """Use wavefront differential method to compute the tolerance. 
-        
+        """Use wavefront differential method to compute the tolerance.
+
         Wavefront differential method is proposed in [1], while the detailed implementation remains unknown. I (Xinge Yang) assume a symbolic differentiation is used to compute the gradient/Jacobian of the wavefront error. With AutoDiff, we can easily calculate Jacobian with gradient backpropagation, therefore I leave the implementation of this method as future work.
 
         Args:

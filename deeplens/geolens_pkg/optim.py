@@ -12,8 +12,19 @@ Differentiable lens design has several advantages over conventional lens design:
     2. First-order optimization with momentum (e.g., Adam) is typically more stable than second-order optimization, and also has promising convergence speed.
     3. Efficient definition of loss functions can prevent the lens from violating constraints.
 
-Technical Paper:
+References:
     Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
+
+Functions:
+    - init_constraints: Initialize constraints for the lens design
+    - loss_reg: An empirical regularization loss for lens design
+    - loss_infocus: Sample parallel rays and compute RMS loss on the sensor plane
+    - loss_surface: Penalize surface shape (sag, diameter-to-thickness ratio, etc.)
+    - loss_self_intersec: Loss function to avoid self-intersection
+    - loss_ray_angle: Loss function to penalize large chief ray angle
+    - loss_rms: Loss function to compute RGB spot error RMS
+    - sample_ring_arm_rays: Sample rays from object space using a ring-arm pattern
+    - optimize: Optimize the lens by minimizing rms errors
 """
 
 import logging
