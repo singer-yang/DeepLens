@@ -4,19 +4,12 @@
 
 **DeepLens** is a differentiable optical lens simulator. It is developed for (1) differentiable optical design, (2) end-to-end optics-vision co-design, and (3) photorealistic image simulation. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
 
-<!-- ## Contact
-
-* Welcome to contribute to DeepLens! Please see our [Contributing Guide](CONTRIBUTING.md) for more details. If you don't know where to start, check out some [open questions](https://github.com/users/singer-yang/projects/2).
-* Contact Xinge Yang (xinge.yang@kaust.edu.sa) for any inquiries. DeepLens is also looking for sponsors!
-* We have a [Slack group](https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw) and a WeChat group (add singeryang1999 to join) for discussion.
-* The DeepLens paper is published in [Nature Communications](https://www.nature.com/articles/s41467-024-50835-7)! -->
-
 ## Mission
 
 1. Next-generation **optical design software** enhanced by differentiable optimization.
 2. Next-generation **computational cameras** integrating optical encoding with deep learning decoding.
 
-## Key Features
+## Features
 
 1. **Differentiable Optics.** DeepLens leverages gradient backpropagation and differentiable optimization, demonstrating outstanding optimization power compared to classical optical design.
 2. **Automated Lens Design.** Enables automated lens design using curriculum learning, optical regularization losses, and GPU acceleration.
@@ -74,7 +67,7 @@ Design hybrid refractive-diffractive lenses with a new ray-wave model.
     <img src="assets/hybridlens.png" alt="Implicit" height="200px"/>
 </div>
 
-## How to use
+## Installation
 
 Clone this repo:
 
