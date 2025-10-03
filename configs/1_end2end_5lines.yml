@@ -3,7 +3,7 @@ EXP_NAME: 'End2End lens design for image reconstruction.'
 seed: ~
 
 lens:
-  path: './lenses/cooke40_inferior.json'
+  path: './datasets/lenses/cooke40_inferior.json'
   lr: !!python/tuple [1e-4, 1e-4, 0, 0]
 
 network:

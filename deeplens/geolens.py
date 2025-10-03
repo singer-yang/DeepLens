@@ -14,11 +14,11 @@ Technical Paper:
 import json
 import math
 
-import cv2 as cv
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
+from PIL import Image
 from torchvision.utils import save_image
 
 from deeplens.basics import (
@@ -1873,7 +1873,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Render an image, compute PSNR and SSIM
         if render:
             depth = DEPTH if depth == float("inf") else depth
-            img_org = cv.cvtColor(cv.imread("./datasets/IQ/NBS_1963_1k.png"), cv.COLOR_BGR2RGB)
+            img_org = Image.open("./datasets/charts/NBS_1963_1k.png").convert('RGB')
+            img_org = np.array(img_org)
             self.analysis_rendering(
                 img_org,
                 depth=depth,
