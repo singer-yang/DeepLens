@@ -25,6 +25,7 @@ import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
+from PIL import Image
 from tqdm import tqdm
 
 import wandb
@@ -43,14 +44,14 @@ from deeplens.utils import (
 
 def config():
     # ==> Config
-    with open("configs/1_end2end_5lines.yml") as f:
+    with open("configs/1_end2end_lens_design.yml") as f:
         args = yaml.load(f, Loader=yaml.FullLoader)
 
     # ==> Result folder
     characters = string.ascii_letters + string.digits
     random_string = "".join(random.choice(characters) for i in range(4))
     current_time = datetime.now().strftime("%m%d-%H%M%S")
-    exp_name = current_time + "-End2End-5-lines-" + random_string
+    exp_name = current_time + "-End2End-Lens-Design-" + random_string
     result_dir = f"./results/{exp_name}"
     os.makedirs(result_dir, exist_ok=True)
     args["result_dir"] = result_dir
@@ -79,7 +80,7 @@ def config():
     with open(f"{result_dir}/config.yml", "w") as f:
         yaml.dump(args, f)
 
-    shutil.copy("1_end2end_5lines.py", f"{result_dir}/1_end2end_5lines.py")
+    shutil.copy("1_end2end_lens_design.py", f"{result_dir}/1_end2end_lens_design.py")
 
     return args
 
@@ -190,8 +191,9 @@ def end2end_train(lens: GeoLens, net, args):
                 torch.save(net.state_dict(), f"{result_dir}/net_epoch{epoch + 1}.pth")
 
                 # => Qualitative evaluation
-                img1 = cv.cvtColor(cv.imread("./datasets/bird.png"), cv.COLOR_BGR2RGB)
-                img1 = cv.resize(img1, args["train"]["img_res"]).astype(np.float32)
+                img1 = Image.open("./datasets/charts/NBS_1963_1k.png").convert('RGB')
+                img1 = img1.resize(args["train"]["img_res"])
+                img1 = np.array(img1).astype(np.float32)
                 img1 = (
                     torch.from_numpy(img1 / 255.0)
                     .permute(2, 0, 1)
