@@ -28,7 +28,7 @@ if __name__ == "__main__":
     psfnet_lens = PSFNetLens(
         in_chan=3,
         psf_chan=3,
-        lens_path="./lenses/camera/ef50mm_f1.8.json",
+        lens_path="./datasets/lenses/camera/ef50mm_f1.8.json",
         model_name="mlpconv",
         kernel_size=128,
         sensor_res=(3000, 3000),
