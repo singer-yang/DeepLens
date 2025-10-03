@@ -1,0 +1,88 @@
+{
+    "info": "Lens design for MIT hybrid lens project, consisting of a refractive lens with a DOE, using ray tracing for the simulation. Sensor BFS Board-level GigE: 1.6 MP, 1/2.9'. Metalens material should be changed to TiO2. Aperture size should be changed to 3.0mm. Meta-atom cell period should be 300-400nm.",
+    "foclen": 5.0076,
+    "fnum": 2.4266,
+    "r_sensor": 3.115,
+    "(d_sensor)": 8.4232,
+    "(sensor_size)": [
+        4.4053,
+        4.4053
+    ],
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Aperture",
+            "r": 1.0,
+            "(d)": 0.0,
+            "mat2": "air",
+            "is_square": false,
+            "diffraction": false,
+            "d_next": 0.2906
+        },
+        {
+            "idx": 2,
+            "type": "Spheric",
+            "r": 3.115,
+            "(c)": 0.1072,
+            "roc": 9.331,
+            "(d)": 0.2906,
+            "mat2": "h-k51",
+            "d_next": 2.0962
+        },
+        {
+            "idx": 3,
+            "type": "Spheric",
+            "r": 3.115,
+            "(c)": -0.1057,
+            "roc": -9.461,
+            "(d)": 2.3868,
+            "mat2": "air",
+            "d_next": 0.4999
+        },
+        {
+            "idx": 4,
+            "type": "Spheric",
+            "r": 3.115,
+            "(c)": 0.0545,
+            "roc": 18.3482,
+            "(d)": 2.8867,
+            "mat2": "h-k51",
+            "d_next": 2.4117
+        },
+        {
+            "idx": 5,
+            "type": "Spheric",
+            "r": 3.115,
+            "(c)": -0.1958,
+            "roc": -5.1077,
+            "(d)": 5.2985,
+            "mat2": "air",
+            "d_next": 0.6207
+        },
+        {
+            "idx": 6,
+            "type": "Plane",
+            "(l)": 4.242640687119286,
+            "r": 3.0,
+            "(d)": 5.9192,
+            "is_square": true,
+            "mat2": "fused_silica",
+            "d_next": 0.5
+        },
+        {
+            "idx": 7,
+            "type": "Phase",
+            "r": 3.115,
+            "param_model": "binary2",
+            "order2": -658.9512,
+            "order4": 584.5055,
+            "order6": 593.4034,
+            "order8": 589.8662,
+            "order10": 585.1763,
+            "order12": 580.3827,
+            "(d)": 6.4192,
+            "mat2": "air",
+            "d_next": 2.004
+        }
+    ]
+}
