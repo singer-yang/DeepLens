@@ -18,10 +18,10 @@ from deeplens import GeoLens
 
 
 def main():
-    lens = GeoLens(filename="./lenses/camera/ef35mm_f2.0.json")
-    # lens = GeoLens(filename="./lenses/camera/ef35mm_f2.0.zmx")
-    # lens = GeoLens(filename='./lenses/cellphone/cellphone80deg.json')
-    # lens = GeoLens(filename='./lenses/zemax_double_gaussian.zmx')
+    lens = GeoLens(filename="./datasets/lenses/camera/ef35mm_f2.0.json")
+    # lens = GeoLens(filename="./datasets/lenses/camera/ef35mm_f2.0.zmx")
+    # lens = GeoLens(filename='./datasets/lenses/cellphone/cellphone80deg.json')
+    # lens = GeoLens(filename='./datasets/lenses/zemax_double_gaussian.zmx')
 
     lens.analysis(render=True)
 
