@@ -169,10 +169,10 @@ class GeoLensVis:
         self,
         filename,
         depth=float("inf"),
-        entrance_pupil=True,
         zmx_format=True,
         multi_plot=False,
         lens_title=None,
+        show=False,
     ):
         """Plot 2D lens layout with ray tracing.
 
@@ -183,50 +183,53 @@ class GeoLensVis:
             zmx_format: Whether to use ZMX format
             multi_plot: Whether to create multiple plots
             lens_title: Title for the lens plot
+            show: Whether to show the plot
         """
         num_rays = 11
         num_views = 3
 
         # Lens title
         if lens_title is None:
-            eff_foclen = self.foclen
-            eq_foclen = self.eqfl
-            fov_deg = self.dfov * 180 / torch.pi
+            eff_foclen = int(self.foclen)
+            eq_foclen = int(self.eqfl)
+            fov_deg = round(self.dfov * 180 / torch.pi, 1)
+            sensor_r = round(self.r_sensor, 1)
+            sensor_w, sensor_h = self.sensor_size
+            sensor_w = round(sensor_w, 1)
+            sensor_h = round(sensor_h, 1)
 
             if self.aper_idx is not None:
                 _, pupil_r = self.calc_entrance_pupil()
-                fnum = eff_foclen / pupil_r / 2
-                lens_title = f"FoV{round(fov_deg, 1)}({int(eq_foclen)}mm EqFocLen) - F/{round(fnum, 2)} - SensorDiag{round(self.r_sensor * 2, 2)}mm - FocLen{round(eff_foclen, 2)}mm"
+                fnum = round(eff_foclen / pupil_r / 2, 1)
+                lens_title = f"FocLen{eff_foclen}mm - F/{fnum} - FoV{fov_deg}(Equivalent {eq_foclen}mm) - Sensor Diagonal {2 * sensor_r}mm"
             else:
-                lens_title = f"FoV{round(fov_deg, 1)}({int(eq_foclen)}mm EqFocLen) - SensorDiag{round(self.r_sensor * 2, 2)}mm - FocLen{round(eff_foclen, 2)}mm"
+                lens_title = f"FocLen{eff_foclen}mm - FoV{fov_deg}(Equivalent {eq_foclen}mm) - Sensor Diagonal {2 * sensor_r}mm"
 
         # Draw lens layout
+        colors_list = ["#CC0000", "#006600", "#0066CC"]
+        rfov_deg = float(np.rad2deg(self.real_rfov))
+        fov_ls = np.linspace(0, rfov_deg * 0.99, num=num_views)
+        
         if not multi_plot:
-            colors_list = ["#CC0000", "#006600", "#0066CC"]
-            fov_ls = np.linspace(
-                0, float(np.rad2deg(self.real_rfov) * 0.99), num=num_views
-            )
             ax, fig = self.draw_lens_2d(zmx_format=zmx_format)
-
+            fig.suptitle(lens_title)
             for i, fov in enumerate(fov_ls):
-                # Sample rays, shape (num_view, num_rays, 3)
+                # Sample rays, shape (num_rays, 3)
                 if depth == float("inf"):
                     ray = self.sample_parallel_2D(
                         fov=fov,
                         wvln=WAVE_RGB[2 - i],
                         num_rays=num_rays,
-                        entrance_pupil=entrance_pupil,
                         depth=-1.0,
                         plane="sagittal",
-                    )  # shape (num_rays, 3)
+                    )
                 else:
                     ray = self.sample_point_source_2D(
                         fov=fov,
                         depth=depth,
                         num_rays=num_rays,
                         wvln=WAVE_RGB[2 - i],
-                        entrance_pupil=entrance_pupil,
-                    )  # shape (num_rays, 3)
+                    )
                     ray.prop_to(-1.0)
 
                 # Trace rays to sensor and plot ray paths
@@ -236,51 +239,42 @@ class GeoLensVis:
                 )
 
             ax.axis("off")
-            ax.set_title(lens_title, fontsize=8)
-            if filename.endswith(".png"):
-                fig.savefig(filename, format="png", dpi=600)
-            else:
-                raise ValueError("Invalid file extension")
-            plt.close()
+
 
         else:
-            fov_ls = np.linspace(0, np.rad2deg(self.real_rfov) * 0.99, num=num_views)
-            colors_list = ["#CC0000", "#006600", "#0066CC"]
             fig, axs = plt.subplots(1, 3, figsize=(15, 5))
             fig.suptitle(lens_title)
-
             for i, wvln in enumerate(WAVE_RGB):
                 ax = axs[i]
                 ax, fig = self.draw_lens_2d(ax=ax, fig=fig, zmx_format=zmx_format)
-
                 for fov in fov_ls:
+                    # Sample rays, shape (num_rays, 3)
                     if depth == float("inf"):
                         ray = self.sample_parallel_2D(
                             fov=fov,
                             num_rays=num_rays,
                             wvln=wvln,
-                            entrance_pupil=entrance_pupil,
                             plane="sagittal",
-                        )  # shape (num_rays, 3)
+                        )
                     else:
                         ray = self.sample_point_source_2D(
                             fov=fov,
                             depth=depth,
                             num_rays=num_rays,
                             wvln=wvln,
-                            entrance_pupil=entrance_pupil,
-                        )  # shape (num_rays, 3)
+                        )
 
+                    # Trace rays to sensor and plot ray paths
                     ray_out, ray_o_record = self.trace2sensor(ray=ray, record=True)
                     ax, fig = self.draw_ray_2d(
                         ray_o_record, ax=ax, fig=fig, color=colors_list[i]
                     )
                     ax.axis("off")
 
-            if filename.endswith(".png"):
-                fig.savefig(filename, format="png", dpi=300)
-            else:
-                raise ValueError("Invalid file extension")
+        if show:
+            fig.show()
+        else:
+            fig.savefig(filename, format="png", dpi=600)
             plt.close()
 
     def draw_lens_2d(
