@@ -66,7 +66,7 @@ class GeoLensEval:
     # ================================================================
     @torch.no_grad()
     def draw_spot_radial(
-        self, num_field=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None
+        self, num_field=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None, show=False
     ):
         """Draw spot diagram of the lens at different field angles along meridional (y) direction.
 
@@ -75,6 +75,7 @@ class GeoLensEval:
             depth (float, optional): depth of the point source. Defaults to float("inf").
             wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
+            show (bool, optional): whether to show the plot. Defaults to False.
         """
         # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
         ray = self.sample_radial_rays(
@@ -87,7 +88,8 @@ class GeoLensEval:
         ray_valid = ray.valid.clone().cpu().numpy()  # .squeeze(0)
 
         # Plot multiple spot diagrams in one figure
-        _, axs = plt.subplots(1, num_field, figsize=(num_field * 4, 4))
+        fig, axs = plt.subplots(1, num_field, figsize=(num_field * 4, 4))
+        fig.suptitle("Spot diagram along y-axis for depth " + str(depth))
         for i in range(num_field):
             valid = ray_valid[i, :]
             x, y = ray_o[i, :, 0], ray_o[i, :, 1]
@@ -118,10 +120,13 @@ class GeoLensEval:
             save_name = f"{save_name}_meridional_{depth_str}.png"
 
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-        plt.close()
+        if show:
+            plt.show()
+        else:
+            plt.close()
 
     @torch.no_grad()
-    def draw_spot_map(self, num_grid=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None):
+    def draw_spot_map(self, num_grid=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None, show=False):
         """Draw spot diagram of the lens at different field angles.
 
         Args:
@@ -129,6 +134,7 @@ class GeoLensEval:
             depth (float, optional): depth of the point source. Defaults to DEPTH.
             wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
             save_name (string, optional): filename to save. Defaults to None.
+            show (bool, optional): whether to show the plot. Defaults to False.
         """
         # Sample rays, shape [num_grid, num_grid, num_rays, 3]
         ray = self.sample_grid_rays(
@@ -146,6 +152,7 @@ class GeoLensEval:
         fig, axs = plt.subplots(
             num_grid, num_grid, figsize=(num_grid * 2, num_grid * 2)
         )
+        fig.suptitle("Spot diagram")
         for i in range(num_grid):
             for j in range(num_grid):
                 valid = ray_valid[i, j, :]
@@ -180,7 +187,10 @@ class GeoLensEval:
             save_name = f"{save_name}_spot_{depth_str}.png"
 
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-        plt.close()
+        if show:
+            plt.show()
+        else:
+            plt.close()
 
     # ================================================================
     # RMS map
@@ -547,6 +557,7 @@ class GeoLensEval:
         depth_list=[DEPTH],
         save_name="./mtf_grid.png",
         ks=128,
+        show=False,
     ):
         """Draw a grid of MTF curves.
         Each subplot in the grid corresponds to a specific (depth, FOV) combination.
@@ -558,6 +569,7 @@ class GeoLensEval:
             depth_list (list, optional): List of depth values. Defaults to [DEPTH].
             save_name (str, optional): Filename to save the plot. Defaults to "./mtf_grid.png".
             ks (int, optional): Kernel size for PSF calculation. Defaults to 256.
+            show (bool, optional): whether to show the plot. Defaults to False.
         """
         assert save_name.endswith(".png"), "save_name must end with .png"
         pixel_size = self.pixel_size
@@ -574,6 +586,7 @@ class GeoLensEval:
         fig, axs = plt.subplots(
             num_depths, num_fovs, figsize=(num_fovs * 3, num_depths * 3), squeeze=False
         )
+        fig.suptitle("MTF Curves")
 
         # Iterate over depth and field of view
         for depth_idx, depth in enumerate(depth_list):
@@ -619,7 +632,7 @@ class GeoLensEval:
                 # Set title and label for subplot
                 fov_deg = round(fov_relative * self.rfov * 180 / np.pi, 1)
                 depth_str = "inf" if depth == float("inf") else f"{depth}"
-                ax.set_title(f"Depth: {depth_str}mm, FOV: {fov_deg}deg", fontsize=8)
+                ax.set_title(f"FOV: {fov_deg}deg, Depth: {depth_str}mm", fontsize=8)
                 ax.set_xlabel("Spatial Frequency [cycles/mm]", fontsize=8)
                 ax.set_ylabel("MTF", fontsize=8)
                 ax.legend(fontsize=6)
@@ -629,7 +642,10 @@ class GeoLensEval:
 
         plt.tight_layout()
         plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-        plt.close(fig)
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
 
     # ================================================================
     # Vignetting

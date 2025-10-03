@@ -186,3 +186,4 @@ class GeoLensIO:
         with open(filename, "w") as f:
             f.writelines(lens_zmx_str)
             f.close()
+            print(f"Lens written to {filename}")
