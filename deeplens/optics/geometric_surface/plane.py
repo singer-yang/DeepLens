@@ -6,7 +6,7 @@ from deeplens.optics.geometric_surface.base import Surface
 
 
 class Plane(Surface):
-    def __init__(self, r, d, mat2, is_square=False, origin=None, vec_local=[0., 0., 1.], device="cpu"):
+    def __init__(self, r, d, mat2, is_square=False, origin=None, vec_local=[0., 0., 1.], surf_idx=None, device="cpu"):
         """Plane surface. 
         
         Examples: 
@@ -19,7 +19,7 @@ class Plane(Surface):
             - Mirror.
             - ThinLens.
         """
-        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, origin=origin, vec_local=vec_local, device=device)
+        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, origin=origin, vec_local=vec_local, surf_idx=surf_idx, device=device)
 
     @classmethod
     def init_from_dict(cls, surf_dict):

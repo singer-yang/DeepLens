@@ -21,9 +21,11 @@ class Surface(DeepObj):
         # FIXME: here is an ambiguity during optimization, because optimizing d will not change the origin
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         if origin is None:
-            self.origin = torch.tensor([0.0, 0.0, self.d.item()])
+            self.origin_x = torch.tensor(0.0)
+            self.origin_y = torch.tensor(0.0)
         else:
-            self.origin = torch.tensor(origin)
+            self.origin_x = origin[0]
+            self.origin_y = origin[1]
         
         # Surface direction vector in global coordinate system
         self.vec_local = F.normalize(torch.tensor(vec_local), p=2, dim=-1)
@@ -261,7 +263,6 @@ class Surface(DeepObj):
         n_vec = F.normalize(n_vec, p=2, dim=-1)
         
         is_forward = torch.sum(ray.d * self.vec_local, dim=-1, keepdim=True) > 0
-        breakpoint()
         n_vec = torch.where(is_forward, n_vec, -n_vec)
         return n_vec
 
@@ -275,7 +276,9 @@ class Surface(DeepObj):
             ray (Ray): transformed ray in local coordinate system.
         """
         # Shift ray origin to surface origin
-        ray.o = ray.o - self.origin
+        ray.o[..., 0] = ray.o[..., 0] - self.origin_x
+        ray.o[..., 1] = ray.o[..., 1] - self.origin_y
+        ray.o[..., 2] = ray.o[..., 2] - self.d
         
         # Rotate ray origin and direction
         if torch.abs(torch.dot(self.vec_local, self.vec_global) - 1.0) > EPSILON:
@@ -305,7 +308,9 @@ class Surface(DeepObj):
             ray.d = F.normalize(ray.d, p=2, dim=-1)
         
         # Shift ray origin back to global coordinates
-        ray.o = ray.o + self.origin
+        ray.o[..., 0] = ray.o[..., 0] + self.origin_x
+        ray.o[..., 1] = ray.o[..., 1] + self.origin_y
+        ray.o[..., 2] = ray.o[..., 2] + self.d
 
         return ray
 

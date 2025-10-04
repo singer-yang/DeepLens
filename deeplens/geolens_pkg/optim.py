@@ -93,7 +93,7 @@ class GeoLensOptim:
             self.thickness_min_edge = 1.5
             self.thickness_max_edge = 10.0
             self.thickness_min_center = 2.5
-            self.thickness_max_center = 10.0
+            self.thickness_max_center = 15.0
             
             self.flange_min = 5.0
             self.flange_max = 50.0  # float("inf")
