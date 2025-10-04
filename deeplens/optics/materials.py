@@ -106,8 +106,8 @@ class Material(DeepObj):
             self.n, self.V = 1.0, 1e38
 
         # Material found in AGF file
-        elif self.name in MATERIAL_data:
-            self.set_material_param_agf(MATERIAL_data, self.name)
+        elif self.name.lower() in MATERIAL_data:
+            self.set_material_param_agf(MATERIAL_data, self.name.lower())
 
         # Material is given by a (n, V) string, e.g. "1.5168/64.17"
         elif "/" in self.name:
@@ -289,32 +289,41 @@ class Material(DeepObj):
     # -------------------------------------------
     def match_material(self, mat_table=None):
         """Find the closest material in the CDGM common glasses database."""
-        # Material match table
-        if mat_table is None:
-            print("No material table provided. Using CDGM common glasses as default.")
-            mat_table = CUSTOM_data["CDGM_GLASS"]
-        elif mat_table == "CDGM":
-            mat_table = CUSTOM_data["CDGM_GLASS"]
-        elif mat_table == "PLASTIC":
-            mat_table = CUSTOM_data["PLASTIC_TABLE"]
-        else:
-            raise NotImplementedError(f"Material table {mat_table} not implemented.")
+        if not self.name == "air":
+            # Material match table
+            if mat_table is None:
+                print("No material table provided. Using CDGM common glasses as default.")
+                mat_table = CUSTOM_data["CDGM_GLASS"]
+            elif mat_table == "CDGM":
+                # CDGM common glasses
+                mat_table = CUSTOM_data["CDGM_GLASS"]
+            elif mat_table == "PLASTIC":
+                mat_table = CUSTOM_data["PLASTIC_TABLE"]
+            else:
+                raise NotImplementedError(f"Material table {mat_table} not implemented.")
 
-        # Find the closest material
-        weight_n = 2
-        dist_min = 1e6
-        for name in mat_table:
-            n, V = mat_table[name]
-            dist = weight_n * abs(n - self.n) / self.n + abs(V - self.V) / self.V
-            if dist < dist_min:
-                self.name = name
-                dist_min = dist
+            # Find the closest material
+            dist_min = 1e6
+            for name in mat_table:
+                n, V = mat_table[name]
+                error_n = abs(n - self.n) / self.n
+                error_V = abs(V - self.V) / self.V
+                dist = error_n + 0.1 * error_V
+                if dist < dist_min:
+                    self.name = name
+                    dist_min = dist
 
-        # Load the new material parameters
-        self.load_dispersion()
+            # Load the new material parameters
+            self.load_dispersion()
 
     def get_optimizer_params(self, lrs=[1e-4, 1e-3]):
-        """Optimize the material parameters (n, V)."""
+        """Optimize the material parameters (n, V). 
+        
+        Optimizing refractive index is more important than optimizing Abbe number.
+        
+        Args:
+            lrs (list): learning rates for n and V. Defaults to [1e-4, 1e-4].
+        """
         if isinstance(self.n, float):
             self.n = torch.tensor(self.n).to(self.device)
             self.V = torch.tensor(self.V).to(self.device)
