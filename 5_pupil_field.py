@@ -21,7 +21,7 @@ from deeplens import GeoLens
 
 def main():
     # Better to use a high sensor resolution (4000x4000 is roughly acceptable, but higher is better)
-    lens = GeoLens(filename="./lenses/cellphone/cellphone80deg.json", dtype=torch.float64)
+    lens = GeoLens(filename="./datasets/lenses/cellphone/cellphone80deg.json", dtype=torch.float64)
     lens.set_sensor_res(sensor_res=[4000, 4000])
 
     # Calculate the pupil field
@@ -32,9 +32,9 @@ def main():
     save_image(torch.abs(wavefront), "./wavefront_amp.png")
 
     # Compare coherent and incoherent PSFs
-    psf_coherent = lens.psf_coherent(torch.tensor([0.0, 0.0, -10000.0]), ks=101)
+    psf_coherent = lens.psf_coherent(torch.tensor([0.0, 0.0, -10000.0]), ks=64)
     save_image(psf_coherent, "./psf_coherent.png", normalize=True)
-    psf_incoherent = lens.psf(torch.tensor([0.0, 0.0, -10000.0]), ks=101)
+    psf_incoherent = lens.psf(torch.tensor([0.0, 0.0, -10000.0]), ks=64)
     save_image(psf_incoherent, "./psf_incoherent.png", normalize=True)
 
 
