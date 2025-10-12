@@ -55,7 +55,7 @@ def create_lens(
 
     # Compute lens parameters
     aper_r = foclen / fnum / 2
-    imgh = 2 * foclen * float(np.tan(np.deg2rad(fov / 2)))
+    imgh = round(2 * foclen * float(np.tan(np.deg2rad(fov / 2))), 2)
     if thickness is None:
         thickness = foclen + flange
     d_opt = thickness - flange
