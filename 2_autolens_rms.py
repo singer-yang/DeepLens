@@ -146,7 +146,7 @@ def curriculum_design(
                         depth=depth,
                         spp=spp,
                         wvln=wv,
-                        scale_pupil=1.10, #TODO:
+                        scale_pupil=1.10,
                     )
                     rays_backup.append(ray)
 
