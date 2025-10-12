@@ -6,9 +6,10 @@ import torch
 import torch.nn.functional as F
 
 from deeplens.optics.geometric_surface.base import EPSILON, Surface
+from deeplens.optics.geometric_surface.plane import Plane
 
 
-class Phase(Surface):
+class Phase(Plane):
     """Phase profile for diffractive surfaces (metasurface or DOE).
 
     Reference:
@@ -17,8 +18,28 @@ class Phase(Surface):
         [3] https://optics.ansys.com/hc/en-us/articles/18254409091987-Large-Scale-Metalens-Ray-Propagation
     """
 
-    def __init__(self, r, d, param_model="binary2", norm_radii=None, mat2="air", device="cpu"):
-        Surface.__init__(self, r, d, mat2, is_square=False, device=device)
+    def __init__(
+        self,
+        r,
+        d,
+        param_model="binary2",
+        norm_radii=None,
+        mat2="air",
+        pos_xy=[0.0, 0.0],
+        vec_local=[0.0, 0.0, 1.0],
+        is_square=True,
+        device="cpu",
+    ):
+        Surface.__init__(
+            self,
+            r=r,
+            d=d,
+            mat2=mat2,
+            pos_xy=pos_xy,
+            vec_local=vec_local,
+            is_square=is_square,
+            device=device,
+        )
 
         # DOE geometry
         self.r = r
@@ -50,7 +71,7 @@ class Phase(Surface):
             obj.order8 += surf_dict.get("order8", 0.0)
             obj.order10 += surf_dict.get("order10", 0.0)
             obj.order12 += surf_dict.get("order12", 0.0)
-        
+
         else:
             print(f"Parameter randomly initialized for {param_model}")
 
@@ -104,22 +125,6 @@ class Phase(Surface):
         ray = self.refract(ray, n1 / n2)
         if self.diffraction:
             ray = self.diffract(ray)
-        return ray
-
-    def intersect(self, ray):
-        """Ray intersection with a flat DOE surface."""
-        # Intersection with a plane
-        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
-        new_o = ray.o + t.unsqueeze(-1) * ray.d
-        valid_aper = torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) <= self.r
-        valid = valid_aper & (ray.valid > 0)
-        ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
-
-        # OPL change
-        if ray.coherent:
-            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
-
         return ray
 
     def diffract(self, ray):
@@ -230,7 +235,9 @@ class Phase(Surface):
 
         elif self.param_model == "poly1d":
             dphi_even_dr = (
-                2 * self.order2 * r_norm + 4 * self.order4 * r_norm**3 + 6 * self.order6 * r_norm**5
+                2 * self.order2 * r_norm
+                + 4 * self.order4 * r_norm**3
+                + 6 * self.order6 * r_norm**5
             )
             dphi_even_dz = dphi_even_dr * x_norm / r_norm / self.norm_radii
             dphi_even_dy = dphi_even_dr * y_norm / r_norm / self.norm_radii
@@ -296,22 +303,22 @@ class Phase(Surface):
         elif self.param_model == "binary2":
             self.d.requires_grad = True
             params.append({"params": [self.d], "lr": lrs[0]})
-            
+
             self.order2.requires_grad = True
             params.append({"params": [self.order2], "lr": lrs[1]})
-            
+
             self.order4.requires_grad = True
             params.append({"params": [self.order4], "lr": lrs[1]})
-            
+
             self.order6.requires_grad = True
             params.append({"params": [self.order6], "lr": lrs[1]})
-            
+
             self.order8.requires_grad = True
             params.append({"params": [self.order8], "lr": lrs[1]})
-            
+
             self.order10.requires_grad = True
             params.append({"params": [self.order10], "lr": lrs[1]})
-            
+
             self.order12.requires_grad = True
             params.append({"params": [self.order12], "lr": lrs[1]})
 
@@ -341,8 +348,10 @@ class Phase(Surface):
             )
 
         # We do not optimize material parameters for phase surface.
-        assert optim_mat is False, "Material parameters are not optimized for phase surface."
-        
+        assert optim_mat is False, (
+            "Material parameters are not optimized for phase surface."
+        )
+
         return params
 
     def get_optimizer(self, lr=None):
@@ -458,10 +467,10 @@ class Phase(Surface):
         self.diffraction = True
         ckpt = torch.load(load_path)
         self.param_model = ckpt["param_model"]
-        
+
         if self.param_model == "fresnel":
             self.f0 = ckpt["f0"].to(self.device)
-        
+
         elif self.param_model == "binary2":
             self.param_model = "binary2"
             self.order2 = ckpt["order2"].to(self.device)

@@ -11,7 +11,19 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class Aspheric(Surface):
-    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, surf_idx=None, device="cpu"):
+    def __init__(
+        self,
+        r,
+        d,
+        c,
+        k,
+        ai,
+        mat2,
+        pos_xy=[0.0, 0.0],
+        vec_local=[0.0, 0.0, 1.0],
+        is_square=False,
+        device="cpu",
+    ):
         """Initialize aspheric surface.
 
         Args:
@@ -23,8 +35,17 @@ class Aspheric(Surface):
             mat2 (Material): material of the second medium
             device (torch.device): device to store the tensor
         """
-        Surface.__init__(self, r=r, d=d, mat2=mat2, is_square=False, surf_idx=surf_idx, device=device)
-        
+        Surface.__init__(
+            self,
+            r=r,
+            d=d,
+            mat2=mat2,
+            pos_xy=pos_xy,
+            vec_local=vec_local,
+            is_square=is_square,
+            device=device,
+        )
+
         self.c = torch.tensor(c)
         self.k = torch.tensor(k)
         if ai is not None:
@@ -65,14 +86,13 @@ class Aspheric(Surface):
         else:
             c = surf_dict["c"]
 
-        if "ai" in surf_dict:
-            ai = surf_dict["ai"]
-        else:
-            ai = torch.rand(6) * 1e-30
-
-        surf_idx = surf_dict.get("surf_idx", None)
         return cls(
-            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"], surf_idx=surf_idx
+            r=surf_dict["r"],
+            d=surf_dict["d"],
+            c=c,
+            k=surf_dict["k"],
+            ai=surf_dict["ai"],
+            mat2=surf_dict["mat2"],
         )
 
     def _sag(self, x, y):
@@ -92,7 +112,11 @@ class Aspheric(Surface):
         if self.ai_degree > 0:
             if self.ai_degree == 4:
                 total_surface = (
-                    total_surface + self.ai2 * r2 + self.ai4 * r2**2 + self.ai6 * r2**3 + self.ai8 * r2**4
+                    total_surface
+                    + self.ai2 * r2
+                    + self.ai4 * r2**2
+                    + self.ai6 * r2**3
+                    + self.ai8 * r2**4
                 )
             elif self.ai_degree == 5:
                 total_surface = (
@@ -128,7 +152,7 @@ class Aspheric(Surface):
         else:
             c = self.c
             k = self.k
-        
+
         # Compute surface height derivatives
         r2 = x**2 + y**2
         sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
@@ -136,7 +160,13 @@ class Aspheric(Surface):
 
         if self.ai_degree > 0:
             if self.ai_degree == 4:
-                dsdr2 = dsdr2 + self.ai2 + 2 * self.ai4 * r2 + 3 * self.ai6 * r2**2 + 4 * self.ai8 * r2**3
+                dsdr2 = (
+                    dsdr2
+                    + self.ai2
+                    + 2 * self.ai4 * r2
+                    + 3 * self.ai6 * r2**2
+                    + 4 * self.ai8 * r2**3
+                )
             elif self.ai_degree == 5:
                 dsdr2 = (
                     dsdr2
@@ -162,85 +192,6 @@ class Aspheric(Surface):
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
 
-    # def _d2fdxy(self, x, y):
-    #     """Compute second-order derivatives of surface height with respect to x and y."""
-    #     # Tolerance
-    #     c = self.c + self.c_error
-    #     k = self.k + self.k_error
-    #     ai2 = self.ai2 + self.ai2_error
-    #     ai4 = self.ai4 + self.ai4_error
-    #     ai6 = self.ai6 + self.ai6_error
-    #     ai8 = self.ai8 + self.ai8_error
-    #     ai10 = self.ai10 + self.ai10_error
-    #     ai12 = self.ai12 + self.ai12_error
-
-    #     # Compute surface height derivatives
-    #     r2 = x**2 + y**2
-    #     sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
-
-    #     # Compute dsdr2
-    #     dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / (2 * sf)) * c / (1 + sf) ** 2
-
-    #     # Compute derivative of dsdr2 with respect to r2 (ddsdr2_dr2)
-    #     ddsdr2_dr2 = (
-    #         ((1 + k) * c**2 / (2 * sf)) + ((1 + k) ** 2 * r2 * c**4) / (4 * sf**3)
-    #     ) * c / (1 + sf) ** 2 - 2 * dsdr2 * (
-    #         1 + sf + (1 + k) * r2 * c**2 / (2 * sf)
-    #     ) / (1 + sf)
-
-    #     if self.ai_degree > 0:
-    #         if self.ai_degree == 4:
-    #             dsdr2 = dsdr2 + ai2 + 2 * ai4 * r2 + 3 * ai6 * r2**2 + 4 * ai8 * r2**3
-    #             ddsdr2_dr2 = ddsdr2_dr2 + 2 * ai4 + 6 * ai6 * r2 + 12 * ai8 * r2**2
-    #         elif self.ai_degree == 5:
-    #             dsdr2 = (
-    #                 dsdr2
-    #                 + ai2
-    #                 + 2 * ai4 * r2
-    #                 + 3 * ai6 * r2**2
-    #                 + 4 * ai8 * r2**3
-    #                 + 5 * ai10 * r2**4
-    #             )
-    #             ddsdr2_dr2 = (
-    #                 ddsdr2_dr2
-    #                 + 2 * ai4
-    #                 + 6 * ai6 * r2
-    #                 + 12 * ai8 * r2**2
-    #                 + 20 * ai10 * r2**3
-    #             )
-    #         elif self.ai_degree == 6:
-    #             dsdr2 = (
-    #                 dsdr2
-    #                 + ai2
-    #                 + 2 * ai4 * r2
-    #                 + 3 * ai6 * r2**2
-    #                 + 4 * ai8 * r2**3
-    #                 + 5 * ai10 * r2**4
-    #                 + 6 * ai12 * r2**5
-    #             )
-    #             ddsdr2_dr2 = (
-    #                 ddsdr2_dr2
-    #                 + 2 * ai4
-    #                 + 6 * ai6 * r2
-    #                 + 12 * ai8 * r2**2
-    #                 + 20 * ai10 * r2**3
-    #                 + 30 * ai12 * r2**4
-    #             )
-    #         else:
-    #             for i in range(1, self.ai_degree + 1):
-    #                 exec(f"dsdr2 += i * ai{2 * i} * r2 ** {i - 1}")
-    #                 if i > 1:
-    #                     exec(f"ddsdr2_dr2 += i * (i - 1) * ai{2 * i} * r2 ** {i - 2}")
-    #     else:
-    #         ddsdr2_dr2 = ddsdr2_dr2
-
-    #     # Compute second-order derivatives
-    #     d2f_dx2 = 2 * dsdr2 + 4 * x**2 * ddsdr2_dr2
-    #     d2f_dxdy = 4 * x * y * ddsdr2_dr2
-    #     d2f_dy2 = 2 * dsdr2 + 4 * y**2 * ddsdr2_dr2
-
-    #     return d2f_dx2, d2f_dxdy, d2f_dy2
-
     def is_within_data_range(self, x, y):
         """Invalid when shape is non-defined."""
         if self.tolerancing:
@@ -249,7 +200,7 @@ class Aspheric(Surface):
         else:
             c = self.c
             k = self.k
-        
+
         if k > -1:
             valid = (x**2 + y**2) < 1 / c**2 / (1 + k)
         else:
@@ -265,7 +216,7 @@ class Aspheric(Surface):
         else:
             c = self.c
             k = self.k
-        
+
         if k > -1:
             max_height = torch.sqrt(1 / (k + 1) / (c**2)).item() - 0.001
         else:
@@ -357,20 +308,28 @@ class Aspheric(Surface):
         super().zero_tolerance()
         self.c_error = 0.0
         self.k_error = 0.0
-    
+
     def sensitivity_score(self):
         """Tolerance squared sum."""
         score_dict = super().sensitivity_score()
-        
-        score_dict.update({
-            f"surf{self.surf_idx}_c_grad": round(self.c.grad.item(), 6),
-            f"surf{self.surf_idx}_c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
-        })
-    
-        score_dict.update({
-            f"surf{self.surf_idx}_k_grad": round(self.k.grad.item(), 6),
-            f"surf{self.surf_idx}_k_score": round((self.k_tole**2 * self.k.grad**2).item(), 6),
-        })
+
+        score_dict.update(
+            {
+                "c_grad": round(self.c.grad.item(), 6),
+                "c_score": round(
+                    (self.c_tole**2 * self.c.grad**2).item(), 6
+                ),
+            }
+        )
+
+        score_dict.update(
+            {
+                "k_grad": round(self.k.grad.item(), 6),
+                "k_score": round(
+                    (self.k_tole**2 * self.k.grad**2).item(), 6
+                ),
+            }
+        )
         return score_dict
 
     # =======================================
@@ -379,7 +338,6 @@ class Aspheric(Surface):
     def surf_dict(self):
         """Return a dict of surface."""
         surf_dict = {
-            "idx": self.surf_idx,
             "type": "Aspheric",
             "r": round(self.r, 4),
             "(c)": round(self.c.item(), 4),

@@ -13,7 +13,19 @@ from deeplens.optics.geometric_surface.base import EPSILON, Surface
 
 
 class AsphericNorm(Surface):
-    def __init__(self, r, d, c=0.0, k=0.0, ai=None, mat2=None, surf_idx=None, device="cpu"):
+    def __init__(
+        self,
+        r,
+        d,
+        c,
+        k,
+        ai,
+        mat2,
+        pos_xy=[0.0, 0.0],
+        vec_local=[0.0, 0.0, 1.0],
+        is_square=False,
+        device="cpu",
+    ):
         """Initialize aspheric surface.
 
         Args:
@@ -25,22 +37,27 @@ class AsphericNorm(Surface):
             mat2 (Material): material of the second medium
             device (torch.device): device to store the tensor
         """
-        Surface.__init__(self, r, d, mat2, is_square=False, surf_idx=surf_idx, device=device)
-        self.norm_r = r if r > 2.0 else 2.0
+        Surface.__init__(
+            self,
+            r=r,
+            d=d,
+            mat2=mat2,
+            pos_xy=pos_xy,
+            vec_local=vec_local,
+            is_square=is_square,
+            device=device,
+        )
         self.c = torch.tensor(c)
         self.k = torch.tensor(k)
-        if ai is not None:
-            self.ai = torch.tensor(ai)  # Store absolute ai
-            self.ai_degree = len(ai)
-            # Create normalized coefficients for optimization and sag calculation
-            for i, a in enumerate(ai):
-                p_name = f"norm_ai{2 * (i + 1)}"
-                # abs_ai = norm_ai / norm_r^(2(i+1))
-                norm_coeff = torch.tensor(a * self.norm_r ** (2 * (i + 1)))
-                setattr(self, p_name, norm_coeff)
-        else:
-            self.ai = None
-            self.ai_degree = 0
+
+        self.norm_r = r if r > 2.0 else 2.0
+        self.ai = torch.tensor(ai)
+        self.ai_degree = len(ai)
+        # Create normalized coefficients for optimization and sag calculation
+        for i, a in enumerate(ai):
+            p_name = f"norm_ai{2 * (i + 1)}"
+            norm_coeff = torch.tensor(a * self.norm_r ** (2 * (i + 1)))
+            setattr(self, p_name, norm_coeff)
 
         self.tolerancing = False
         self.to(device)
@@ -52,14 +69,13 @@ class AsphericNorm(Surface):
         else:
             c = surf_dict["c"]
 
-        if "ai" in surf_dict:
-            ai = surf_dict["ai"]
-        else:
-            ai = torch.rand(6) * 1e-30
-
-        surf_idx = surf_dict.get("surf_idx", None)
         return cls(
-            surf_dict["r"], surf_dict["d"], c, surf_dict["k"], ai, surf_dict["mat2"], surf_idx=surf_idx
+            r=surf_dict["r"],
+            d=surf_dict["d"],
+            c=c,
+            k=surf_dict["k"],
+            ai=surf_dict["ai"],
+            mat2=surf_dict["mat2"],
         )
 
     def _sag(self, x, y):
@@ -235,14 +251,18 @@ class AsphericNorm(Surface):
     def sensitivity_score(self):
         """Tolerance squared sum."""
         score_dict = super().sensitivity_score()
-        score_dict.update({
-            f"surf{self.surf_idx}_c_grad": round(self.c.grad.item(), 6),
-            f"surf{self.surf_idx}_c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
-        })
-        score_dict.update({
-            f"surf{self.surf_idx}_k_grad": round(self.k.grad.item(), 6),
-            f"surf{self.surf_idx}_k_score": round((self.k_tole**2 * self.k.grad**2).item(), 6),
-        })
+        score_dict.update(
+            {
+                "c_grad": round(self.c.grad.item(), 6),
+                "c_score": round((self.c_tole**2 * self.c.grad**2).item(), 6),
+            }
+        )
+        score_dict.update(
+            {
+                "k_grad": round(self.k.grad.item(), 6),
+                "k_score": round((self.k_tole**2 * self.k.grad**2).item(), 6),
+            }
+        )
         return score_dict
 
     # =======================================
@@ -251,7 +271,6 @@ class AsphericNorm(Surface):
     def surf_dict(self):
         """Return a dict of surface."""
         surf_dict = {
-            "idx": self.surf_idx,
             "type": "Aspheric",
             "r": round(self.r, 4),
             "(c)": round(self.c.item(), 4),
@@ -265,7 +284,6 @@ class AsphericNorm(Surface):
             for i in range(1, self.ai_degree + 1):
                 p_name = f"norm_ai{2 * i}"
                 norm_ai = getattr(self, p_name)
-                # abs_ai = norm_ai / norm_r^(2i)
                 abs_ai = norm_ai.item() / (self.norm_r ** (2 * i))
                 surf_dict[f"(ai{2 * i})"] = float(format(abs_ai, ".6e"))
                 surf_dict["ai"].append(float(format(abs_ai, ".6e")))
