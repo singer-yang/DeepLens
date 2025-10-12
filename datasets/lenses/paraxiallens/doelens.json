@@ -1,0 +1,20 @@
+{
+    "info": "A paraxial DOE lens system.",
+    "d_sensor": 50.0,
+    "sensor_size": [4.0, 4.0],
+    "sensor_res": [2000, 2000],
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Fresnel",
+            "size": 4.0,
+            "res": [4000, 4000],
+            "fab_ps": 0.001,
+            "(d)": 1.2,
+            "is_square": true,
+            "f0": 50.0,
+            "wvln0": 0.589,
+            "d_next": 50.0
+        }
+    ]
+}

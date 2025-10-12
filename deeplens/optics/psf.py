@@ -22,7 +22,7 @@ import cv2 as cv
 import torch
 import torch.nn.functional as F
 
-from deeplens.optics.basics import DELTA
+from deeplens.basics import DELTA
 
 
 # ================================================
