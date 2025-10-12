@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 from deeplens.lens import Lens
-from deeplens.optics.basics import DEPTH, EPSILON
+from deeplens.basics import DEPTH, EPSILON
 from deeplens.optics.psf import conv_psf_depth_interp
 
 

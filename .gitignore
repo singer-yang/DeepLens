@@ -16,7 +16,9 @@ temp/*
 
 lenses/pancake/
 datasets/BSDS300/
+*.out
 
+# Sphinx documentation build results
+docs/_build/
 
 # add my own files
-*.ipynb

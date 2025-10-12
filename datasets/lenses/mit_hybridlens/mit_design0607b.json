@@ -1,0 +1,102 @@
+{
+    "info": "Lens design for MIT hybrid lens project, consisting of a refractive lens with a DOE, using ray tracing for the simulation. Sensor BFS Board-level GigE: 1.6 MP, 1/2.9'. Metalens material should be changed to TiO2. Aperture size should be changed to 3.0mm. Meta-atom cell period should be 300-400nm.",
+    "foclen": 4.8508,
+    "fnum": 2.2451,
+    "r_sensor": 3.115,
+    "(d_sensor)": 8.2713,
+    "(sensor_size)": [
+        4.4053,
+        4.4053
+    ],
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Aperture",
+            "r": 1.0,
+            "(d)": 0.0,
+            "mat2": "air",
+            "is_square": false,
+            "diffraction": false,
+            "d_next": 0.361
+        },
+        {
+            "idx": 2,
+            "type": "Aspheric",
+            "r": 3.115,
+            "(c)": 0.0857,
+            "roc": 11.6624,
+            "d": 0.361,
+            "k": 0.0,
+            "ai": [
+                0.01026504,
+                -9.688289e-05
+            ],
+            "mat2": "1.5337/59.66",
+            "(ai2)": 0.01026504,
+            "(ai4)": -9.688289e-05,
+            "d_next": 2.1822
+        },
+        {
+            "idx": 3,
+            "type": "Aspheric",
+            "r": 3.115,
+            "(c)": -0.0642,
+            "roc": -15.5814,
+            "d": 2.5432,
+            "k": 0.0,
+            "ai": [
+                -0.1148414,
+                0.0001159003
+            ],
+            "mat2": "air",
+            "(ai2)": -0.1148414,
+            "(ai4)": 0.0001159003,
+            "d_next": 0.1889
+        },
+        {
+            "idx": 4,
+            "type": "Spheric",
+            "r": 3.115,
+            "(c)": -0.0946,
+            "roc": -10.5735,
+            "(d)": 2.732,
+            "mat2": "1.5320/57.39",
+            "d_next": 2.7165
+        },
+        {
+            "idx": 5,
+            "type": "Spheric",
+            "r": 3.115,
+            "(c)": -0.1491,
+            "roc": -6.7051,
+            "(d)": 5.4486,
+            "mat2": "air",
+            "d_next": 0.4706
+        },
+        {
+            "idx": 6,
+            "type": "Plane",
+            "(l)": 4.242640687119286,
+            "r": 3.0,
+            "(d)": 5.9192,
+            "is_square": true,
+            "mat2": "fused_silica",
+            "d_next": 0.5
+        },
+        {
+            "idx": 7,
+            "type": "Phase",
+            "r": 3.115,
+            "param_model": "binary2",
+            "order2": -149.6764,
+            "order4": 145.5769,
+            "order6": 145.7403,
+            "order8": 145.4621,
+            "order10": 145.1327,
+            "order12": 144.7543,
+            "(d)": 6.4192,
+            "mat2": "air",
+            "d_next": 1.8521
+        }
+    ]
+}

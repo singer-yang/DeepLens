@@ -1,3 +1,8 @@
+"""
+UNet with residual skip connections implementation by Xinge Yang
+Paper: ResUNet-a: A deep learning framework for semantic segmentation of remotely sensed data
+"""
+
 import torch
 import torch.nn as nn
 
