@@ -898,7 +898,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate centroid ray as the chief ray
-            ray = self.sample_from_points(points, scale_pupil=0.25, num_rays=SPP_CALC)
+            ray = self.sample_from_points(points, scale_pupil=0.5, num_rays=SPP_CALC)
             ray = self.trace2sensor(ray)
             assert (ray.valid == 1).any(), "When tracing chief ray, no ray arrives at the sensor."
             psf_center = ray.centroid()
@@ -1464,7 +1464,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             rfov = float(np.arctan(self.r_sensor / self.foclen))
-            phi_rad = torch.linspace(-rfov/2, rfov/2, SPP_CALC)
+            phi_rad = torch.linspace(-rfov/4, rfov/4, SPP_CALC)
 
         d = torch.stack(
             (torch.sin(phi_rad), torch.zeros_like(phi_rad), torch.cos(phi_rad)), axis=-1
@@ -1545,7 +1545,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             rfov = float(np.arctan(self.r_sensor / self.foclen))
-            phi = torch.linspace(-rfov/2, rfov/2, SPP_CALC)
+            phi = torch.linspace(-rfov/4, rfov/4, SPP_CALC)
 
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
@@ -1674,7 +1674,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         for _ in range(8):
             self.surfaces[self.aper_idx].r = optim_aper_r
-            _, pupilr = self.get_entrance_pupil()
+            _, pupilr = self.calc_entrance_pupil()
 
             if abs(pupilr - target_pupil_r) < 0.1:  # Close enough
                 break

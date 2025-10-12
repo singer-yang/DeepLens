@@ -303,12 +303,14 @@ class Material(DeepObj):
                 raise NotImplementedError(f"Material table {mat_table} not implemented.")
 
             # Find the closest material
+            n_range = 0.4 # refractive index range usually [1.5, 1.9]
+            V_range = 40.0 # Abbe number range usually [30, 70]
             dist_min = 1e6
             for name in mat_table:
                 n, V = mat_table[name]
-                error_n = abs(n - self.n) / self.n
-                error_V = abs(V - self.V) / self.V
-                dist = error_n + 0.1 * error_V
+                error_n = abs(n - self.n) / n_range
+                error_V = abs(V - self.V) / V_range
+                dist = error_n + error_V
                 if dist < dist_min:
                     self.name = name
                     dist_min = dist
@@ -316,7 +318,7 @@ class Material(DeepObj):
             # Load the new material parameters
             self.load_dispersion()
 
-    def get_optimizer_params(self, lrs=[1e-4, 1e-3]):
+    def get_optimizer_params(self, lrs=[1e-4, 1e-2]):
         """Optimize the material parameters (n, V). 
         
         Optimizing refractive index is more important than optimizing Abbe number.

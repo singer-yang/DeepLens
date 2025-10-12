@@ -100,16 +100,16 @@ class GeoLensOptim:
 
             # Surface shape constraints
             self.sag2diam_max = 0.1
-            self.grad_max = 0.57 # tan(30deg)
+            self.grad_max = 0.84 # tan(40deg)
             self.grad2_max = 100.0
             self.diam2thick_max = 10.0
             self.tmax2tmin_max = 5.0
             
             # Ray angle constraints
             self.chief_ray_angle_max = 20.0 # deg
-            self.obliq_min = 0.5
+            self.obliq_min = 0.4
 
-    def loss_reg(self, w_focus=1.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
+    def loss_reg(self, w_focus=2.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
         """An empirical regularization loss for lens design.
 
         By default we should use weight 0.1 * self.loss_reg() in the total loss.
@@ -119,11 +119,13 @@ class GeoLensOptim:
         loss_ray_angle = self.loss_ray_angle()
         loss_intersec = self.loss_self_intersec()
         loss_surf = self.loss_surface()
+        # loss_mat = self.loss_mat()
         loss_reg = (
             w_focus * loss_focus
             + w_intersec * loss_intersec
             + w_surf * loss_surf
             + w_ray_angle * loss_ray_angle
+            # + loss_mat
         )
 
         # Return loss and loss dictionary
@@ -132,6 +134,7 @@ class GeoLensOptim:
             "loss_intersec": loss_intersec.item(),
             "loss_surf": loss_surf.item(),
             'loss_ray_angle': loss_ray_angle.item(),
+            # 'loss_mat': loss_mat.item(),
         }
         return loss_reg, loss_dict
 
@@ -313,7 +316,7 @@ class GeoLensOptim:
         obliq_min = self.obliq_min
 
         # Loss on chief ray angle
-        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC, scale_pupil=0.1)
+        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
@@ -332,6 +335,25 @@ class GeoLensOptim:
             loss_obliq = torch.tensor(0.0, device=self.device)
 
         return loss_cra + loss_obliq
+
+    def loss_mat(self):
+        n_max = 1.9
+        n_min = 1.5
+        V_max = 70
+        V_min = 30
+        loss_mat = torch.tensor(0.0, device=self.device)
+        for i in range(len(self.surfaces)):
+            if self.surfaces[i].mat1.name != "air":
+                if self.surfaces[i].mat1.n > n_max:
+                    loss_mat += (self.surfaces[i].mat1.n - n_max) / (n_max - n_min)
+                if self.surfaces[i].mat1.n < n_min:
+                    loss_mat += (n_min - self.surfaces[i].mat1.n) / (n_max - n_min)
+                if self.surfaces[i].mat1.V > V_max:
+                    loss_mat += (self.surfaces[i].mat1.V - V_max) / (V_max - V_min)
+                if self.surfaces[i].mat1.V < V_min:
+                    loss_mat += (V_min - self.surfaces[i].mat1.V) / (V_max - V_min)
+        
+        return loss_mat
 
     # ================================================================
     # Loss functions for image quality
@@ -483,12 +505,13 @@ class GeoLensOptim:
                 with torch.no_grad():
                     if shape_control:
                         self.correct_shape()
+                        # self.refocus()
 
                     self.write_lens_json(f"{result_dir}/iter{i}.json")
                     self.analysis(f"{result_dir}/iter{i}")
             
                     # Sample rays
-                    self.update_float_setting()
+                    self.calc_pupil()
                     rays_backup = []
                     for wv in WAVE_RGB:
                         ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05, sample_more_off_axis=False)
@@ -522,7 +545,8 @@ class GeoLensOptim:
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
-                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1) # l2 loss
+                # l_rms = (ray_err.abs().sum(-1) * ray_valid).sum(-1) # l1 loss
                 l_rms /= ray_valid.sum(-1) + EPSILON
 
                 # Weighted loss
