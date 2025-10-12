@@ -150,6 +150,7 @@ class GeoLensTolerance:
         # Baseline merit
         self.refocus()
         baseline_merit = merit_func(lens=self, fov=0.0, depth=DEPTH)
+        # merit_ls /= baseline_merit
 
         # Results plot
         sorted_merit = np.sort(merit_ls)

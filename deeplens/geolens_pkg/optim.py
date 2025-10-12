@@ -63,6 +63,7 @@ class GeoLensOptim:
         # In the future, we want to use constraint_params to set the constraints.
         if constraint_params is None:
             constraint_params = {}
+            print("Lens design constraints initialized with default values.")
 
         if self.r_sensor < 12.0:
             self.is_cellphone = True
@@ -97,17 +98,17 @@ class GeoLensOptim:
 
             # Self-intersection constraints
             self.dist_min_edge = 0.1
-            self.dist_max_edge = 80.0  # float("inf")
+            self.dist_max_edge = 100.0  # float("inf")
             self.dist_min_center = 0.1
-            self.dist_max_center = 80.0  # float("inf")
+            self.dist_max_center = 100.0  # float("inf")
             
-            self.thickness_min_edge = 1.5
-            self.thickness_max_edge = 15.0
-            self.thickness_min_center = 2.5
-            self.thickness_max_center = 15.0
+            self.thickness_min_edge = 1.0
+            self.thickness_max_edge = 20.0
+            self.thickness_min_center = 2.0
+            self.thickness_max_center = 20.0
             
             self.flange_min = 5.0
-            self.flange_max = 50.0  # float("inf")
+            self.flange_max = 100.0  # float("inf")
 
             # Surface shape constraints
             self.sag2diam_max = 0.1
@@ -120,19 +121,16 @@ class GeoLensOptim:
             self.chief_ray_angle_max = 20.0 # deg
             self.obliq_min = 0.4
 
-    def loss_reg(self, w_focus=2.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
-        """An empirical regularization loss for lens design.
-
-        By default we should use weight 0.1 * self.loss_reg() in the total loss.
-        """
+    def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
+        """Regularization loss for lens design."""
         # Loss functions for regularization
-        loss_focus = self.loss_infocus()
+        # loss_focus = self.loss_infocus()
         loss_ray_angle = self.loss_ray_angle()
         loss_intersec = self.loss_self_intersec()
         loss_surf = self.loss_surface()
         # loss_mat = self.loss_mat()
         loss_reg = (
-            w_focus * loss_focus
+            # w_focus * loss_focus
             + w_intersec * loss_intersec
             + w_surf * loss_surf
             + w_ray_angle * loss_ray_angle
@@ -141,7 +139,7 @@ class GeoLensOptim:
 
         # Return loss and loss dictionary
         loss_dict = {
-            "loss_focus": loss_focus.item(),
+            # "loss_focus": loss_focus.item(),
             "loss_intersec": loss_intersec.item(),
             "loss_surf": loss_surf.item(),
             'loss_ray_angle': loss_ray_angle.item(),
@@ -149,7 +147,7 @@ class GeoLensOptim:
         }
         return loss_reg, loss_dict
 
-    def loss_infocus(self, target=0.01):
+    def loss_infocus(self, target=0.005):
         """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
 
         Args:
@@ -204,11 +202,11 @@ class GeoLensOptim:
             if grad_max > grad_max_allowed:
                 loss_grad += grad_max
 
-            # 2nd-order derivative
-            grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
-            grad2_max = grad2_ls.abs().max()
-            if grad2_max > grad2_max_allowed:
-                loss_grad2 += 10 * grad2_max
+            # # 2nd-order derivative
+            # grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
+            # grad2_max = grad2_ls.abs().max()
+            # if grad2_max > grad2_max_allowed:
+            #     loss_grad2 += 10 * grad2_max
 
             # Diameter to thickness ratio, thick_max to thick_min ratio
             if not self.surfaces[i].mat2.name == "air":
@@ -465,7 +463,7 @@ class GeoLensOptim:
 
     def optimize(
         self,
-        lrs=[1e-4, 1e-4, 1e-1, 1e-4],
+        lrs=[1e-3, 1e-4, 1e-1, 1e-4],
         decay=0.01,
         iterations=5000,
         test_per_iter=100,
@@ -477,12 +475,11 @@ class GeoLensOptim:
         """Optimize the lens by minimizing rms errors.
 
         Debug hints:
-            *, Slowly and continuously update!
-            1, thickness (fov and ttl better match)
-            2, alpha order (higher is better but more sensitive)
-            3, learning rate and decay (prefer smaller lr and decay)
-            4, reasonable parameters range
-            5. nan can be introduced by torch.sqrt() function in the backward pass.
+            1, Slowly optimize with small learning rate
+            2, FOV and thickness should match well
+            3, Reasonable parameter range
+            4, Aspheric order higher is better but also more sensitive
+            5, More iterations with larger ray sampling
         """
         # Experiment settings
         depth = DEPTH
@@ -508,13 +505,13 @@ class GeoLensOptim:
         pbar = tqdm(
             total=iterations + 1,
             desc="Progress",
-            postfix={"loss_rms": 0},
+            postfix={"loss_rms": 0, "loss_focus": 0},
         )
         for i in range(iterations + 1):
             # ===> Evaluate the lens
             if i % test_per_iter == 0:
                 with torch.no_grad():
-                    if shape_control:
+                    if shape_control and i > 0:
                         self.correct_shape()
                         # self.refocus()
 
@@ -569,9 +566,13 @@ class GeoLensOptim:
             loss_rms = sum(loss_rms_ls) / len(loss_rms_ls)
 
             # Total loss
+            w_focus = 5.0
+            loss_focus = self.loss_infocus()
+            
+            w_reg = 0.05
             loss_reg, loss_dict = self.loss_reg()
-            w_reg = 0.1
-            L_total = loss_rms + w_reg * loss_reg
+            
+            L_total = loss_rms + w_focus * loss_focus + w_reg * loss_reg
 
             # Back-propagation
             optimizer.zero_grad()
@@ -579,7 +580,7 @@ class GeoLensOptim:
             optimizer.step()
             scheduler.step()
 
-            pbar.set_postfix(loss_rms=loss_rms.item(), **loss_dict)
+            pbar.set_postfix(loss_rms=loss_rms.item(), loss_focus=loss_focus.item(), **loss_dict)
             pbar.update(1)
 
         pbar.close()

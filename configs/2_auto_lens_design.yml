@@ -30,8 +30,8 @@ decay: 0.001
 # fnum: 2.0
 # flange: 18.0
 # thickness: 120.0
-# lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"]]
-# lrs: [1e-3, 5e-4, 0.0, 0.0]
+# lens_type: [["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"], ["Spheric", "Spheric"]]
+# lrs: [1e-3, 1e-3, 0.0, 0.0]
 # decay: 0.001
 
 # # lens target example 4 (mobile lens)

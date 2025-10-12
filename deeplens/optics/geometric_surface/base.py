@@ -529,11 +529,7 @@ class Surface(DeepObj):
 
     def max_height(self):
         """Maximum valid height."""
-        if self.tolerancing:
-            r = self.r + self.r_error
-        else:
-            r = self.r
-        return r
+        return 10e3
 
     def surface_with_offset(self, x, y, valid_check=True):
         """Calculate z coordinate of the surface at (x, y).
@@ -580,7 +576,8 @@ class Surface(DeepObj):
 
     def update_r(self, r):
         """Update surface radius."""
-        self.r = r
+        r_max = self.max_height()
+        self.r = min(r, r_max)
 
     # =====================================================================
     # Tolerancing

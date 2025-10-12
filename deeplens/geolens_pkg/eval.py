@@ -88,7 +88,7 @@ class GeoLensEval:
         ray_valid = ray.valid.clone().cpu().numpy()  # .squeeze(0)
 
         # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(1, num_field, figsize=(num_field * 4, 4))
+        fig, axs = plt.subplots(1, num_field, figsize=(num_field * 3, 3))
         fig.suptitle("Spot diagram along y-axis for depth " + str(depth))
         for i in range(num_field):
             valid = ray_valid[i, :]
