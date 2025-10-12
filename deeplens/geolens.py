@@ -2058,7 +2058,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         data["(sensor_size)"] = [round(i, 4) for i in self.sensor_size]
         data["surfaces"] = []
         for i, s in enumerate(self.surfaces):
-            surf_dict = s.surf_dict()
+            surf_dict = {"idx": i}
+            surf_dict.update(s.surf_dict())
             if i < len(self.surfaces) - 1:
                 surf_dict["d_next"] = round(
                     self.surfaces[i + 1].d.item() - self.surfaces[i].d.item(), 4
