@@ -122,16 +122,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.calc_pupil()
         self.calc_fov()
 
-    def update_float_setting(self):
-        """After lens changed, compute foclen, fov and fnum."""
-        # Basic lens parameter calculation
-        self.calc_pupil()
-        if self.float_enpd is False:
-            self.entrance_pupilr = self.enpd / 2.0
-        if self.float_foclen is True:
-            self.calc_foclen()
-        if self.float_rfov is True:
-            self.calc_fov()
+    # def update_float_setting(self):
+    #     """After lens changed, compute foclen, fov and fnum."""
+    #     # Basic lens parameter calculation
+    #     self.calc_pupil()
+    #     if self.float_enpd is False:
+    #         self.entrance_pupilr = self.enpd / 2.0
+    #     if self.float_foclen is True:
+    #         self.calc_foclen()
+    #     if self.float_rfov is True:
+    #         self.calc_fov()
 
     # def double(self):
     #     """Use double-precision for coherent ray tracing."""
@@ -1464,7 +1464,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             rfov = float(np.arctan(self.r_sensor / self.foclen))
-            phi_rad = torch.linspace(-rfov/4, rfov/4, SPP_CALC)
+            phi_rad = torch.linspace(-rfov/2, rfov/2, SPP_CALC)
 
         d = torch.stack(
             (torch.sin(phi_rad), torch.zeros_like(phi_rad), torch.cos(phi_rad)), axis=-1
@@ -1490,8 +1490,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             avg_pupilr = self.surfaces[-1].r
             avg_pupilz = self.surfaces[-1].d.item()
         else:
-            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
-            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # ===>
+            # avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            # avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # ===>
+            avg_pupilr = torch.median(intersection_points[:, 0]).item()
+            avg_pupilz = torch.median(intersection_points[:, 1]).item()
+            # ===>
 
             if paraxial:
                 avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
@@ -1545,7 +1550,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             rfov = float(np.arctan(self.r_sensor / self.foclen))
-            phi = torch.linspace(-rfov/4, rfov/4, SPP_CALC)
+            phi = torch.linspace(-rfov/2, rfov/2, SPP_CALC)
 
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
@@ -1571,8 +1576,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
-            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
-            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # ===>
+            # avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            # avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # ===>
+            avg_pupilr = torch.median(intersection_points[:, 0]).item()
+            avg_pupilz = torch.median(intersection_points[:, 1]).item()
+            # ===>
 
             if paraxial:
                 avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
@@ -1654,7 +1664,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.d_sensor = d_sensor_new
 
         # FoV will be slightly changed
-        self.update_float_setting()
+        self.post_computation()
 
     @torch.no_grad()
     def set_fnum(self, fnum):
@@ -1672,7 +1682,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         aper_r_min = 0.5 * optim_aper_r
         aper_r_max = 2.0 * optim_aper_r
 
-        for _ in range(8):
+        for _ in range(16):
             self.surfaces[self.aper_idx].r = optim_aper_r
             _, pupilr = self.calc_entrance_pupil()
 
@@ -1738,7 +1748,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
         else:
-            expand_factor = 0.15 if expand_factor is None else expand_factor
+            expand_factor = 0.20 if expand_factor is None else expand_factor
 
         # Expand surface height
         for i in surface_range:
