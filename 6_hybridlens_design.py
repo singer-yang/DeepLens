@@ -77,7 +77,7 @@ def config():
 
 def main(args):
     # Create a hybrid refractive-diffractive lens
-    lens = HybridLens(filename="./lenses/hybridlens/a489_doe.json", dtype=torch.float64)
+    lens = HybridLens(filename="./datasets/lenses/hybridlens/a489_doe.json", dtype=torch.float64)
     lens.refocus(foc_dist=-1000.0)
 
     # PSF optimization loop to focus blue light

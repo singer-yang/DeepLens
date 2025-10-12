@@ -212,7 +212,7 @@ class GeoLensVis:
         
         if not multi_plot:
             ax, fig = self.draw_lens_2d(zmx_format=zmx_format)
-            fig.suptitle(lens_title)
+            fig.suptitle(lens_title, fontsize=10)
             for i, fov in enumerate(fov_ls):
                 # Sample rays, shape (num_rays, 3)
                 if depth == float("inf"):
@@ -240,10 +240,9 @@ class GeoLensVis:
 
             ax.axis("off")
 
-
         else:
             fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-            fig.suptitle(lens_title)
+            fig.suptitle(lens_title, fontsize=10)
             for i, wvln in enumerate(WAVE_RGB):
                 ax = axs[i]
                 ax, fig = self.draw_lens_2d(ax=ax, fig=fig, zmx_format=zmx_format)
@@ -274,7 +273,7 @@ class GeoLensVis:
         if show:
             fig.show()
         else:
-            fig.savefig(filename, format="png", dpi=600)
+            fig.savefig(filename, format="png", dpi=300)
             plt.close()
 
     def draw_lens_2d(
@@ -287,10 +286,10 @@ class GeoLensVis:
         fix_bound=False,
     ):
         """Draw lens layout in a 2D plot."""
-
         # If no ax is given, generate a new one.
         if ax is None and fig is None:
-            fig, ax = plt.subplots(figsize=(5, 5))
+            # fig, ax = plt.subplots(figsize=(6, 6))
+            fig, ax = plt.subplots()
 
         # Draw lens surfaces
         for i, s in enumerate(self.surfaces):

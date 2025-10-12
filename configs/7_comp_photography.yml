@@ -3,8 +3,8 @@ is_debug: True
 seed: 42
 
 camera:
-  lens_file: "./lenses/camera/rf50mm_f1.8.json"
-  sensor_file: "./sensors/canon_r6.json"
+  lens_file: "./datasets/lenses/camera/rf50mm_f1.8.json"
+  sensor_file: "./datasets/sensors/canon_r6.json"
 
 network:
   name: NAFNet
