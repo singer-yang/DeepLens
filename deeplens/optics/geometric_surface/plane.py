@@ -13,7 +13,7 @@ class Plane(Surface):
         mat2,
         pos_xy=[0.0, 0.0],
         vec_local=[0.0, 0.0, 1.0],
-        is_square=True,
+        is_square=False,
         device="cpu",
     ):
         """Plane surface.

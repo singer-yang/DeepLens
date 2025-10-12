@@ -11,7 +11,6 @@ class Mirror(Plane):
         d,
         pos_xy=[0.0, 0.0],
         vec_local=[0.0, 0.0, 1.0],
-        mat2=None,
         is_square=True,
         device="cpu",
     ):
