@@ -1678,12 +1678,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         target_pupil_r = self.foclen / fnum / 2
 
         # Binary search to find aperture radius that gives desired exit pupil radius
-        optim_aper_r = current_aper_r * (fnum / current_fnum)
-        aper_r_min = 0.5 * optim_aper_r
-        aper_r_max = 2.0 * optim_aper_r
+        aper_r = current_aper_r * (current_fnum / fnum)
+        aper_r_min = 0.5 * aper_r
+        aper_r_max = 2.0 * aper_r
 
         for _ in range(16):
-            self.surfaces[self.aper_idx].r = optim_aper_r
+            self.surfaces[self.aper_idx].r = aper_r
             _, pupilr = self.calc_entrance_pupil()
 
             if abs(pupilr - target_pupil_r) < 0.1:  # Close enough
@@ -1691,14 +1691,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
             if pupilr > target_pupil_r:
                 # Current radius is too large, decrease it
-                aper_r_max = optim_aper_r
-                optim_aper_r = (aper_r_min + optim_aper_r) / 2
+                aper_r_max = aper_r
+                aper_r = (aper_r_min + aper_r) / 2
             else:
                 # Current radius is too small, increase it
-                aper_r_min = optim_aper_r
-                optim_aper_r = (aper_r_max + optim_aper_r) / 2
+                aper_r_min = aper_r
+                aper_r = (aper_r_max + aper_r) / 2
 
-        self.surfaces[self.aper_idx].r = optim_aper_r
+        self.surfaces[self.aper_idx].r = aper_r
 
         # Update pupil after setting aperture radius
         self.calc_pupil()
