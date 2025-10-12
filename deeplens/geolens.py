@@ -1760,7 +1760,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
         else:
-            expand_factor = 0.20 if expand_factor is None else expand_factor
+            expand_factor = 0.10 if expand_factor is None else expand_factor
 
         # Expand surface height
         for i in surface_range:
@@ -1775,7 +1775,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             print(f"Using fov_deg: {fov_deg} during surface pruning.")
 
         fov_y = [f * fov_deg / 10 for f in range(0, 11)]
-        ray = self.sample_parallel(fov_x=[0.0], fov_y=fov_y, num_rays=SPP_CALC)
+        ray = self.sample_parallel(fov_x=[0.0], fov_y=fov_y, num_rays=SPP_CALC, scale_pupil=1.5)
         _, ray_o_record = self.trace2sensor(ray=ray, record=True)
 
         # Ray record, shape [num_rays, num_surfaces + 2, 3]
@@ -1790,14 +1790,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Update surface height
         for i in surface_range:
             if surf_r_max[i] > 0:
-                max_height_expand = surf_r_max[i].item() * (1 + expand_factor)
-                max_height_allowed = self.surfaces[i].max_height()
-                self.surfaces[i].update_r(min(max_height_expand, max_height_allowed))
+                r_expand = surf_r_max[i].item() * expand_factor
+                r_expand = max(min(r_expand, 2.0), 0.1)
+                self.surfaces[i].update_r(surf_r_max[i].item() + r_expand)
             else:
-                print(f"No valid rays for Surf {i}, set to maximum height.")
-                max_height_expand = self.surfaces[i].r * (1 + expand_factor)
-                max_height_value_range = self.surfaces[i].max_height()
-                self.surfaces[i].update_r(min(max_height_expand, max_height_value_range))
+                print(f"No valid rays for Surf {i}, expand existing radius.")
+                r_expand = self.surfaces[i].r * expand_factor
+                r_expand = max(min(r_expand, 2.0), 0.1)
+                self.surfaces[i].update_r(self.surfaces[i].r + r_expand)
 
     @torch.no_grad()
     def correct_shape(self, expand_factor=None):

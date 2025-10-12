@@ -192,7 +192,7 @@ class GeoLensVis:
         if lens_title is None:
             eff_foclen = int(self.foclen)
             eq_foclen = int(self.eqfl)
-            fov_deg = round(self.dfov * 180 / torch.pi, 1)
+            fov_deg = round(self.rfov * 180 / torch.pi, 1)
             sensor_r = round(self.r_sensor, 1)
             sensor_w, sensor_h = self.sensor_size
             sensor_w = round(sensor_w, 1)
@@ -211,8 +211,6 @@ class GeoLensVis:
         fov_ls = np.linspace(0, rfov_deg * 0.99, num=num_views)
         
         if not multi_plot:
-            colors_list = ["#CC0000", "#006600", "#0066CC"]
-            fov_ls = np.linspace(0, float(np.rad2deg(self.rfov) * 0.99), num=num_views)
             ax, fig = self.draw_lens_2d(zmx_format=zmx_format)
             fig.suptitle(lens_title, fontsize=10)
             for i, fov in enumerate(fov_ls):
@@ -243,8 +241,6 @@ class GeoLensVis:
             ax.axis("off")
 
         else:
-            fov_ls = np.linspace(0, np.rad2deg(self.rfov) * 0.99, num=num_views)
-            colors_list = ["#CC0000", "#006600", "#0066CC"]
             fig, axs = plt.subplots(1, 3, figsize=(15, 5))
             fig.suptitle(lens_title, fontsize=10)
             for i, wvln in enumerate(WAVE_RGB):

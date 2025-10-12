@@ -220,7 +220,7 @@ class Aspheric(Surface):
         if k > -1:
             max_height = torch.sqrt(1 / (k + 1) / (c**2)).item() - 0.001
         else:
-            max_height = 100
+            max_height = 10e3
 
         return max_height
 

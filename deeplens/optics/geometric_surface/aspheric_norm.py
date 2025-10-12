@@ -156,7 +156,7 @@ class AsphericNorm(Surface):
         if self.k > -1:
             max_height = torch.sqrt(1 / (k + 1) / (c**2)).item() - 0.01
         else:
-            max_height = 100
+            max_height = 10e3
 
         return max_height
 
@@ -213,11 +213,13 @@ class AsphericNorm(Surface):
     @torch.no_grad()
     def update_r(self, r):
         """Update the radius of the surface."""
-        r_new = r
-        norm_r_old = self.norm_r
-        norm_r_new = r_new if r_new > 2.0 else 2.0
+        # Update radius
+        r_max = self.max_height()
+        r_new = max(min(r, r_max), 0.5)
 
         # Update normalized ai
+        norm_r_old = self.norm_r
+        norm_r_new = r_new if r_new > 2.0 else 2.0
         for i in range(1, self.ai_degree + 1):
             norm_ai = getattr(self, f"norm_ai{2 * i}")
             norm_ai.data = norm_ai.data * (norm_r_new / norm_r_old) ** (2 * i)
