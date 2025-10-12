@@ -5,11 +5,29 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
+"""Tolerance analysis for geometric lens design.
+
+References:
+    [1] Jun Dai, Liqun Chen, Xinge Yang, Yuyao Hu, Jinwei Gu, Tianfan Xue, "Tolerance-Aware Deep Optics," arXiv preprint arXiv:2502.04719, 2025.
+
+Functions:
+    Tolerance Setup:
+        - init_tolerance(): Initialize tolerance parameters for the lens
+        - sample_tolerance(): Sample a random manufacturing error for the lens
+        - zero_tolerance(): Clear manufacturing error for the lens
+
+    Tolerance Analysis Methods:
+        - tolerancing_sensitivity(): Use sensitivity analysis (1st order gradient) to compute the tolerance score
+        - tolerancing_monte_carlo(): Use Monte Carlo simulation to compute the tolerance
+        - tolerancing_wavefront(): Use wavefront differential method to compute the tolerance
+"""
+
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm import tqdm
 
-from deeplens.optics.basics import DEPTH
+from deeplens.basics import DEPTH
 
 
 class GeoLensTolerance:
@@ -96,6 +114,7 @@ class GeoLensTolerance:
             [1] https://optics.ansys.com/hc/en-us/articles/43071088477587-How-to-analyze-your-tolerance-results
             [2] Optical Design Tolerancing. CODE V.
         """
+
         def merit_func(lens, fov=0.0, depth=DEPTH):
             # Calculate MTF at a specific field of view
             point = [0, -fov / lens.rfov, depth]
@@ -125,13 +144,28 @@ class GeoLensTolerance:
 
                 # Clear perturbation
                 self.zero_tolerance()
+
         merit_ls = np.array(merit_ls)
 
-        # Baseline merit (TODO: do we need to use baseline merit to normalize the results?)
+        # Baseline merit
         self.refocus()
         baseline_merit = merit_func(lens=self, fov=0.0, depth=DEPTH)
 
-        # Return results
+        # Results plot
+        sorted_merit = np.sort(merit_ls)
+        cumulative_prob = (1 - np.arange(len(sorted_merit)) / len(sorted_merit)) * 100
+        plt.figure(figsize=(8, 6))
+        plt.xlabel("Merit Score", fontsize=12)
+        plt.ylabel("Cumulative Probability (%)", fontsize=12)
+        plt.title("Cumulative Probability beyond Merit Score", fontsize=14)
+        plt.plot(sorted_merit, cumulative_prob, linewidth=2)
+        plt.gca().invert_xaxis()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig("Monte_Carlo_Cumulative_Prob.png", dpi=150, bbox_inches="tight")
+        plt.close()
+
+        # Results dict
         results = {
             "method": "monte_carlo",
             "trials": trials,
@@ -146,11 +180,6 @@ class GeoLensTolerance:
                 "70% > ": round(float(np.percentile(merit_ls, 30)), 4),
                 "60% > ": round(float(np.percentile(merit_ls, 60)), 4),
                 "50% > ": round(float(np.percentile(merit_ls, 50)), 4),
-                "40% > ": round(float(np.percentile(merit_ls, 60)), 4),
-                "30% > ": round(float(np.percentile(merit_ls, 70)), 4),
-                "20% > ": round(float(np.percentile(merit_ls, 80)), 4),
-                "10% > ": round(float(np.percentile(merit_ls, 90)), 4),
-                "5% > ": round(float(np.percentile(merit_ls, 95)), 4),
             },
             "merit_percentile": {
                 "99% < ": round(float(np.percentile(merit_ls, 99)), 4),
@@ -160,18 +189,13 @@ class GeoLensTolerance:
                 "70% < ": round(float(np.percentile(merit_ls, 70)), 4),
                 "60% < ": round(float(np.percentile(merit_ls, 60)), 4),
                 "50% < ": round(float(np.percentile(merit_ls, 50)), 4),
-                "40% < ": round(float(np.percentile(merit_ls, 60)), 4),
-                "30% < ": round(float(np.percentile(merit_ls, 70)), 4),
-                "20% < ": round(float(np.percentile(merit_ls, 80)), 4),
-                "10% < ": round(float(np.percentile(merit_ls, 90)), 4),
-                "5% < ": round(float(np.percentile(merit_ls, 95)), 4),
             },
         }
         return results
 
     def tolerancing_wavefront(self, tolerance_params=None):
-        """Use wavefront differential method to compute the tolerance. 
-        
+        """Use wavefront differential method to compute the tolerance.
+
         Wavefront differential method is proposed in [1], while the detailed implementation remains unknown. I (Xinge Yang) assume a symbolic differentiation is used to compute the gradient/Jacobian of the wavefront error. With AutoDiff, we can easily calculate Jacobian with gradient backpropagation, therefore I leave the implementation of this method as future work.
 
         Args:

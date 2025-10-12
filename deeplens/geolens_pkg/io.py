@@ -5,7 +5,17 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Lens file IO (ZEMAX)."""
+"""Lens file IO for geometric lens systems.
+
+Functions:
+    ZEMAX Format (.zmx):
+        - read_lens_zmx(): Load lens from ZEMAX .zmx file
+        - write_lens_zmx(): Write lens to ZEMAX .zmx file
+    
+    Code V Format (.seq) - TODO:
+        - read_lens_seq(): Load lens from Code V .seq file
+        - write_lens_seq(): Write lens to Code V .seq file
+"""
 
 import torch
 
@@ -176,3 +186,4 @@ class GeoLensIO:
         with open(filename, "w") as f:
             f.writelines(lens_zmx_str)
             f.close()
+            print(f"Lens written to {filename}")

@@ -14,20 +14,14 @@ Technical Paper:
 import json
 import math
 
-import cv2 as cv
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
+from PIL import Image
 from torchvision.utils import save_image
 
-from deeplens.geolens_pkg.eval import GeoLensEval
-from deeplens.geolens_pkg.io import GeoLensIO
-from deeplens.geolens_pkg.optim import GeoLensOptim
-from deeplens.geolens_pkg.tolerance import GeoLensTolerance
-from deeplens.geolens_pkg.vis import GeoLensVis
-from deeplens.geolens_pkg.view_3d import GeoLensVis3D
-from deeplens.lens import Lens
-from deeplens.optics.basics import (
+from deeplens.basics import (
     DEFAULT_WAVE,
     DELTA_PARAXIAL,
     DEPTH,
@@ -40,6 +34,13 @@ from deeplens.optics.basics import (
     SPP_RENDER,
     WAVE_RGB,
 )
+from deeplens.geolens_pkg.eval import GeoLensEval
+from deeplens.geolens_pkg.io import GeoLensIO
+from deeplens.geolens_pkg.optim import GeoLensOptim
+from deeplens.geolens_pkg.tolerance import GeoLensTolerance
+from deeplens.geolens_pkg.view_3d import GeoLensVis3D
+from deeplens.geolens_pkg.vis import GeoLensVis
+from deeplens.lens import Lens
 from deeplens.optics.geometric_surface import (
     Aperture,
     Aspheric,
@@ -833,6 +834,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         unwarp=False,
         noise=0.0,
         method="ray_tracing",
+        show=False,
     ):
         """Render a single image for visualization and analysis. 
         
@@ -844,6 +846,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             save_name (str, optional): save name. Defaults to None.
             noise (float, optional): sensor noise. Defaults to 0.0.
             method (str, optional): rendering method. Defaults to 'ray_tracing'.
+            show (bool, optional): show the rendered image. Defaults to False.
         """
         # Change sensor resolution to match the image
         sensor_res_original = self.sensor_res
@@ -863,6 +866,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         render_ssim = round(batch_ssim(img, img_render), 3)
         print(f"Rendered image: PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}")
 
+        # Save image
         if save_name is not None:
             save_image(img_render, f"{save_name}.png")
 
@@ -880,6 +884,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Change the sensor resolution back
         self.set_sensor_res(sensor_res=sensor_res_original)
+
+        # Show image
+        if show:
+            plt.imshow(img_render.cpu().squeeze(0).permute(1, 2, 0).numpy())
+            plt.title("Rendered image")
+            plt.axis("off")
+            plt.show()
 
         return img_render
 
@@ -999,13 +1010,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Args:
             depth (float, optional): Depth of the point source plane. Defaults to DEPTH.
-            grid (int, optional): Grid size. Defaults to 7.
-            ks (int, optional): Kernel size. Defaults to 51.
+            grid (int, tuple): Grid size (grid_w, grid_h). Defaults to 7.
+            ks (int, optional): Kernel size. Defaults to PSF_KS.
             spp (int, optional): Sample per pixel. Defaults to None.
             recenter (bool, optional): Recenter the PSF using chief ray. Defaults to True.
 
         Returns:
-            psf_map: Shape of [grid*ks, grid*ks].
+            psf_map: Shape of [grid_h, grid_w, 1, ks, ks].
         """
         if isinstance(grid, int):
             grid = (grid, grid)
@@ -1013,9 +1024,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         points = points.reshape(-1, 3)
         psfs = self.psf(
             points=points, ks=ks, recenter=recenter, spp=spp, wvln=wvln
-        ).unsqueeze(1)  # shape [grid**2, 1, ks, ks]
+        ).unsqueeze(1)  # shape [grid_h * grid_w, 1, ks, ks]
 
-        psf_map = psfs.reshape(grid[0], grid[1], 1, ks, ks)
+        psf_map = psfs.reshape(grid[1], grid[0], 1, ks, ks)
         return psf_map
 
     # ====================================================================================
@@ -1194,6 +1205,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         avg_geo_radius_um = torch.stack(geo_radius_fields, dim=0).mean(dim=0) * 1000.0
 
         # Print results
+        print(f"Ray spot analysis results for depth {depth}:")
         print(
             f"RMS radius: FoV (0.0) {avg_rms_radius_um[0]:.3f} um, FoV (0.5) {avg_rms_radius_um[num_field//2]:.3f} um, FoV (1.0) {avg_rms_radius_um[-1]:.3f} um"
         )
@@ -1841,6 +1853,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         render=False,
         render_unwarp=False,
         lens_title=None,
+        show=False,
     ):
         """Analyze the optical lens.
 
@@ -1850,23 +1863,29 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             render (bool): whether render an image.
             render_unwarp (bool): whether unwarp the rendered image.
             lens_title (str): lens title
+            show (bool): whether to show the rendered image.
         """
         # Draw lens layout and ray path
         self.draw_layout(
             filename=f"{save_name}.png",
             lens_title=lens_title,
             depth=depth,
+            show=show,
         )
 
         # Draw spot diagram
-        self.draw_spot_radial(depth=depth, save_name=f"{save_name}_spot.png")
+        self.draw_spot_radial(
+            depth=depth, 
+            save_name=f"{save_name}_spot.png", 
+            show=show,
+        )
 
         # Draw MTF
         if depth == float("inf"):
             # This is a hack to draw MTF for infinite depth
-            self.draw_mtf(depth_list=[DEPTH], save_name=f"{save_name}_mtf.png")
+            self.draw_mtf(depth_list=[DEPTH], save_name=f"{save_name}_mtf.png", show=show)
         else:
-            self.draw_mtf(depth_list=[depth], save_name=f"{save_name}_mtf.png")
+            self.draw_mtf(depth_list=[depth], save_name=f"{save_name}_mtf.png", show=show)
 
         # Calculate RMS error
         self.analysis_spot(depth=depth)
@@ -1874,7 +1893,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Render an image, compute PSNR and SSIM
         if render:
             depth = DEPTH if depth == float("inf") else depth
-            img_org = cv.cvtColor(cv.imread("./datasets/IQ/NBS_1963_1k.png"), cv.COLOR_BGR2RGB)
+            img_org = Image.open("./datasets/charts/NBS_1963_1k.png").convert('RGB')
+            img_org = np.array(img_org)
             self.analysis_rendering(
                 img_org,
                 depth=depth,
@@ -1882,6 +1902,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
                 unwarp=render_unwarp,
                 save_name=f"{save_name}_render",
                 noise=0.01,
+                show=show,
             )
 
     # ====================================================================================
@@ -2084,3 +2105,4 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         with open(filename, "w") as f:
             json.dump(data, f, indent=4)
+        print(f"Lens written to {filename}")

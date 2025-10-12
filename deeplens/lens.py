@@ -12,25 +12,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torchvision.utils import make_grid, save_image
+from tqdm import tqdm
 
-from deeplens.optics.basics import (
+from deeplens.basics import (
     BLUE_RESPONSE,
+    DEFAULT_WAVE,
     DEPTH,
     EPSILON,
     GREEN_RESPONSE,
     PSF_KS,
     RED_RESPONSE,
+    SPP_PSF,
     WAVE_BOARD_BAND,
     WAVE_RGB,
-    DEFAULT_WAVE,
-    SPP_PSF,
     DeepObj,
     init_device,
 )
 from deeplens.optics.psf import (
     conv_psf,
-    conv_psf_map,
     conv_psf_depth_interp,
+    conv_psf_map,
+    conv_psf_map_depth_interp,
     conv_psf_pixel,
 )
 
@@ -196,13 +198,13 @@ class Lens(DeepObj):
 
         Args:
             depth (float): Depth of the point source.
-            grid (tuple, optional): Grid size. Defaults to (9, 9), meaning 9x9 grid.
+            grid (tuple): Grid size (grid_w, grid_h). Defaults to (9, 9), meaning 9x9 grid.
             normalized (bool): Return normalized object source coordinates. Defaults to True, meaning object sources xy coordinates range from [-1, 1].
             quater (bool): Use quater of the sensor plane to save memory. Defaults to False.
             center (bool): Use center of each patch. Defaults to True.
 
         Returns:
-            point_source: Shape of [grid, grid, 3], [-1, 1], [-1, 1], [-Inf, 0].
+            point_source: Normalized object source coordinates. Shape of [grid_h, grid_w, 3], [-1, 1], [-1, 1], [-Inf, 0].
         """
         # Compute point source grid
         if grid[0] == 1:
@@ -225,12 +227,12 @@ class Lens(DeepObj):
                     indexing="xy",
                 )
 
-        z = torch.full((grid[0], grid[1]), depth)
+        z = torch.full_like(x, depth)
         point_source = torch.stack([x, y, z], dim=-1)
 
         # Use quater of the sensor plane to save memory
         if quater:
-            z = torch.full((grid[0], grid[1]), depth)
+            z = torch.full_like(x, depth)
             point_source = torch.stack([x, y, z], dim=-1)
             bound_i = grid[0] // 2 if grid[0] % 2 == 0 else grid[0] // 2 + 1
             bound_j = grid[1] // 2
@@ -248,13 +250,13 @@ class Lens(DeepObj):
         """Compute monochrome PSF map.
 
         Args:
-            grid (tuple, optional): Grid size. Defaults to (5, 5), meaning 5x5 grid.
-            wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
-            depth (float, optional): Depth of the object. Defaults to DEPTH.
-            ks (int, optional): Kernel size. Defaults to PSF_KS.
+            grid (tuple): Grid size (grid_w, grid_h). Defaults to (5, 5), meaning 5x5 grid.
+            wvln (float): Wavelength. Defaults to DEFAULT_WAVE.
+            depth (float): Depth of the object. Defaults to DEPTH.
+            ks (int): Kernel size. Defaults to PSF_KS.
 
         Returns:
-            psf_map: Shape of [grid, grid, 3, ks, ks].
+            psf_map: Shape of [grid_h, grid_w, 3, ks, ks].
         """
         # PSF map grid
         points = self.point_source_grid(depth=depth, grid=grid, center=True)
@@ -266,29 +268,29 @@ class Lens(DeepObj):
             point = points[i, ...]
             psf = self.psf(points=point, wvln=wvln, ks=ks)
             psfs.append(psf)
-        psf_map = torch.stack(psfs).unsqueeze(1)  # shape [grid*grid, 1, ks, ks]
+        psf_map = torch.stack(psfs).unsqueeze(1)  # shape [grid_h * grid_w, 1, ks, ks]
 
-        # Reshape PSF map from [grid*grid, 1, ks, ks] -> [grid, grid, 1, ks, ks]
-        psf_map = psf_map.reshape(grid[0], grid[1], 1, ks, ks)
+        # Reshape PSF map from [grid_h * grid_w, 1, ks, ks] -> [grid_h, grid_w, 1, ks, ks]
+        psf_map = psf_map.reshape(grid[1], grid[0], 1, ks, ks)
         return psf_map
 
     def psf_map_rgb(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
         """Compute RGB PSF map.
 
         Args:
-            grid (tuple, optional): Grid size. Defaults to (5, 5), meaning 5x5 grid.
-            ks (int, optional): Kernel size. Defaults to 51, meaning 51x51 kernel size.
-            depth (float, optional): Depth of the object. Defaults to DEPTH.
+            grid (tuple): Grid size (grid_w, grid_h). Defaults to (5, 5), meaning 5x5 grid.
+            ks (int): Kernel size. Defaults to 51, meaning 51x51 kernel size.
+            depth (float): Depth of the object. Defaults to DEPTH.
             **kwargs: Additional arguments for psf_map().
 
         Returns:
-            psf_map: Shape of [grid, grid, 3, ks, ks].
+            psf_map: Shape of [grid_h, grid_w, 3, ks, ks].
         """
         psfs = []
         for wvln in WAVE_RGB:
             psf_map = self.psf_map(grid=grid, ks=ks, depth=depth, wvln=wvln, **kwargs)
             psfs.append(psf_map)
-        psf_map = torch.cat(psfs, dim=2)  # shape [grid, grid, 3, ks, ks]
+        psf_map = torch.cat(psfs, dim=2)  # shape [grid_h, grid_w, 3, ks, ks]
         return psf_map
 
     @torch.no_grad()
@@ -300,16 +302,16 @@ class Lens(DeepObj):
         log_scale=False,
         save_name="./psf_map.png",
     ):
-        """Draw RGB PSF map of the doelens."""
-        # Calculate RGB PSF map, shape [grid, grid, 3, ks, ks]
+        """Draw RGB PSF map of the lens."""
+        # Calculate RGB PSF map, shape [grid_h, grid_w, 3, ks, ks]
         psf_map = self.psf_map_rgb(depth=depth, grid=grid, ks=ks)
 
-        # Reshape the PSF map to create a grid visualization
-        grid_h, grid_w = grid if isinstance(grid, tuple) else (grid, grid)
+        # Create a grid visualization (vis_map: shape [3, grid_h * ks, grid_w * ks])
+        grid_w, grid_h = grid if isinstance(grid, tuple) else (grid, grid)
         h, w = grid_h * ks, grid_w * ks
         vis_map = torch.zeros((3, h, w), device=psf_map.device, dtype=psf_map.dtype)
 
-        # Process each PSF in the grid
+        # Put each PSF into the vis_map
         for i in range(grid_h):
             for j in range(grid_w):
                 # Extract the PSF at this grid position
@@ -553,6 +555,8 @@ class Lens(DeepObj):
             [1] "Aberration-Aware Depth-from-Focus", TPAMI 2023.
             [2] "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur", ICCVW 2025.
         """
+        depth_map = -1.0 * depth_map
+
         if method == "psf_patch":
             # Render a small image patch (same FoV, different depth)
             psf_center = kwargs.get("psf_center", (0.0, 0.0))
@@ -577,9 +581,29 @@ class Lens(DeepObj):
             img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref)
             return img_render
 
+        elif method == "psf_map":
+            # Render full resolution image with PSF map convolution
+            psf_grid = kwargs.get("psf_grid", (10, 10)) # (grid_w, grid_h)
+            psf_ks = kwargs.get("psf_ks", PSF_KS)
+            depth_min = kwargs.get("depth_min", depth_map.min())
+            depth_max = kwargs.get("depth_max", depth_map.max())
+            num_depth = kwargs.get("num_depth", 16)
+            depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
+
+            # Calculate PSF map at different depths
+            psf_maps = []
+            for depth in tqdm(depths_ref):
+                psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
+                psf_maps.append(psf_map)
+            psf_map = torch.stack(psf_maps, dim=2) # shape [grid_h, grid_w, num_depth, 3, ks, ks]
+            
+            # Image simulation
+            img_render = conv_psf_map_depth_interp(img_obj, depth_map, psf_map, depths_ref)
+            return img_render
+
         elif method == "psf_pixel":
             # Render full resolution image with pixel-wise PSF convolution. This method is computationally expensive.
-            psf_ks = kwargs.get("psf_ks", 21)
+            psf_ks = kwargs.get("psf_ks", 32)
             assert img_obj.shape[0] == 1, "Now only support batch size 1"
 
             # Calculate points in the object space
