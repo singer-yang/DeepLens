@@ -1805,6 +1805,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             delta_aper = self.surfaces[1].d.item() - d_aper
             for i in optim_surf_range:
                 self.surfaces[i].d -= delta_aper
+            self.d_sensor -= delta_aper
 
         # Rule 4: Prune all surfaces
         self.prune_surf(expand_factor=expand_factor)

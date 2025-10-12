@@ -86,12 +86,12 @@ class GeoLensOptim:
 
             # Self-intersection constraints
             self.dist_min_edge = 0.1
-            self.dist_max_edge = 50.0  # float("inf")
+            self.dist_max_edge = 80.0  # float("inf")
             self.dist_min_center = 0.1
-            self.dist_max_center = 50.0  # float("inf")
+            self.dist_max_center = 80.0  # float("inf")
             
             self.thickness_min_edge = 1.5
-            self.thickness_max_edge = 10.0
+            self.thickness_max_edge = 15.0
             self.thickness_min_center = 2.5
             self.thickness_max_center = 15.0
             
@@ -102,7 +102,7 @@ class GeoLensOptim:
             self.sag2diam_max = 0.1
             self.grad_max = 0.84 # tan(40deg)
             self.grad2_max = 100.0
-            self.diam2thick_max = 10.0
+            self.diam2thick_max = 15.0
             self.tmax2tmin_max = 5.0
             
             # Ray angle constraints
