@@ -95,8 +95,8 @@ class Plane(Surface):
     def surf_dict(self):
         surf_dict = {
             "type": "Plane",
-            "(w)": self.w,
-            "(h)": self.h,
+            # "(w)": self.w,
+            # "(h)": self.h,
             "r": self.r,
             "(d)": round(self.d.item(), 4),
             "is_square": True,
