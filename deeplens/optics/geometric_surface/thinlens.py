@@ -23,9 +23,9 @@ class ThinLens(Plane):
             r=r,
             d=d,
             mat2="air",
-            is_square=is_square,
             pos_xy=pos_xy,
             vec_local=vec_local,
+            is_square=is_square,
             device=device,
         )
         self.f = torch.tensor(f)
@@ -51,26 +51,6 @@ class ThinLens(Plane):
         params.append({"params": [self.f], "lr": lrs[1]})
 
         return params
-
-    # def intersect(self, ray, n=1.0):
-    #     """Solve ray-surface intersection and update rays."""
-    #     # Solve intersection
-    #     # t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
-    #     t = (0. - ray.o[..., 2]) / ray.d[..., 2]
-    #     new_o = ray.o + t.unsqueeze(-1) * ray.d
-    #     valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-    #         ray.valid > 0
-    #     )
-
-    #     # Update ray position
-    #     new_o = ray.o + ray.d * t.unsqueeze(-1)
-    #     ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-    #     ray.valid = ray.valid * valid
-
-    #     if ray.coherent:
-    #         ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + t.unsqueeze(-1), ray.opl)
-
-    #     return ray
 
     def refract(self, ray, n=1.0):
         """For a thin lens, all rays will converge to z = f plane. Therefore we trace the chief-ray (parallel-shift to surface center) to find the final convergence point for each ray.
