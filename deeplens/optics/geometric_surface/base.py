@@ -215,11 +215,10 @@ class Surface(DeepObj):
 
         # Update ray direction and obliquity. d is already normalized if both n and ray.d are normalized.
         new_d = n * ray.d + (n * cosi - sr) * normal_vec
-        new_obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1) * ray.obliq
-        obliq_update_mask = valid.unsqueeze(-1) & (
-            ray.obliq < 0.6
-        )  # only update obliq term for steep rays
-        ray.obliq = torch.where(obliq_update_mask, new_obliq, ray.obliq)
+        # Update obliq term for steep rays
+        obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
+        obliq_update_mask = valid.unsqueeze(-1) & (obliq < 0.5)
+        ray.obliq = torch.where(obliq_update_mask, obliq * ray.obliq, ray.obliq)
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray valid mask
