@@ -272,7 +272,7 @@ class Surface(DeepObj):
         n_vec = torch.stack((nx, ny, nz), axis=-1)
         n_vec = F.normalize(n_vec, p=2, dim=-1)
 
-        is_forward = torch.sum(ray.d * self.vec_local, dim=-1, keepdim=True) > 0
+        is_forward = ray.d[..., 2].unsqueeze(-1) > 0
         n_vec = torch.where(is_forward, n_vec, -n_vec)
         return n_vec
 

@@ -66,25 +66,21 @@ def create_lens(
     surfaces = lens.surfaces
 
     d_total = 0.0
-    idx = 0
     for elem_type in lens_type:
         if elem_type == "Aperture":
             d_next = (torch.rand(1) + 0.5).item()
-            surfaces.append(Aperture(r=aper_r, d=d_total, surf_idx=idx))
-            idx += 1
+            surfaces.append(Aperture(r=aper_r, d=d_total))
             d_total += d_next
 
         elif isinstance(elem_type, list):
             if len(elem_type) == 1 and elem_type[0] == "Aperture":
                 d_next = (torch.rand(1) + 0.5).item()
-                surfaces.append(Aperture(r=aper_r, d=d_total, surf_idx=idx))
-                idx += 1
+                surfaces.append(Aperture(r=aper_r, d=d_total))
                 d_total += d_next
 
             elif len(elem_type) == 1 and elem_type[0] == "ThinLens":
                 d_next = (torch.rand(1) + 1.0).item()
-                surfaces.append(ThinLens(r=aper_r, d=d_total, surf_idx=idx))
-                idx += 1
+                surfaces.append(ThinLens(r=aper_r, d=d_total))
                 d_total += d_next
 
             elif len(elem_type) in [2, 3]:
@@ -97,9 +93,8 @@ def create_lens(
                         d_next = (torch.rand(1) + 1.0).item()
 
                     surfaces.append(
-                        create_surface(surface_type, d_total, aper_r, imgh, mat, idx)
+                        create_surface(surface_type, d_total, aper_r, imgh, mat)
                     )
-                    idx += 1
                     d_total += d_next
             else:
                 raise Exception("Lens element type not supported yet.")
@@ -134,7 +129,7 @@ def create_lens(
 
     return lens
 
-def create_surface(surface_type, d_total, aper_r, imgh, mat, idx):
+def create_surface(surface_type, d_total, aper_r, imgh, mat):
     """Create a surface object based on the surface type."""
     if mat == "air":
         c = -float(np.random.rand()) * 0.001
@@ -143,15 +138,15 @@ def create_surface(surface_type, d_total, aper_r, imgh, mat, idx):
     r = max(imgh / 2, aper_r)
 
     if surface_type == "Spheric":
-        return Spheric(r=r, d=d_total, c=c, mat2=mat, surf_idx=idx)
+        return Spheric(r=r, d=d_total, c=c, mat2=mat)
     
     elif surface_type == "Aspheric":
         ai = np.random.randn(8).astype(np.float32) * 1e-24
         k = float(np.random.rand()) * 1e-6
-        return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat, surf_idx=idx)
+        return Aspheric(r=r, d=d_total, c=c, ai=ai, k=k, mat2=mat)
 
     elif surface_type == "Plane":
-        return Plane(r=r, d=d_total, mat2=mat, surf_idx=idx)
+        return Plane(r=r, d=d_total, mat2=mat)
     
     else:
         raise Exception("Surface type not supported yet.")

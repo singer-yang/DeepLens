@@ -9,6 +9,7 @@ class Mirror(Plane):
         self,
         r,
         d,
+        mat2="air",
         pos_xy=[0.0, 0.0],
         vec_local=[0.0, 0.0, 1.0],
         is_square=True,
@@ -19,7 +20,7 @@ class Mirror(Plane):
             self,
             r=r,
             d=d,
-            mat2="air",
+            mat2=mat2,
             is_square=is_square,
             pos_xy=pos_xy,
             vec_local=vec_local,
@@ -28,7 +29,7 @@ class Mirror(Plane):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        return cls(surf_dict["r"], surf_dict["d"])
+        return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
 
     def ray_reaction(self, ray, n1=None, n2=None):
         """Compute output ray after intersection and reflection with the mirror surface."""
