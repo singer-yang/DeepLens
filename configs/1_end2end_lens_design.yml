@@ -1,0 +1,21 @@
+DEBUG: True
+EXP_NAME: 'End2End lens design for image reconstruction.'
+seed: ~
+
+lens:
+  path: './datasets/lenses/cooke40_inferior.json'
+  lr: !!python/tuple [1e-4, 1e-4, 0, 0]
+
+network:
+  pretrained: False
+  lr: !!float 1e-3
+
+train:
+  # train_dir: './datasets/DIV2K_train_HR'
+  train_dir: './datasets/BSDS300/images/train'
+  epochs: 10
+  bs: 8
+  img_res: !!python/tuple [256, 256]
+
+  noise: 0.001
+  depth: -20000

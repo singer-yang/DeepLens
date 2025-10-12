@@ -22,7 +22,7 @@ from deeplens.geolens import GeoLens
 from deeplens.lens import Lens
 from deeplens.network.surrogate import MLP
 from deeplens.network.surrogate.psfnet_mplconv import PSFNet_MLPConv
-from deeplens.optics.basics import DEPTH
+from deeplens.basics import DEPTH
 from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
 
 

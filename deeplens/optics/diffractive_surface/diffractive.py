@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from deeplens.optics.basics import EPSILON, DeepObj
+from deeplens.basics import EPSILON, DeepObj
 from deeplens.optics.materials import Material
 
 

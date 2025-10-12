@@ -5,7 +5,12 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Utils for GeoLens class."""
+"""Utils for geometric lens systems.
+
+Functions:
+    - create_lens(): Create a lens design starting point with flat surfaces
+    - create_surface(): Create a surface object based on the surface type
+"""
 
 import os
 import random
@@ -17,7 +22,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 from deeplens.optics.geometric_surface import Aperture, Aspheric, AsphericNorm, Spheric, ThinLens, Plane
 from deeplens.optics.materials import MATERIAL_data
-from deeplens.optics.basics import WAVE_RGB
+from deeplens.basics import WAVE_RGB
 from deeplens.geolens import GeoLens
 
 

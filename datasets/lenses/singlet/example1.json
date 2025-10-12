@@ -1,0 +1,33 @@
+{
+    "info": "None",
+    "foclen": 38.8704,
+    "fnum": 3.2343,
+    "r_sensor": 3.0,
+    "(d_sensor)": 40.699,
+    "(sensor_size)": [
+        4.243,
+        4.243
+    ],
+    "surfaces": [
+        {
+            "idx": 0,
+            "type": "Spheric",
+            "r": 5.0,
+            "(c)": 0.025,
+            "roc": 40.0,
+            "(d)": 0.0,
+            "mat2": "bk7",
+            "d_next": 3.0
+        },
+        {
+            "idx": 1,
+            "type": "Spheric",
+            "r": 5.0,
+            "(c)": -0.025,
+            "roc": -40.0,
+            "(d)": 3.0,
+            "mat2": "air",
+            "d_next": 37.699
+        }
+    ]
+}
