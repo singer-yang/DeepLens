@@ -1,25 +1,52 @@
 """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
 
-import numpy as np
 import torch
 
 from deeplens.optics.geometric_surface.base import Surface
 
 
 class Plane(Surface):
-    def __init__(self, r, d, mat2, is_square=False, device="cpu"):
-        """Plane surface, typically rectangle. Working as IR filter, lens cover glass or DOE base."""
-        Surface.__init__(self, r, d, mat2=mat2, is_square=is_square, device=device)
-        self.l = r * np.sqrt(2)
+    def __init__(
+        self,
+        r,
+        d,
+        mat2,
+        pos_xy=[0.0, 0.0],
+        vec_local=[0.0, 0.0, 1.0],
+        is_square=False,
+        device="cpu",
+    ):
+        """Plane surface.
+
+        Examples:
+            - IR filter.
+            - Lens cover glass.
+            - DOE base.
+
+        The following surfaces inherit from Plane:
+            - Aperture.
+            - Mirror.
+            - ThinLens.
+        """
+        Surface.__init__(
+            self,
+            r=r,
+            d=d,
+            mat2=mat2,
+            pos_xy=pos_xy,
+            vec_local=vec_local,
+            is_square=is_square,
+            device=device,
+        )
 
     @classmethod
     def init_from_dict(cls, surf_dict):
         return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
 
     def intersect(self, ray, n=1.0):
-        """Solve ray-surface intersection and update ray data."""
+        """Solve ray-surface intersection in local coordinate system and update ray data."""
         # Solve intersection
-        t = (self.d - ray.o[..., 2]) / ray.d[..., 2]
+        t = (0.0 - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
         if self.is_square:
             valid = (
@@ -38,18 +65,22 @@ class Plane(Surface):
         ray.valid = ray.valid * valid
 
         if ray.coherent:
-            ray.opl = torch.where(valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl)
+            ray.opl = torch.where(
+                valid.unsqueeze(-1), ray.opl + n * t.unsqueeze(-1), ray.opl
+            )
 
         return ray
 
     def normal_vec(self, ray):
-        """Calculate surface normal vector at intersection points.
-        
+        """Calculate surface normal vector at intersection points in local coordinate system.
+
         Normal vector points from the surface toward the side where the light is coming from.
         """
         normal_vec = torch.zeros_like(ray.d)
         normal_vec[..., 2] = -1
-        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+
+        is_forward = ray.d[..., 2].unsqueeze(-1) > 0
+        normal_vec = torch.where(is_forward, normal_vec, -normal_vec)
         return normal_vec
 
     def _sag(self, x, y):
@@ -60,7 +91,7 @@ class Plane(Surface):
 
     def _d2fdxy(self, x, y):
         return torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
-    
+
     # =========================================
     # Optimization
     # =========================================
@@ -84,10 +115,9 @@ class Plane(Surface):
     def surf_dict(self):
         surf_dict = {
             "type": "Plane",
-            "(l)": self.l,
             "r": self.r,
             "(d)": round(self.d.item(), 4),
-            "is_square": True,
+            "is_square": self.is_square,
             "mat2": self.mat2.get_name(),
         }
 

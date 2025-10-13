@@ -1,0 +1,22 @@
+{
+    "info": "None",
+    "foclen": 49.8172,
+    "fnum": 4.0178,
+    "r_sensor": 18.175,
+    "(d_sensor)": 60.439,
+    "(sensor_size)": [
+        25.703,
+        25.703
+    ],
+    "surfaces": [
+        {
+            "idx": 0,
+            "type": "ThinLens",
+            "f": 10.0,
+            "r": 7.5,
+            "(d)": 0.0,
+            "mat2": "n-sk16",
+            "d_next": 3.259
+        }
+    ]
+}

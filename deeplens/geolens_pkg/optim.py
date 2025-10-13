@@ -20,7 +20,8 @@ Functions:
     - loss_reg: An empirical regularization loss for lens design
     - loss_infocus: Sample parallel rays and compute RMS loss on the sensor plane
     - loss_surface: Penalize surface shape (sag, diameter-to-thickness ratio, etc.)
-    - loss_self_intersec: Loss function to avoid self-intersection
+    - loss_intersec: Loss function to avoid self-intersection
+    - loss_gap: Loss function to penalize too large air gap and thickness
     - loss_ray_angle: Loss function to penalize large chief ray angle
     - loss_rms: Loss function to compute RGB spot error RMS
     - sample_ring_arm_rays: Sample rays from object space using a ring-arm pattern
@@ -63,22 +64,22 @@ class GeoLensOptim:
         # In the future, we want to use constraint_params to set the constraints.
         if constraint_params is None:
             constraint_params = {}
+            print("Lens design constraints initialized with default values.")
 
         if self.r_sensor < 12.0:
             self.is_cellphone = True
 
             # Self intersection constraints
-            self.dist_min_edge = 0.05
-            self.dist_max_edge = 2.0
-            self.dist_min_center = 0.05
-            self.dist_max_center = 0.5
-            
-            self.thickness_min_edge = 0.25
-            self.thickness_max_edge = 2.0
-            self.thickness_min_center = 0.4
-            self.thickness_max_center = 3.0
-            
+            self.air_min_edge = 0.05
+            self.air_min_center = 0.05
+            self.thick_min_edge = 0.25
+            self.thick_min_center = 0.4
             self.flange_min = 0.8
+
+            self.air_max_edge = 2.0
+            self.air_max_center = 0.5
+            self.thick_max_edge = 2.0
+            self.thick_max_center = 3.0
             self.flange_max = 2.0
 
             # Surface shape constraints
@@ -96,57 +97,59 @@ class GeoLensOptim:
             self.is_cellphone = False
 
             # Self-intersection constraints
-            self.dist_min_edge = 0.1
-            self.dist_max_edge = 50.0  # float("inf")
-            self.dist_min_center = 0.1
-            self.dist_max_center = 50.0  # float("inf")
-            
-            self.thickness_min_edge = 1.5
-            self.thickness_max_edge = 10.0
-            self.thickness_min_center = 2.5
-            self.thickness_max_center = 10.0
-            
+            self.air_min_edge = 0.1
+            self.air_min_center = 0.1
+            self.thick_min_edge = 1.0
+            self.thick_min_center = 2.0
             self.flange_min = 5.0
-            self.flange_max = 50.0  # float("inf")
+            
+            self.air_max_edge = 100.0  # float("inf")
+            self.air_max_center = 100.0  # float("inf")
+            self.thick_max_edge = 20.0
+            self.thick_max_center = 20.0
+            self.flange_max = 100.0  # float("inf")
 
             # Surface shape constraints
             self.sag2diam_max = 0.1
-            self.grad_max = 0.57 # tan(30deg)
+            self.grad_max = 0.84 # tan(40deg)
             self.grad2_max = 100.0
-            self.diam2thick_max = 10.0
+            self.diam2thick_max = 15.0
             self.tmax2tmin_max = 5.0
             
             # Ray angle constraints
             self.chief_ray_angle_max = 20.0 # deg
-            self.obliq_min = 0.5
+            self.obliq_min = 0.4
 
-    def loss_reg(self, w_focus=1.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
-        """An empirical regularization loss for lens design.
-
-        By default we should use weight 0.1 * self.loss_reg() in the total loss.
-        """
+    def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_gap=1.0, w_surf=1.0):
+        """Regularization loss for lens design."""
         # Loss functions for regularization
-        loss_focus = self.loss_infocus()
+        # loss_focus = self.loss_infocus()
         loss_ray_angle = self.loss_ray_angle()
-        loss_intersec = self.loss_self_intersec()
+        loss_intersec = self.loss_intersec()
+        loss_gap = self.loss_gap()
         loss_surf = self.loss_surface()
+        # loss_mat = self.loss_mat()
         loss_reg = (
-            w_focus * loss_focus
+            # w_focus * loss_focus
             + w_intersec * loss_intersec
+            + w_gap * loss_gap
             + w_surf * loss_surf
             + w_ray_angle * loss_ray_angle
+            # + loss_mat
         )
 
         # Return loss and loss dictionary
         loss_dict = {
-            "loss_focus": loss_focus.item(),
+            # "loss_focus": loss_focus.item(),
             "loss_intersec": loss_intersec.item(),
+            "loss_gap": loss_gap.item(),
             "loss_surf": loss_surf.item(),
             'loss_ray_angle': loss_ray_angle.item(),
+            # 'loss_mat': loss_mat.item(),
         }
         return loss_reg, loss_dict
 
-    def loss_infocus(self, target=0.01):
+    def loss_infocus(self, target=0.005):
         """Sample parallel rays and compute RMS loss on the sensor plane, minimize focus loss.
 
         Args:
@@ -201,11 +204,11 @@ class GeoLensOptim:
             if grad_max > grad_max_allowed:
                 loss_grad += grad_max
 
-            # 2nd-order derivative
-            grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
-            grad2_max = grad2_ls.abs().max()
-            if grad2_max > grad2_max_allowed:
-                loss_grad2 += 10 * grad2_max
+            # # 2nd-order derivative
+            # grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
+            # grad2_max = grad2_ls.abs().max()
+            # if grad2_max > grad2_max_allowed:
+            #     loss_grad2 += 10 * grad2_max
 
             # Diameter to thickness ratio, thick_max to thick_min ratio
             if not self.surfaces[i].mat2.name == "air":
@@ -213,9 +216,9 @@ class GeoLensOptim:
                 surf1 = self.surfaces[i]
 
                 # Penalize diameter to thickness ratio
-                d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
-                if d_to_t > diam2thick_max:
-                    loss_diam2thick += d_to_t
+                diam2thick = 2 * max(surf2.r, surf1.r) / (surf2.d - surf1.d)
+                if diam2thick > diam2thick_max:
+                    loss_diam2thick += diam2thick
 
                 # Penalize thick_max to thick_min ratio
                 r_edge = min(surf2.r, surf1.r)
@@ -229,28 +232,87 @@ class GeoLensOptim:
                 if tmax2tmin > tmax2tmin_max:
                     loss_tmax2tmin += tmax2tmin
 
-        return loss_sag2diam + loss_grad + loss_grad2 + loss_diam2thick + loss_tmax2tmin
+        return loss_sag2diam + loss_grad + loss_diam2thick + loss_tmax2tmin #+ loss_grad2
 
-    def loss_self_intersec(self):
+    def loss_intersec(self):
         """Loss function to avoid self-intersection.
 
-        Loss is designed by the distance to the next surfaces.
+        This function penalizes when surfaces are too close to each other,
+        which could cause self-intersection or manufacturing issues.
         """
         # Constraints
-        space_lower_center = self.dist_min_center
-        space_upper_center = self.dist_max_center
-        space_lower_edge = self.dist_min_edge
-        space_upper_edge = self.dist_max_edge
-        thick_lower_center = self.thickness_min_center
-        thick_upper_center = self.thickness_max_center
-        thick_lower_edge = self.thickness_min_edge
-        thick_upper_edge = self.thickness_max_edge
-        flange_min_allowed = self.flange_min
-        flange_max_allowed = self.flange_max
+        air_min_center = self.air_min_center
+        air_min_edge = self.air_min_edge
+        thick_min_center = self.thick_min_center
+        thick_min_edge = self.thick_min_edge
+        flange_min = self.flange_min
 
         # Loss
-        loss_min = torch.tensor(0.0, device=self.device)
-        loss_max = torch.tensor(0.0, device=self.device)
+        loss = torch.tensor(0.0, device=self.device)
+        for i in range(len(self.surfaces) - 1):
+            # Sample evaluation points on the two surfaces
+            current_surf = self.surfaces[i]
+            next_surf = self.surfaces[i + 1]
+            
+            r_center = torch.tensor(0.0).to(self.device) * current_surf.r
+            z_prev_center = current_surf.surface_with_offset(r_center, 0.0, valid_check=False)
+            z_next_center = next_surf.surface_with_offset(r_center, 0.0, valid_check=False)
+            
+            r_edge = torch.linspace(0.5, 1.0, 16).to(self.device) * current_surf.r
+            z_prev_edge = current_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
+            z_next_edge = next_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
+
+            # Next surface is air
+            if self.surfaces[i].mat2.name == "air":
+                # Center air gap
+                dist_center = z_next_center - z_prev_center
+                if dist_center < air_min_center:
+                    loss += dist_center
+
+                # Edge air gap
+                dist_edge = torch.min(z_next_edge - z_prev_edge)
+                if dist_edge < air_min_edge:
+                    loss += dist_edge
+
+            # Next surface is lens
+            else:
+                # Center thickness
+                dist_center = z_next_center - z_prev_center
+                if dist_center < thick_min_center:
+                    loss += dist_center
+
+                # Edge thickness
+                dist_edge = torch.min(z_next_edge - z_prev_edge)
+                if dist_edge < thick_min_edge:
+                    loss += dist_edge
+
+        # Distance to sensor (flange)
+        last_surf = self.surfaces[-1]
+        r = torch.linspace(0.0, 1.0, 32).to(self.device) * last_surf.r
+        z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
+        
+        flange = torch.min(z_last_surf)
+        if flange < flange_min:
+            loss += flange
+
+        # Loss, maximize loss
+        return -loss
+
+    def loss_gap(self):
+        """Loss function to penalize too large air gap and thickness.
+        
+        This function penalizes when air gaps or lens thicknesses are too large,
+        which could make the lens system impractically large.
+        """
+        # Constraints
+        air_max_center = self.air_max_center
+        air_max_edge = self.air_max_edge
+        thick_max_center = self.thick_max_center
+        thick_max_edge = self.thick_max_edge
+        flange_max = self.flange_max
+
+        # Loss
+        loss = torch.tensor(0.0, device=self.device)
 
         # Distance between surfaces
         for i in range(len(self.surfaces) - 1):
@@ -270,53 +332,37 @@ class GeoLensOptim:
             if self.surfaces[i].mat2.name == "air":
                 # Center air gap
                 dist_center = z_next_center - z_prev_center
-                if dist_center < space_lower_center:
-                    loss_min += dist_center
-
-                if dist_center > space_upper_center:
-                    loss_max += dist_center
+                if dist_center > air_max_center:
+                    loss += dist_center
 
                 # Edge air gap
-                dist_edge_min = torch.min(z_next_edge - z_prev_edge)
-                if dist_edge_min < space_lower_edge:
-                    loss_min += dist_edge_min
-                
-                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
-                if dist_edge_max > space_upper_edge:
-                    loss_max += dist_edge_max
+                dist_edge = torch.max(z_next_edge - z_prev_edge)
+                if dist_edge > air_max_edge:
+                    loss += dist_edge
 
             # Lens thickness
             else:
                 # Center thickness
                 dist_center = z_next_center - z_prev_center
-                if dist_center < thick_lower_center:
-                    loss_min += dist_center
-
-                if dist_center > thick_upper_center:
-                    loss_max += dist_center
+                if dist_center > thick_max_center:
+                    loss += dist_center
 
                 # Edge thickness
-                dist_edge_min = torch.min(z_next_edge - z_prev_edge)
-                if dist_edge_min < thick_lower_edge:
-                    loss_min += dist_edge_min
-
-                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
-                if dist_edge_max > thick_upper_edge:
-                    loss_max += dist_edge_max
+                dist_edge = torch.max(z_next_edge - z_prev_edge)
+                if dist_edge > thick_max_edge:
+                    loss += dist_edge
 
         # Distance to sensor (flange)
         last_surf = self.surfaces[-1]
         r = torch.linspace(0.0, 1.0, 32).to(self.device) * last_surf.r
         z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
         
-        flange = torch.min(z_last_surf)
-        if flange < flange_min_allowed:
-            loss_min += flange
-        if flange > flange_max_allowed:
-            loss_max += flange
+        flange = torch.max(z_last_surf)
+        if flange > flange_max:
+            loss += flange
 
-        # Loss, minimize loss_max and maximize loss_min
-        return loss_max - loss_min
+        # Loss, minimize loss
+        return loss
 
     def loss_ray_angle(self):
         """Loss function to penalize large chief ray angle."""
@@ -324,7 +370,7 @@ class GeoLensOptim:
         obliq_min = self.obliq_min
 
         # Loss on chief ray angle
-        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC, scale_pupil=0.1)
+        ray = self.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=SPP_CALC, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
         cos_cra = ray.d[..., 2]
         cos_cra_ref = float(np.cos(np.deg2rad(max_angle_deg)))
@@ -343,6 +389,25 @@ class GeoLensOptim:
             loss_obliq = torch.tensor(0.0, device=self.device)
 
         return loss_cra + loss_obliq
+
+    def loss_mat(self):
+        n_max = 1.9
+        n_min = 1.5
+        V_max = 70
+        V_min = 30
+        loss_mat = torch.tensor(0.0, device=self.device)
+        for i in range(len(self.surfaces)):
+            if self.surfaces[i].mat1.name != "air":
+                if self.surfaces[i].mat1.n > n_max:
+                    loss_mat += (self.surfaces[i].mat1.n - n_max) / (n_max - n_min)
+                if self.surfaces[i].mat1.n < n_min:
+                    loss_mat += (n_min - self.surfaces[i].mat1.n) / (n_max - n_min)
+                if self.surfaces[i].mat1.V > V_max:
+                    loss_mat += (self.surfaces[i].mat1.V - V_max) / (V_max - V_min)
+                if self.surfaces[i].mat1.V < V_min:
+                    loss_mat += (V_min - self.surfaces[i].mat1.V) / (V_max - V_min)
+        
+        return loss_mat
 
     # ================================================================
     # Loss functions for image quality
@@ -425,15 +490,16 @@ class GeoLensOptim:
             # Apply beta transformation to concentrate samples near 1.0
             beta_transformed = beta_values ** 0.5  # Equivalent to Beta(0.5, 1.0) distribution
             ring_fovs = max_fov_rad * beta_transformed
+
+            # Use square root to sample more points near the edge
+            # ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
         else:
-            ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
+            ring_fovs = max_fov_rad * torch.linspace(0.0, 1.0, num_ring, device=self.device)
         
-        arm_angles = torch.linspace(0.0, 2 * np.pi, num_arm + 1, device=self.device)[:-1]
+        arm_angles = torch.linspace(0.0, 2 * torch.pi, num_arm + 1, device=self.device)[:-1]
         ring_grid, arm_grid = torch.meshgrid(ring_fovs, arm_angles, indexing="ij")
-        fov_x_rad = ring_grid * torch.cos(arm_grid)
-        fov_y_rad = ring_grid * torch.sin(arm_grid)
-        x = depth * torch.tan(fov_x_rad)
-        y = depth * torch.tan(fov_y_rad)
+        x = depth * torch.tan(ring_grid) * torch.cos(arm_grid)
+        y = depth * torch.tan(ring_grid) * torch.sin(arm_grid)        
         z = torch.full_like(x, depth)
         points = torch.stack([x, y, z], dim=-1)  # shape: [num_ring, num_arm, 3]
 
@@ -443,7 +509,7 @@ class GeoLensOptim:
 
     def optimize(
         self,
-        lrs=[1e-4, 1e-4, 1e-1, 1e-4],
+        lrs=[1e-3, 1e-4, 1e-1, 1e-4],
         decay=0.01,
         iterations=5000,
         test_per_iter=100,
@@ -455,12 +521,11 @@ class GeoLensOptim:
         """Optimize the lens by minimizing rms errors.
 
         Debug hints:
-            *, Slowly and continuously update!
-            1, thickness (fov and ttl better match)
-            2, alpha order (higher is better but more sensitive)
-            3, learning rate and decay (prefer smaller lr and decay)
-            4, reasonable parameters range
-            5. nan can be introduced by torch.sqrt() function in the backward pass.
+            1, Slowly optimize with small learning rate
+            2, FOV and thickness should match well
+            3, Reasonable parameter range
+            4, Aspheric order higher is better but also more sensitive
+            5, More iterations with larger ray sampling
         """
         # Experiment settings
         depth = DEPTH
@@ -486,20 +551,21 @@ class GeoLensOptim:
         pbar = tqdm(
             total=iterations + 1,
             desc="Progress",
-            postfix={"loss_rms": 0},
+            postfix={"loss_rms": 0, "loss_focus": 0},
         )
         for i in range(iterations + 1):
             # ===> Evaluate the lens
             if i % test_per_iter == 0:
                 with torch.no_grad():
-                    if shape_control:
+                    if shape_control and i > 0:
                         self.correct_shape()
+                        # self.refocus()
 
                     self.write_lens_json(f"{result_dir}/iter{i}.json")
                     self.analysis(f"{result_dir}/iter{i}")
             
                     # Sample rays
-                    self.update_float_setting()
+                    self.calc_pupil()
                     rays_backup = []
                     for wv in WAVE_RGB:
                         ray = self.sample_ring_arm_rays(num_ring=num_ring, num_arm=num_arm, spp=spp, depth=depth, wvln=wv, scale_pupil=1.05, sample_more_off_axis=False)
@@ -533,7 +599,8 @@ class GeoLensOptim:
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
-                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1) # l2 loss
+                # l_rms = (ray_err.abs().sum(-1) * ray_valid).sum(-1) # l1 loss
                 l_rms /= ray_valid.sum(-1) + EPSILON
 
                 # Weighted loss
@@ -545,9 +612,13 @@ class GeoLensOptim:
             loss_rms = sum(loss_rms_ls) / len(loss_rms_ls)
 
             # Total loss
+            w_focus = 1.0
+            loss_focus = self.loss_infocus()
+            
+            w_reg = 0.05
             loss_reg, loss_dict = self.loss_reg()
-            w_reg = 0.1
-            L_total = loss_rms + w_reg * loss_reg
+            
+            L_total = loss_rms + w_focus * loss_focus + w_reg * loss_reg
 
             # Back-propagation
             optimizer.zero_grad()
@@ -555,7 +626,7 @@ class GeoLensOptim:
             optimizer.step()
             scheduler.step()
 
-            pbar.set_postfix(loss_rms=loss_rms.item(), **loss_dict)
+            pbar.set_postfix(loss_rms=loss_rms.item(), loss_focus=loss_focus.item(), **loss_dict)
             pbar.update(1)
 
         pbar.close()

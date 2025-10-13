@@ -192,7 +192,7 @@ class GeoLensVis:
         if lens_title is None:
             eff_foclen = int(self.foclen)
             eq_foclen = int(self.eqfl)
-            fov_deg = round(self.dfov * 180 / torch.pi, 1)
+            fov_deg = round(2 * self.rfov * 180 / torch.pi, 1)
             sensor_r = round(self.r_sensor, 1)
             sensor_w, sensor_h = self.sensor_size
             sensor_w = round(sensor_w, 1)
@@ -207,7 +207,7 @@ class GeoLensVis:
 
         # Draw lens layout
         colors_list = ["#CC0000", "#006600", "#0066CC"]
-        rfov_deg = float(np.rad2deg(self.real_rfov))
+        rfov_deg = float(np.rad2deg(self.rfov))
         fov_ls = np.linspace(0, rfov_deg * 0.99, num=num_views)
         
         if not multi_plot:

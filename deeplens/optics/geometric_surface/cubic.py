@@ -7,8 +7,27 @@ from deeplens.optics.geometric_surface.base import Surface
 
 
 class Cubic(Surface):
-    def __init__(self, r, d, b, mat2, is_square=False, device="cpu"):
-        Surface.__init__(self, r, d, mat2, is_square=is_square, device=device)
+    def __init__(
+        self,
+        r,
+        d,
+        b,
+        mat2,
+        pos_xy=[0.0, 0.0],
+        vec_local=[0.0, 0.0, 1.0],
+        is_square=False,
+        device="cpu",
+    ):
+        Surface.__init__(
+            self,
+            r=r,
+            d=d,
+            mat2=mat2,
+            pos_xy=pos_xy,
+            vec_local=vec_local,
+            is_square=is_square,
+            device=device,
+        )
         self.b = torch.tensor(b)
 
         if len(b) == 1:
@@ -105,8 +124,11 @@ class Cubic(Surface):
         """Return parameters for optimizer."""
         # Broadcast learning rates to all cubic coefficients
         if len(lrs) == 1:
-            lrs = lrs + [lrs[0] * decay ** (b_degree + 1) for b_degree in range(self.b_degree - 1)]
-        
+            lrs = lrs + [
+                lrs[0] * decay ** (b_degree + 1)
+                for b_degree in range(self.b_degree - 1)
+            ]
+
         params = []
 
         # Optimize distance
@@ -138,7 +160,6 @@ class Cubic(Surface):
 
         return params
 
-    
     # =========================================
     # Manufacturing
     # =========================================
@@ -159,8 +180,9 @@ class Cubic(Surface):
             self.b5_error = np.random.randn() * tolerance_params.get("b5_tole", 0.001)
             self.b7_error = np.random.randn() * tolerance_params.get("b7_tole", 0.001)
 
-        self.rotate_angle_error = np.random.randn() * tolerance_params.get("angle_tole", 0.01)
-
+        self.rotate_angle_error = np.random.randn() * tolerance_params.get(
+            "angle_tole", 0.01
+        )
 
     # =========================================
     # IO

@@ -91,7 +91,7 @@ def curriculum_design(
     num_arm = 8
     spp = 2048
 
-    aper_start = self.surfaces[self.aper_idx].r * 0.3
+    aper_start = self.surfaces[self.aper_idx].r * 0.2
     aper_final = self.surfaces[self.aper_idx].r
 
     # Log
@@ -122,12 +122,13 @@ def curriculum_design(
                     aper_final,
                 )
                 self.surfaces[self.aper_idx].update_r(aper_r)
-                self.post_computation()
+                self.calc_pupil()
 
                 # Correct lens shape and evaluate current design
                 if i > 0:
                     if shape_control:
                         self.correct_shape()
+                        # self.refocus()
 
                     if optim_mat and match_mat:
                         self.match_materials()
@@ -145,7 +146,7 @@ def curriculum_design(
                         depth=depth,
                         spp=spp,
                         wvln=wv,
-                        scale_pupil=1.05,
+                        scale_pupil=1.10,
                     )
                     rays_backup.append(ray)
 
@@ -245,9 +246,13 @@ if __name__ == "__main__":
         result_dir=args["result_dir"],
     )
 
+    # Match materials and set fnum
+    lens.match_materials()
+    lens.set_fnum(args["fnum"])
+
     # To obtain optimal optical performance, we typically need additional training iterations. This code uses strong lens design constraints with small learning rates, making optimization slow but steadily improving optical performance. For demonstration purposes, here we only train for 3000 steps.
     lens.optimize(
-        lrs=[float(lr) * 0.5 for lr in args["lrs"]],
+        lrs=[float(lr) * 0.1 for lr in args["lrs"]],
         decay=float(args["decay"]),
         iterations=5000,
         test_per_iter=100,
