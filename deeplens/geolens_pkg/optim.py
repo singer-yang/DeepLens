@@ -214,9 +214,9 @@ class GeoLensOptim:
                 surf1 = self.surfaces[i]
 
                 # Penalize diameter to thickness ratio
-                d_to_t = max(surf2.r, surf1.r) / (surf2.d - surf1.d)
-                if d_to_t > diam2thick_max:
-                    loss_diam2thick += d_to_t
+                diam2thick = 2 * max(surf2.r, surf1.r) / (surf2.d - surf1.d)
+                if diam2thick > diam2thick_max:
+                    loss_diam2thick += diam2thick
 
                 # Penalize thick_max to thick_min ratio
                 r_edge = min(surf2.r, surf1.r)
@@ -230,7 +230,7 @@ class GeoLensOptim:
                 if tmax2tmin > tmax2tmin_max:
                     loss_tmax2tmin += tmax2tmin
 
-        return loss_sag2diam + loss_grad + loss_grad2 + loss_diam2thick + loss_tmax2tmin
+        return loss_sag2diam + loss_grad + loss_diam2thick + loss_tmax2tmin #+ loss_grad2
 
     def loss_self_intersec(self):
         """Loss function to avoid self-intersection.
@@ -445,15 +445,16 @@ class GeoLensOptim:
             # Apply beta transformation to concentrate samples near 1.0
             beta_transformed = beta_values ** 0.5  # Equivalent to Beta(0.5, 1.0) distribution
             ring_fovs = max_fov_rad * beta_transformed
+
+            # Use square root to sample more points near the edge
+            # ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
         else:
-            ring_fovs = max_fov_rad * torch.sqrt(torch.linspace(0.0, 1.0, num_ring, device=self.device))
+            ring_fovs = max_fov_rad * torch.linspace(0.0, 1.0, num_ring, device=self.device)
         
-        arm_angles = torch.linspace(0.0, 2 * np.pi, num_arm + 1, device=self.device)[:-1]
+        arm_angles = torch.linspace(0.0, 2 * torch.pi, num_arm + 1, device=self.device)[:-1]
         ring_grid, arm_grid = torch.meshgrid(ring_fovs, arm_angles, indexing="ij")
-        fov_x_rad = ring_grid * torch.cos(arm_grid)
-        fov_y_rad = ring_grid * torch.sin(arm_grid)
-        x = depth * torch.tan(fov_x_rad)
-        y = depth * torch.tan(fov_y_rad)
+        x = depth * torch.tan(ring_grid) * torch.cos(arm_grid)
+        y = depth * torch.tan(ring_grid) * torch.sin(arm_grid)        
         z = torch.full_like(x, depth)
         points = torch.stack([x, y, z], dim=-1)  # shape: [num_ring, num_arm, 3]
 
@@ -566,7 +567,7 @@ class GeoLensOptim:
             loss_rms = sum(loss_rms_ls) / len(loss_rms_ls)
 
             # Total loss
-            w_focus = 5.0
+            w_focus = 1.0
             loss_focus = self.loss_infocus()
             
             w_reg = 0.05
