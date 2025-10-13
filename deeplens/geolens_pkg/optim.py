@@ -20,7 +20,8 @@ Functions:
     - loss_reg: An empirical regularization loss for lens design
     - loss_infocus: Sample parallel rays and compute RMS loss on the sensor plane
     - loss_surface: Penalize surface shape (sag, diameter-to-thickness ratio, etc.)
-    - loss_self_intersec: Loss function to avoid self-intersection
+    - loss_intersec: Loss function to avoid self-intersection
+    - loss_gap: Loss function to penalize too large air gap and thickness
     - loss_ray_angle: Loss function to penalize large chief ray angle
     - loss_rms: Loss function to compute RGB spot error RMS
     - sample_ring_arm_rays: Sample rays from object space using a ring-arm pattern
@@ -69,17 +70,16 @@ class GeoLensOptim:
             self.is_cellphone = True
 
             # Self intersection constraints
-            self.dist_min_edge = 0.05
-            self.dist_max_edge = 2.0
-            self.dist_min_center = 0.05
-            self.dist_max_center = 0.5
-            
-            self.thickness_min_edge = 0.25
-            self.thickness_max_edge = 2.0
-            self.thickness_min_center = 0.4
-            self.thickness_max_center = 3.0
-            
+            self.air_min_edge = 0.05
+            self.air_min_center = 0.05
+            self.thick_min_edge = 0.25
+            self.thick_min_center = 0.4
             self.flange_min = 0.8
+
+            self.dist_max_edge = 2.0
+            self.dist_max_center = 0.5
+            self.thick_max_edge = 2.0
+            self.thick_max_center = 3.0
             self.flange_max = 2.0
 
             # Surface shape constraints
@@ -97,17 +97,16 @@ class GeoLensOptim:
             self.is_cellphone = False
 
             # Self-intersection constraints
-            self.dist_min_edge = 0.1
-            self.dist_max_edge = 100.0  # float("inf")
-            self.dist_min_center = 0.1
-            self.dist_max_center = 100.0  # float("inf")
-            
-            self.thickness_min_edge = 1.0
-            self.thickness_max_edge = 20.0
-            self.thickness_min_center = 2.0
-            self.thickness_max_center = 20.0
-            
+            self.air_min_edge = 0.1
+            self.air_min_center = 0.1
+            self.thick_min_edge = 1.0
+            self.thick_min_center = 2.0
             self.flange_min = 5.0
+            
+            self.dist_max_edge = 100.0  # float("inf")
+            self.dist_max_center = 100.0  # float("inf")
+            self.thick_max_edge = 20.0
+            self.thick_max_center = 20.0
             self.flange_max = 100.0  # float("inf")
 
             # Surface shape constraints
@@ -121,17 +120,19 @@ class GeoLensOptim:
             self.chief_ray_angle_max = 20.0 # deg
             self.obliq_min = 0.4
 
-    def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_surf=1.0):
+    def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_gap=1.0, w_surf=1.0):
         """Regularization loss for lens design."""
         # Loss functions for regularization
         # loss_focus = self.loss_infocus()
         loss_ray_angle = self.loss_ray_angle()
-        loss_intersec = self.loss_self_intersec()
+        loss_intersec = self.loss_intersec()
+        loss_gap = self.loss_gap()
         loss_surf = self.loss_surface()
         # loss_mat = self.loss_mat()
         loss_reg = (
             # w_focus * loss_focus
             + w_intersec * loss_intersec
+            + w_gap * loss_gap
             + w_surf * loss_surf
             + w_ray_angle * loss_ray_angle
             # + loss_mat
@@ -141,6 +142,7 @@ class GeoLensOptim:
         loss_dict = {
             # "loss_focus": loss_focus.item(),
             "loss_intersec": loss_intersec.item(),
+            "loss_gap": loss_gap.item(),
             "loss_surf": loss_surf.item(),
             'loss_ray_angle': loss_ray_angle.item(),
             # 'loss_mat': loss_mat.item(),
@@ -232,26 +234,21 @@ class GeoLensOptim:
 
         return loss_sag2diam + loss_grad + loss_diam2thick + loss_tmax2tmin #+ loss_grad2
 
-    def loss_self_intersec(self):
+    def loss_intersec(self):
         """Loss function to avoid self-intersection.
 
-        Loss is designed by the distance to the next surfaces.
+        This function penalizes when surfaces are too close to each other,
+        which could cause self-intersection or manufacturing issues.
         """
         # Constraints
-        space_lower_center = self.dist_min_center
-        space_upper_center = self.dist_max_center
-        space_lower_edge = self.dist_min_edge
-        space_upper_edge = self.dist_max_edge
-        thick_lower_center = self.thickness_min_center
-        thick_upper_center = self.thickness_max_center
-        thick_lower_edge = self.thickness_min_edge
-        thick_upper_edge = self.thickness_max_edge
+        space_lower_center = self.air_min_center
+        space_lower_edge = self.air_min_edge
+        thick_lower_center = self.thick_min_center
+        thick_lower_edge = self.thick_min_edge
         flange_min_allowed = self.flange_min
-        flange_max_allowed = self.flange_max
 
         # Loss
-        loss_min = torch.tensor(0.0, device=self.device)
-        loss_max = torch.tensor(0.0, device=self.device)
+        loss = torch.tensor(0.0, device=self.device)
 
         # Distance between surfaces
         for i in range(len(self.surfaces) - 1):
@@ -272,38 +269,24 @@ class GeoLensOptim:
                 # Center air gap
                 dist_center = z_next_center - z_prev_center
                 if dist_center < space_lower_center:
-                    loss_min += dist_center
-
-                if dist_center > space_upper_center:
-                    loss_max += dist_center
+                    loss += dist_center
 
                 # Edge air gap
                 dist_edge_min = torch.min(z_next_edge - z_prev_edge)
                 if dist_edge_min < space_lower_edge:
-                    loss_min += dist_edge_min
-                
-                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
-                if dist_edge_max > space_upper_edge:
-                    loss_max += dist_edge_max
+                    loss += dist_edge_min
 
             # Lens thickness
             else:
                 # Center thickness
                 dist_center = z_next_center - z_prev_center
                 if dist_center < thick_lower_center:
-                    loss_min += dist_center
-
-                if dist_center > thick_upper_center:
-                    loss_max += dist_center
+                    loss += dist_center
 
                 # Edge thickness
                 dist_edge_min = torch.min(z_next_edge - z_prev_edge)
                 if dist_edge_min < thick_lower_edge:
-                    loss_min += dist_edge_min
-
-                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
-                if dist_edge_max > thick_upper_edge:
-                    loss_max += dist_edge_max
+                    loss += dist_edge_min
 
         # Distance to sensor (flange)
         last_surf = self.surfaces[-1]
@@ -312,12 +295,76 @@ class GeoLensOptim:
         
         flange = torch.min(z_last_surf)
         if flange < flange_min_allowed:
-            loss_min += flange
-        if flange > flange_max_allowed:
-            loss_max += flange
+            loss += flange
 
-        # Loss, minimize loss_max and maximize loss_min
-        return loss_max - loss_min
+        # Loss, maximize loss_min (minimize negative values)
+        return -loss
+
+    def loss_gap(self):
+        """Loss function to penalize too large air gap and thickness.
+        
+        This function penalizes when air gaps or lens thicknesses are too large,
+        which could make the lens system impractically large.
+        """
+        # Constraints
+        space_upper_center = self.dist_max_center
+        space_upper_edge = self.dist_max_edge
+        thick_upper_center = self.thick_max_center
+        thick_upper_edge = self.thick_max_edge
+        flange_max_allowed = self.flange_max
+
+        # Loss
+        loss = torch.tensor(0.0, device=self.device)
+
+        # Distance between surfaces
+        for i in range(len(self.surfaces) - 1):
+            # Sample evaluation points on the two surfaces
+            current_surf = self.surfaces[i]
+            next_surf = self.surfaces[i + 1]
+            
+            r_center = torch.tensor(0.0).to(self.device) * current_surf.r
+            z_prev_center = current_surf.surface_with_offset(r_center, 0.0, valid_check=False)
+            z_next_center = next_surf.surface_with_offset(r_center, 0.0, valid_check=False)
+            
+            r_edge = torch.linspace(0.5, 1.0, 16).to(self.device) * current_surf.r
+            z_prev_edge = current_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
+            z_next_edge = next_surf.surface_with_offset(r_edge, 0.0, valid_check=False)
+
+            # Air gap
+            if self.surfaces[i].mat2.name == "air":
+                # Center air gap
+                dist_center = z_next_center - z_prev_center
+                if dist_center > space_upper_center:
+                    loss += dist_center
+
+                # Edge air gap
+                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
+                if dist_edge_max > space_upper_edge:
+                    loss += dist_edge_max
+
+            # Lens thickness
+            else:
+                # Center thickness
+                dist_center = z_next_center - z_prev_center
+                if dist_center > thick_upper_center:
+                    loss += dist_center
+
+                # Edge thickness
+                dist_edge_max = torch.max(z_next_edge - z_prev_edge)
+                if dist_edge_max > thick_upper_edge:
+                    loss += dist_edge_max
+
+        # Distance to sensor (flange)
+        last_surf = self.surfaces[-1]
+        r = torch.linspace(0.0, 1.0, 32).to(self.device) * last_surf.r
+        z_last_surf = self.d_sensor - last_surf.surface_with_offset(r, 0.0)
+        
+        flange = torch.max(z_last_surf)
+        if flange > flange_max_allowed:
+            loss += flange
+
+        # Loss, minimize loss_max
+        return loss
 
     def loss_ray_angle(self):
         """Loss function to penalize large chief ray angle."""
