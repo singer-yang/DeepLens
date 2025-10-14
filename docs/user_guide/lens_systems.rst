@@ -83,10 +83,10 @@ GeoLens includes extensive material databases:
     from deeplens.optics import Material
     
     # Load material
-    material = Material('N-BK7', wave_range=[450, 650])
+    material = Material('N-BK7')
     
-    # Get refractive index
-    n = material.n(wavelength=550)  # nm
+    # Get refractive index at wavelength (in micrometers)
+    n = material.refractive_index(0.550)  # 550 nm = 0.550 μm
 
 Adding Surfaces Manually
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -117,19 +117,17 @@ Ray Tracing Methods
 .. code-block:: python
 
     # Point source ray tracing
-    ray = lens.sample_point_source(depth=1000, M=512)
+    ray = lens.sample_point_source(depth=1000, num_rays=512)
     ray_out = lens.trace(ray)
     
-    # Parallel ray bundle
-    ray = lens.sample_parallel_2D(R=5.0, M=256)
+    # Parallel ray bundle (2D visualization)
+    ray = lens.sample_parallel_2D(fov=0.0, num_rays=7)
     ray_out = lens.trace(ray)
     
-    # Field-dependent sampling
+    # Sample rays from 3D points
     ray = lens.sample_from_points(
-        depth=1000,
-        M=256,
-        spp=1024,
-        field=[0.0, 0.7]  # [x, y] normalized field
+        points=[[0.0, 0.0, -1000.0]],
+        num_rays=1024
     )
     ray_out = lens.trace(ray)
 
@@ -138,14 +136,18 @@ PSF Calculation
 
 .. code-block:: python
 
-    # Geometric PSF (ray-based)
-    psf_ray = lens.psf(depth=1000, spp=4096, method='ray')
+    import torch
     
-    # Wave optics PSF (more accurate)
-    psf_wave = lens.psf(depth=1000, spp=2048, method='wave')
+    # Single point PSF (center field, at depth -1000mm)
+    points = torch.tensor([[0.0, 0.0, -1000.0]])
+    psf = lens.psf(points=points, ks=51, spp=4096)
     
-    # Coherent PSF
-    psf_coherent = lens.psf(depth=1000, spp=1024, method='coherent')
+    # Off-axis PSF (normalized coordinates)
+    points = torch.tensor([[0.5, 0.3, -1000.0]])  # x, y normalized [-1, 1]
+    psf = lens.psf(points=points, ks=51, spp=2048)
+    
+    # RGB PSF
+    psf_rgb = lens.psf_rgb(points=points, ks=51, spp=1024)
 
 Image Rendering
 ^^^^^^^^^^^^^^^
@@ -155,30 +157,41 @@ Image Rendering
     import torch
     from torchvision.utils import save_image
     
-    # Load image as tensor
-    img = torch.rand(1, 3, 512, 512).cuda()
+    # Load image as tensor (must match sensor resolution)
+    img = torch.rand(1, 3, 2000, 2000).cuda()
     
-    # Render through lens
+    # Render through lens using PSF map
     img_rendered = lens.render(
         img,
-        depth=1000,
-        spp=512,
-        method='fft'  # or 'conv'
+        depth=-1000,
+        method='psf_map',
+        psf_grid=(10, 10),
+        psf_ks=51
+    )
+    
+    # Or use ray tracing (more accurate, slower)
+    img_rendered = lens.render(
+        img,
+        depth=-1000,
+        method='ray_tracing',
+        spp=512
     )
     
     save_image(img_rendered, 'output.png')
 
-DiffracLens - Wave Optics
---------------------------
+DiffractiveLens - Wave Optics
+------------------------------
 
-``DiffracLens`` implements wave optics for diffractive optical elements.
+``DiffractiveLens`` implements wave optics for diffractive optical elements.
 
 .. code-block:: python
 
-    from deeplens import DiffracLens
+    from deeplens import DiffractiveLens
     
-    lens = DiffracLens(
+    lens = DiffractiveLens(
         filename='./datasets/lenses/doe/doe_example.json',
+        sensor_res=(2000, 2000),
+        sensor_size=(8.0, 8.0),
         device='cuda'
     )
 
@@ -201,8 +214,10 @@ HybridLens - Refractive-Diffractive
     
     lens = HybridLens(
         filename='./datasets/lenses/hybridlens/hybrid_design.json',
+        sensor_res=(2000, 2000),
+        sensor_size=(8.0, 8.0),
         device='cuda',
-        wave_method='asm'  # Angular spectrum method
+        dtype=torch.float64
     )
     
     # Render image through hybrid lens
@@ -225,18 +240,18 @@ PSFNetLens - Neural Surrogate
 
     from deeplens import PSFNetLens
     
-    # Load pre-trained model
+    # Initialize PSFNetLens with lens file
     lens = PSFNetLens(
-        ckpt_path='./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth',
-        device='cuda'
+        lens_path='./datasets/lenses/camera/ef50mm_f1.8.json',
+        in_chan=3,
+        psf_chan=3,
+        model_name='mlp_conv',
+        kernel_size=64,
+        sensor_res=(3000, 3000)
     )
     
-    # Fast PSF prediction
-    psf = lens.psf(
-        depth=1000,
-        field=[0.0, 0.5],  # Field position
-        wvln=0.589  # Wavelength in micrometers
-    )
+    # Load pre-trained network weights
+    lens.load_net('./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth')
     
     # Fast image rendering
     img_rendered = lens.render(img, depth=1000)
@@ -270,14 +285,18 @@ ParaxialLens - Quick Prototyping
     from deeplens import ParaxialLens
     
     lens = ParaxialLens(
-        foclen=50.0,  # Focal length in mm
-        fnum=2.0,     # F-number
-        sensor_res=(512, 512),
+        foclen=50.0,              # Focal length in mm
+        fnum=2.0,                 # F-number
+        sensor_size=(8.0, 8.0),   # Sensor size in mm (W, H)
+        sensor_res=(512, 512),    # Sensor resolution in pixels (W, H)
         device='cuda'
     )
     
+    # Refocus the lens
+    lens.refocus(foc_dist=-2000)
+    
     # Defocus blur simulation
-    img_blurred = lens.render(img, depth=1000, focus_depth=2000)
+    img_blurred = lens.render(img, depth=-1000)
 
 Lens File Formats
 -----------------
@@ -351,11 +370,14 @@ Common Methods
 
 .. code-block:: python
 
+    import torch
+    
     # PSF calculation
-    psf = lens.psf(depth, spp, method)
+    points = torch.tensor([[0.0, 0.0, -1000.0]])
+    psf = lens.psf(points=points, ks=51, spp=2048)
     
     # Image rendering
-    img_out = lens.render(img, depth, spp)
+    img_out = lens.render(img, depth=-1000, method='psf_map')
     
     # Visualization
     lens.plot_setup2D()
@@ -371,23 +393,25 @@ All lens classes support gradient-based optimization:
 
 .. code-block:: python
 
-    # Enable optimization parameters
-    lens.set_optimizer_params({
-        'radius': True,
-        'thickness': True,
-        'ai': True
-    })
+    import torch
     
-    # Get optimizable parameters
-    params = lens.parameters()
+    # Get optimizable parameters with learning rates
+    # Learning rates: [d (thickness), c (curvature), k (conic), ai (aspheric)]
+    params = lens.get_optimizer_params(
+        lrs=[1e-4, 1e-4, 1e-2, 1e-4],
+        decay=0.01
+    )
     
     # Use with PyTorch optimizers
-    optimizer = torch.optim.Adam(params, lr=0.01)
+    optimizer = torch.optim.Adam(params)
     
     # Optimization loop
     for i in range(1000):
         optimizer.zero_grad()
-        loss = compute_loss(lens)
+        
+        # Compute loss (e.g., RMS spot size)
+        loss = lens.loss_rms(num_grid=9, depth=-10000, num_rays=2048)
+        
         loss.backward()
         optimizer.step()
 
