@@ -1,7 +1,7 @@
 Lens Systems
 ============
 
-DeepLens provides several types of lens models, each suited for different applications and computational requirements.
+DeepLens provides different simulation models, suited for different types of optical lenses. All of them are differentiable and can be used for lens design and end-to-end optimization.
 
 Overview
 --------
@@ -15,24 +15,24 @@ Overview
      - Use Case
    * - **GeoLens**
      - Ray tracing geometric lens
-     - High-accuracy simulation, lens design
+     - High-accuracy simulation for geometric lenses, and differentiable lens design
    * - **DiffracLens**
-     - Wave optics diffractive lens
-     - Diffractive optical elements
+     - Paraxial wave optics diffractive lens
+     - Simple simulation for diffractive optical elements, not accounting for aberrations
    * - **HybridLens**
-     - Hybrid refractive-diffractive
-     - DOEs, metasurfaces, hybrid systems
+     - Hybrid refractive-diffractive lens, using ray tracing and wave optics
+     - DOEs and metasurfaces with refractive lenses, accounting for aberrations and diffraction
    * - **PSFNetLens**
      - Neural surrogate model
-     - Fast PSF prediction, real-time applications
+     - Fast PSF prediction compared to ray tracing, image simulation with varying depth and focal plane
    * - **ParaxialLens**
-     - Paraxial approximation
-     - Quick prototyping, defocus simulation
+     - Paraxial geometric lens, using Circle of Confusion (CoC) to simulate defocus
+     - Quick simulation for defocus, without aberrations
 
 GeoLens - Geometric Ray Tracing
 --------------------------------
 
-The ``GeoLens`` class implements a fully differentiable ray tracing engine for refractive lens systems.
+The ``GeoLens`` class implements a fully differentiable ray tracing engine for refractive/reflective lens systems.
 
 Initialization
 ^^^^^^^^^^^^^^
@@ -48,88 +48,35 @@ Initialization
         sensor_size=(8.0, 8.0),  # mm
         device='cuda'
     )
-    
-    # Create from scratch
-    lens = GeoLens(
-        sensor_res=(1024, 1024),
-        sensor_size=(10.0, 10.0),
-        device='cuda'
-    )
+
 
 Supported Surface Types
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 * **Spheric**: Standard spherical surfaces
 * **Aspheric**: Aspheric surfaces with even polynomial terms
-* **AsphericNorm**: Normalized aspheric surfaces
+* **AsphericNorm**: Aspheric surfaces with normalized even polynomial parameters
 * **Plane**: Flat surfaces
 * **Aperture**: Aperture stops
-* **ThinLens**: Paraxial thin lens approximation
+* **ThinLens**: Ideal thin lens
 * **Cubic**: Cubic phase surfaces
-* **Phase**: General phase surfaces
-
-Material Library
-^^^^^^^^^^^^^^^^
-
-GeoLens includes extensive material databases:
-
-* **SCHOTT**: Standard optical glasses
-* **CDGM**: Chinese optical glasses
-* **PLASTIC**: Optical plastics
-* **MISC**: Miscellaneous materials
-
-.. code-block:: python
-
-    from deeplens.optics import Material
-    
-    # Load material
-    material = Material('N-BK7')
-    
-    # Get refractive index at wavelength (in micrometers)
-    n = material.refractive_index(0.550)  # 550 nm = 0.550 μm
-
-Adding Surfaces Manually
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    from deeplens.optics import Spheric, Aspheric, Aperture
-    from deeplens.optics import Material
-    
-    lens = GeoLens(device='cuda')
-    
-    # Add surfaces
-    lens.surfaces.append(Spheric(r=50.0, d=5.0, is_square=False))
-    lens.materials.append(Material('N-BK7'))
-    
-    lens.surfaces.append(Spheric(r=-50.0, d=45.0, is_square=False))
-    lens.materials.append(Material('air'))
-    
-    lens.surfaces.append(Aperture(r=10.0, d=0.0))
-    lens.materials.append(Material('air'))
-    
-    # Finalize lens
-    lens.post_computation()
+* **Phase**: General phase surfaces simulated with ray tracing
 
 Ray Tracing Methods
 ^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    # Point source ray tracing
-    ray = lens.sample_point_source(depth=1000, num_rays=512)
-    ray_out = lens.trace(ray)
-    
-    # Parallel ray bundle (2D visualization)
-    ray = lens.sample_parallel_2D(fov=0.0, num_rays=7)
-    ray_out = lens.trace(ray)
+    # Parallel ray bundle
+    ray = lens.sample_parallel(fov_x=0.0, fov_y=0.0)
+    ray_out = lens.trace2sensor(ray)
     
     # Sample rays from 3D points
     ray = lens.sample_from_points(
         points=[[0.0, 0.0, -1000.0]],
         num_rays=1024
     )
-    ray_out = lens.trace(ray)
+    ray_out = lens.trace2sensor(ray)
 
 PSF Calculation
 ^^^^^^^^^^^^^^^
@@ -140,14 +87,14 @@ PSF Calculation
     
     # Single point PSF (center field, at depth -1000mm)
     points = torch.tensor([[0.0, 0.0, -1000.0]])
-    psf = lens.psf(points=points, ks=51, spp=4096)
+    psf = lens.psf(points=points, ks=64, spp=4096)
     
     # Off-axis PSF (normalized coordinates)
     points = torch.tensor([[0.5, 0.3, -1000.0]])  # x, y normalized [-1, 1]
-    psf = lens.psf(points=points, ks=51, spp=2048)
+    psf = lens.psf(points=points, ks=64, spp=4096)
     
     # RGB PSF
-    psf_rgb = lens.psf_rgb(points=points, ks=51, spp=1024)
+    psf_rgb = lens.psf_rgb(points=points, ks=64, spp=4096)
 
 Image Rendering
 ^^^^^^^^^^^^^^^
@@ -160,33 +107,40 @@ Image Rendering
     # Load image as tensor (must match sensor resolution)
     img = torch.rand(1, 3, 2000, 2000).cuda()
     
-    # Render through lens using PSF map
+    # Render through lens using PSF map convolution
     img_rendered = lens.render(
         img,
         depth=-1000,
         method='psf_map',
         psf_grid=(10, 10),
-        psf_ks=51
+        psf_ks=64
     )
     
-    # Or use ray tracing (more accurate, slower)
+    # Or use ray tracing (more accurate, slower and larger memory footprint)
     img_rendered = lens.render(
         img,
         depth=-1000,
         method='ray_tracing',
-        spp=512
+        spp=32
     )
     
     save_image(img_rendered, 'output.png')
 
-DiffractiveLens - Wave Optics
-------------------------------
+Features
+^^^^^^^^
 
-``DiffractiveLens`` implements wave optics for diffractive optical elements.
+* Fully differentiable ray tracing for lens design optimization
+* Support for various refractive and reflective surface types
+* Accurate geometric aberration simulation
+
+DiffractiveLens - Paraxial Wave Optics
+--------------------------------------
+
+``DiffractiveLens`` implements paraxial wave optics for diffractive optical lenses.
 
 .. code-block:: python
 
-    from deeplens import DiffractiveLens
+    from deeplens.diffraclens import DiffractiveLens
     
     lens = DiffractiveLens(
         filename='./datasets/lenses/doe/doe_example.json',
@@ -203,38 +157,41 @@ Supported Diffractive Surfaces
 * **Pixel2D**: Pixelated metasurfaces
 * **Zernike**: Zernike polynomial surfaces
 
-HybridLens - Refractive-Diffractive
-------------------------------------
+HybridLens - Refractive-Diffractive Lens System
+-----------------------------------------------
 
-``HybridLens`` combines ray tracing and wave optics for accurate simulation of hybrid systems.
+``HybridLens`` combines ray tracing and wave optics for accurate simulation of hybrid refractive-diffractive lens systems. However, currently it only supports diffractive surfaces behind a refractive lens.
 
 .. code-block:: python
 
-    from deeplens import HybridLens
+    import torch
+    from deeplens.hybridlens import HybridLens
     
     lens = HybridLens(
-        filename='./datasets/lenses/hybridlens/hybrid_design.json',
+        filename='./datasets/lenses/hybridlens/a489_doe.json',
         sensor_res=(2000, 2000),
         sensor_size=(8.0, 8.0),
         device='cuda',
         dtype=torch.float64
     )
+
+    # Calculate PSF
+    points = torch.tensor([0.0, 0.0, -10000.0])
+    psf = lens.psf(points=points, ks=64, spp=10000000)
     
     # Render image through hybrid lens
-    img_rendered = lens.render(img, depth=1000)
+    img_rendered = lens.render(img, depth=-1000)
 
 Features
 ^^^^^^^^
 
-* Accurate chromatic aberration simulation
-* Support for DOEs and metasurfaces
-* Polarization effects (optional)
-* Wavelength-dependent diffraction
+* Accurate optical aberration and diffraction simulation
+* Support for DOEs and metasurfaces with refractive lenses
 
 PSFNetLens - Neural Surrogate
 ------------------------------
 
-``PSFNetLens`` uses neural networks to predict PSFs, enabling real-time applications.
+``PSFNetLens`` uses neural networks to predict PSFs, enabling fast PSF calculation and image simulation.
 
 .. code-block:: python
 
@@ -245,7 +202,7 @@ PSFNetLens - Neural Surrogate
         lens_path='./datasets/lenses/camera/ef50mm_f1.8.json',
         in_chan=3,
         psf_chan=3,
-        model_name='mlp_conv',
+        model_name='mlpconv',
         kernel_size=64,
         sensor_res=(3000, 3000)
     )
@@ -254,15 +211,16 @@ PSFNetLens - Neural Surrogate
     lens.load_net('./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth')
     
     # Fast image rendering
-    img_rendered = lens.render(img, depth=1000)
+    img_rendered = lens.render(img, depth=-1000)
 
 Advantages
 ^^^^^^^^^^
 
-* 100-1000x faster than ray tracing
+* Faster and more memory efficient than ray tracing and ray-wave model
+* Accurate PSF prediction after training
 * Differentiable for end-to-end optimization
-* Compact model size (~10MB)
-* Supports depth and field variation
+* Compact model size (can be less than 10MB)
+* Supports variant spatial position and focal plane for PSF prediction
 
 Training PSFNet
 ^^^^^^^^^^^^^^^
@@ -278,11 +236,11 @@ See :doc:`../tutorials` for detailed training instructions.
 ParaxialLens - Quick Prototyping
 ---------------------------------
 
-``ParaxialLens`` implements a paraxial (thin lens) model for rapid prototyping.
+``ParaxialLens`` implements a paraxial (thin lens) model for rapid simulation for defocus. It uses Circle of Confusion (CoC) to simulate defocus, without aberrations.
 
 .. code-block:: python
 
-    from deeplens import ParaxialLens
+    from deeplens.paraxiallens import ParaxialLens
     
     lens = ParaxialLens(
         foclen=50.0,              # Focal length in mm
@@ -304,38 +262,68 @@ Lens File Formats
 JSON Format
 ^^^^^^^^^^^
 
-DeepLens native format with full parameter support:
+DeepLens native JSON format (as used by ``GeoLens``):
 
 .. code-block:: json
 
     {
+        "info": "Example lens",
         "foclen": 50.0,
         "fnum": 1.8,
+        "r_sensor": 21.6,
+        "d_sensor": 72.8,
+        "sensor_res": [4000, 2667],
         "surfaces": [
             {
                 "type": "Spheric",
-                "r": 46.92,
-                "d": 7.0,
-                "is_square": false
+                "r": 15.5,
+                "c": 0.03,
+                "d": 0.0,
+                "mat1": "air",
+                "mat2": "N-BK7",
+                "d_next": 4.5
+            },
+            {
+                "type": "Aperture",
+                "r": 9.6,
+                "d": 20.3,
+                "mat1": "air",
+                "mat2": "air",
+                "d_next": 5.0
             }
-        ],
-        "materials": ["N-BK7", "air"],
-        "sensor": {
-            "size": [36.0, 24.0],
-            "resolution": [4000, 2667]
-        }
+        ]
     }
 
 Zemax Format (.zmx)
 ^^^^^^^^^^^^^^^^^^^
 
-Load Zemax files directly:
+Load Zemax files directly (currently only supports GeoLens):
 
 .. code-block:: python
 
     lens = GeoLens(filename='lens_design.zmx')
 
 Note: Not all Zemax features are supported. Converted to DeepLens format on load.
+
+Material Library
+-----------------
+
+DeepLens includes extensive material databases for optical glass and plastics:
+
+* **SCHOTT**: Standard optical glasses
+* **CDGM**: Chinese optical glasses
+* **PLASTIC**: Optical plastics
+* **MISC**: Miscellaneous materials
+
+.. code-block:: python
+
+    from deeplens.optics import Material
+    
+    # Load material
+    material = Material('N-BK7')
+    
+    # Get refractive index at wavelength (in micrometers)
+    n = material.refractive_index(0.550)  # 550 nm = 0.550 μm
 
 Lens Properties and Methods
 ----------------------------
@@ -353,8 +341,6 @@ All lens classes share these properties:
     # F-number
     print(lens.fnum)
     
-    # Entrance pupil diameter [mm]
-    print(lens.enpd)
     
     # Field of view [degrees]
     print(lens.hfov)
@@ -380,10 +366,12 @@ Common Methods
     img_out = lens.render(img, depth=-1000, method='psf_map')
     
     # Visualization
-    lens.plot_setup2D()
-    lens.plot_psf(psf)
+    # Draw an RGB PSF map (available for all lens types)
+    lens.draw_psf_map(grid=(7, 7), ks=51, depth=-1000, save_name='psf_map.png')
+    # For GeoLens only: draw 2D layout with ray paths
+    # lens.draw_layout(filename='layout.png', depth=-1000)
     
-    # Save/load
+    # Save
     lens.write_lens_json('output.json')
 
 Optimization
@@ -397,13 +385,11 @@ All lens classes support gradient-based optimization:
     
     # Get optimizable parameters with learning rates
     # Learning rates: [d (thickness), c (curvature), k (conic), ai (aspheric)]
-    params = lens.get_optimizer_params(
+    optimizer = lens.get_optimizer(
         lrs=[1e-4, 1e-4, 1e-2, 1e-4],
         decay=0.01
     )
-    
-    # Use with PyTorch optimizers
-    optimizer = torch.optim.Adam(params)
+
     
     # Optimization loop
     for i in range(1000):
@@ -424,15 +410,17 @@ Performance Tips
 1. **Use GPU**: Always specify ``device='cuda'`` for significant speedup
 2. **Batch Processing**: Process multiple images simultaneously
 3. **SPP Selection**: Balance speed vs accuracy (1024-4096 for PSF, 256-512 for rendering)
-4. **Mixed Precision**: Use ``torch.cuda.amp`` for faster training
+4. **Precision**: Use ``dtype=torch.float64`` for phase-critical simulation (e.g., HybridLens)
 
 Accuracy Considerations
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-1. **Ray Tracing**: More rays = better accuracy but slower
-2. **Wave Optics**: Use for small F-numbers (< 4) and accurate diffraction
-3. **PSFNet**: Fast approximation, may have small errors
-4. **Validation**: Always validate against analytical solutions or reference software
+1. **GeoLens**: High-accuracy geometric ray tracing; differentiable design; aligns with commercial ray tracers
+2. **DiffractiveLens**: Paraxial wave-optics diffraction without geometric aberrations
+3. **ParaxialLens**: Fast defocus-only simulation (CoC), no aberrations
+4. **HybridLens**: Hybrid refractive-diffractive simulation with aberrations and diffraction
+5. **PSFNetLens**: Fast neural approximation; usually accurate enough for image simulation after training
+6. **Validation**: Always validate against analytical solutions or reference software
 
 Next Steps
 ----------
