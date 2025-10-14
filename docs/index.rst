@@ -1,6 +1,3 @@
-DeepLens Documentation
-======================
-
 .. image:: ../assets/logo.png
    :align: center
    :alt: DeepLens Logo
