@@ -19,12 +19,19 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
+from deeplens.basics import DEFAULT_WAVE, DEPTH
 from deeplens.lens import Lens
-from deeplens.basics import DEPTH, DEFAULT_WAVE
-from deeplens.optics.diffractive_surface import Binary2, Fresnel, Pixel2D, ThinLens, Zernike
+from deeplens.optics.diffractive_surface import (
+    Binary2,
+    Fresnel,
+    Pixel2D,
+    ThinLens,
+    Zernike,
+)
 from deeplens.optics.psf import conv_psf
-from deeplens.optics.wave import ComplexWave
 from deeplens.optics.utils import diff_float
+from deeplens.optics.wave import ComplexWave
+
 
 class DiffractiveLens(Lens):
     def __init__(
@@ -34,13 +41,13 @@ class DiffractiveLens(Lens):
         sensor_size=(8.0, 8.0),
         device=None,
     ):
-        """Initialize a lens consisting of a diffractive optical element (DOE).
+        """Initialize a diffractive lens.
 
         Args:
-            filename (str): Path to the lens file.
-            sensor_res (tuple, optional): Sensor resolution (W, H). Defaults to (2000, 2000).
-            sensor_size (tuple, optional): Sensor size (W, H). Defaults to (8.0, 8.0).
-            device (str, optional): Device to run the lens. Defaults to "cpu".
+            filename (str, optional): Path to the lens configuration JSON file. If provided, loads the lens configuration from file. Defaults to None.
+            sensor_res (tuple, optional): Sensor resolution in pixels (width, height). Defaults to (2000, 2000).
+            sensor_size (tuple, optional): Physical sensor dimensions in millimeters (width, height). Defaults to (8.0, 8.0).
+            device (str, optional): Computation device ('cpu' or 'cuda'). Defaults to 'cpu'.
         """
         super().__init__(device=device)
 
@@ -58,6 +65,7 @@ class DiffractiveLens(Lens):
 
     @classmethod
     def load_example1(cls):
+        """Create an example diffractive lens with a single Fresnel DOE."""
         self = cls(sensor_size=(4.0, 4.0), sensor_res=(2000, 2000))
 
         # Diffractive Fresnel DOE
@@ -71,7 +79,7 @@ class DiffractiveLens(Lens):
 
     @classmethod
     def load_example2(cls):
-        """Initialize a lens from a dict."""
+        """Create an example diffractive lens with a thin lens and binary DOE combination."""
         self = cls(sensor_size=(8.0, 8.0), sensor_res=(2000, 2000))
 
         # Diffractive Fresnel DOE
@@ -89,7 +97,7 @@ class DiffractiveLens(Lens):
         return self
 
     def read_lens_json(self, filename):
-        """Load lens from a .json file."""
+        """Load the lens from a .json file."""
         assert filename.endswith(".json"), "File must be a .json file."
 
         with open(filename, "r") as f:
@@ -126,7 +134,7 @@ class DiffractiveLens(Lens):
                 d += d_next
 
     def write_lens_json(self, filename):
-        """Write the lens into a file."""
+        """Write the lens to a file."""
         assert filename.endswith(".json"), "File must be a .json file."
 
         # Save lens to a file
@@ -166,13 +174,16 @@ class DiffractiveLens(Lens):
         return self.forward(wave)
 
     def forward(self, wave):
-        """Propagate a wave through the optical element.
+        """Propagate a wave through the diffractive lens system to the sensor.
+
+        Sequentially applies phase modulation from each diffractive surface, then propagates
+        the wave to the sensor plane using wave optics.
 
         Args:
-            wave (Wave): Input wave field.
+            wave (ComplexWave): Input wave field entering the lens system.
 
         Returns:
-            wave (Wave): Output wave field at sensor plane.
+            ComplexWave: Output wave field at the sensor plane.
         """
         # Propagate to DOE
         for surf in self.surfaces:
@@ -187,7 +198,7 @@ class DiffractiveLens(Lens):
     # Image simulation
     # =============================================
     def render_mono(self, img, wvln=DEFAULT_WAVE, ks=101):
-        """Apply PSF to simulate lens blur for single spectral channel image.
+        """Simulate monochromatic lens blur by convolving an image with the point spread function.
 
         Args:
             img (torch.Tensor): Input image. Shape: (B, 1, H, W)
@@ -195,7 +206,7 @@ class DiffractiveLens(Lens):
             ks (int, optional): PSF kernel size. Defaults to 101.
 
         Returns:
-            img_render (torch.Tensor): Rendered image. Shape: (B, C, H, W)
+            torch.Tensor: Rendered image after applying lens blur with shape (B, 1, H, W).
         """
         psf = self.psf_infinite(wvln=wvln, ks=ks).unsqueeze(0)  # (1, ks, ks)
         img_render = conv_psf(img, psf)
@@ -206,7 +217,7 @@ class DiffractiveLens(Lens):
 
         Args:
             depth (float, optional): Depth of the point source. Defaults to float('inf').
-            wvln (float, optional): wvln. Defaults to 0.589 [um].
+            wvln (float, optional): Wavelength in micrometers. Defaults to 0.589 [um].
             ks (int, optional): PSF kernel size. Defaults to 101.
             upsample_factor (int, optional): Upsampling factor to meet Nyquist sampling constraint. Defaults to 1.
 
@@ -244,7 +255,7 @@ class DiffractiveLens(Lens):
         # Calculate intensity on the sensor. Shape [H_sensor, W_sensor]
         output_wave = self.forward(inp_wave)
         intensity = output_wave.u.abs() ** 2
-        
+
         # Interpolate wave to have the same pixel size as the sensor
         factor = output_wave.ps / self.pixel_size
         intensity = F.interpolate(
@@ -261,14 +272,21 @@ class DiffractiveLens(Lens):
             # crop
             start_h = (intensity_h - sensor_h) // 2
             start_w = (intensity_w - sensor_w) // 2
-            intensity = intensity[start_h : start_h + sensor_h, start_w : start_w + sensor_w]
+            intensity = intensity[
+                start_h : start_h + sensor_h, start_w : start_w + sensor_w
+            ]
         elif sensor_h > intensity_h or sensor_w > intensity_w:
             # pad
             pad_top = (sensor_h - intensity_h) // 2
             pad_bottom = sensor_h - intensity_h - pad_top
             pad_left = (sensor_w - intensity_w) // 2
             pad_right = sensor_w - intensity_w - pad_left
-            intensity = F.pad(intensity, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+            intensity = F.pad(
+                intensity,
+                (pad_left, pad_right, pad_top, pad_bottom),
+                mode="constant",
+                value=0,
+            )
 
         # Crop the valid patch from the full-resolution intensity map as the PSF
         coord_c_i = int(self.sensor_res[1] / 2)
@@ -291,7 +309,7 @@ class DiffractiveLens(Lens):
     # Visualization
     # =============================================
     def draw_layout(self, save_name="./doelens.png"):
-        """Draw lens setup."""
+        """Draw the lens setup."""
         fig, ax = plt.subplots()
 
         # Draw DOE
@@ -349,4 +367,12 @@ class DiffractiveLens(Lens):
     # Optimization
     # =============================================
     def get_optimizer(self, lr):
+        """Get optimizer for the lens parameters.
+
+        Args:
+            lr (float): Learning rate.
+
+        Returns:
+            Optimizer: Optimizer object for lens parameters.
+        """
         return self.doe.get_optimizer(lr=lr)

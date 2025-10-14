@@ -18,11 +18,11 @@ from deeplens.sensor import RGBSensor
 # Renderer
 # ===========================================
 class Renderer:
-    """Renderer is the basic class for image simulation. 
+    """Base class for image simulation and rendering.
     
-    We will support two types of renderers:
-        [1] Camera renderer using optical simulation.
-        [2] PSF renderer using calibrated PSF data.
+    Supports two types of renderers:
+        1. Camera renderer using optical simulation.
+        2. PSF renderer using calibrated PSF data.
     """
     def __init__(self, device=None):
         if device is None:
@@ -30,26 +30,22 @@ class Renderer:
         self.device = device
 
     def __call__(self, *args, **kwargs):
-        """Render a blurry and noisy RGB image batch with for loop."""
+        """Render a batch of blurry and noisy RGB images."""
         return self.render(*args, **kwargs)
 
     def set_device(self, device):
-        """Set the device for rendering."""
+        """Set the computing device for rendering operations."""
         self.device = device
 
     def move_to_device(self, data_dict):
-        """Move data to device."""
+        """Move all tensor data in the dictionary to the specified device."""
         for key in data_dict:
             if isinstance(data_dict[key], torch.Tensor):
                 data_dict[key] = data_dict[key].to(self.device)
         return data_dict
-
-    def render_single_frame(self, *args, **kwargs):
-        """Render a single frame of a blurry and noisy RGB image from spectral data."""
-        raise NotImplementedError
     
     def render(self, data_dict):
-        """Render a blurry and noisy RGB image batch with for loop."""
+        """Render a batch of blurry and noisy RGB images."""
         raise NotImplementedError
 
 
@@ -57,7 +53,11 @@ class Renderer:
 # Camera renderer
 # ===========================================
 class Camera(Renderer):
-    """Camera includes an optical lens and a sensor. It is used to simulate real camera-captured images for computational imaging."""
+    """Camera system consisting of an optical lens and a sensor.
+    
+    This class simulates real camera-captured images for computational imaging 
+    applications, including lens aberrations and sensor noise characteristics.
+    """
     def __init__(
         self,
         lens_file,
@@ -77,25 +77,30 @@ class Camera(Renderer):
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
 
     def __call__(self, data_dict):
-        """Simulate a blurry and noisy RGB image considering lens and sensor."""
+        """Simulate camera-captured images with lens aberrations and sensor noise."""
         return self.render(data_dict)
 
     def render(self, data_dict, render_mode="psf_patch", output_type="rggbif"):
-        """Simulate image with lens aberrations and sensor noise in linear RGB space. 
+        """Simulate camera-captured images with lens aberrations and sensor noise.
+        
+        This method performs the complete imaging pipeline: converts input to linear RGB,
+        applies lens aberrations, converts to Bayer format, adds sensor noise, and prepares
+        output for network training or testing.
 
         Args:
-            data_dict (dict): Dictionary containing essential information for image simulation. 
-                For example:
-                    {
-                        "img": sRGB image (torch.Tensor), (B, 3, H, W), [0, 1]
-                        "iso": iso (int), (B,)
-                        "field_center": field_center (torch.Tensor), (B, 2), [-1, 1]
-                    }
+            data_dict (dict): Dictionary containing essential imaging parameters:
+                - "img": sRGB image (torch.Tensor), shape (B, 3, H, W), range [0, 1]
+                - "iso": ISO value (int), shape (B,)
+                - "field_center": Field center coordinates (torch.Tensor), shape (B, 2), range [-1, 1]
+            render_mode (str): Rendering method. Defaults to "psf_patch".
+            output_type (str): Output format type. Defaults to "rggbif".
 
         Returns:
-            img_rgb (torch.Tensor): RGB image (B, 3, H, W), [0, 1]
+            tuple: (data_lq, data_gt)
+                - data_lq: Low-quality network input with degradations
+                - data_gt: Ground-truth data for training
 
-        Reference:
+        References:
             [1] "Unprocessing Images for Learned Raw Denoising", CVPR 2018.
             [2] "Optical Aberration Correction in Postprocessing using Imaging Simulation", SIGGRAPH 2021.
             [3] "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur", ICCV Workshop 2025.
@@ -128,15 +133,22 @@ class Camera(Renderer):
         return data_lq, data_gt
 
     def render_lens(self, img_linrgb, render_mode="psf_patch", **kwargs):
-        """Simulate an image with lens aberrations.
+        """Apply lens aberration effects to a linear RGB image.
 
         Args:
-            img_linrgb (torch.Tensor): Linear RGB image (energy image), (B, 3, H, W), [0, 1]
-            render_mode (str): Render mode. Defaults to "psf_patch".
-            **kwargs: Additional arguments for different methods.
+            img_linrgb (torch.Tensor): Linear RGB image (energy representation), 
+                shape (B, 3, H, W), range [0, 1]
+            render_mode (str): Rendering method to use. Options include:
+                - "psf_patch": PSF with patch-based rendering
+                - "psf_map": PSF map-based rendering
+                - "psf_pixel": Pixel-wise PSF rendering
+                - "ray_tracing": Full ray tracing simulation
+                - "psf_patch_depth_interp": PSF patch with depth interpolation
+                Defaults to "psf_patch".
+            **kwargs: Additional method-specific arguments (e.g., field_center, depth).
 
         Returns:
-            img_lq (torch.Tensor): Low-quality image (B, 3, H, W), [0, 1]
+            torch.Tensor: Degraded image with lens aberrations, shape (B, 3, H, W), range [0, 1]
         """        
         if render_mode == "psf_patch":
             # Because different image in a batch can have different PSF, so we use for loop here
@@ -182,15 +194,19 @@ class Camera(Renderer):
         output_type="rggbi",
         **kwargs,
     ):
-        """Pack Prepare network input for training and testing.
+        """Package Bayer data into network-ready input and ground-truth pairs.
 
         Args:
-            bayer_lq (torch.Tensor): Bayer image with noise (B, 1, H, W), [~black_level, 2**bit - 1]
-            bayer_gt (torch.Tensor): Bayer image (B, 1, H, W), [~black_level, 2**bit - 1]
-            iso (torch.Tensor): ISO value (B,)
-            iso_scale (int): ISO scale. Defaults to 1000.
-            output_type (str): Output type. Defaults to "rggbi".
-            **kwargs: Additional arguments.
+            bayer_lq (torch.Tensor): Noisy Bayer image, shape (B, 1, H, W), range [~black_level, 2**bit - 1]
+            bayer_gt (torch.Tensor): Clean Bayer image, shape (B, 1, H, W), range [~black_level, 2**bit - 1]
+            iso (torch.Tensor): ISO values, shape (B,)
+            iso_scale (int): Normalization factor for ISO values. Defaults to 1000.
+            output_type (str): Output format specification. Options:
+                - "rgb": Standard RGB format
+                - "rggbi": RGGB channels + ISO channel (5 channels)
+                - "rggbif": RGGB channels + ISO + field position (6 channels)
+                Defaults to "rggbi".
+            **kwargs: Additional data required for specific output types (e.g., field_center).
 
         Returns:
             *_lq (torch.Tensor): Low-quality network input (B, C, H, W)
