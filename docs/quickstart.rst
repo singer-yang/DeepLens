@@ -6,10 +6,10 @@ This guide will help you get started with DeepLens in just a few minutes.
 Hello DeepLens
 --------------
 
-Let's create a simple lens system and perform ray tracing.
+Let's create a simple geometric lens system and perform ray tracing.
 
-Basic Example
-^^^^^^^^^^^^^
+Create a lens (GeoLens for example)
+^^^^^^^^^^^
 
 .. code-block:: python
 
@@ -23,41 +23,21 @@ Basic Example
         device='cuda'
     )
     
-    # Print lens information
-    print(f"Focal length: {lens.foclen:.2f} mm")
-    print(f"F-number: {lens.fnum:.2f}")
-    print(f"Field of view: {lens.hfov:.2f} degrees")
-
-Ray Tracing
-^^^^^^^^^^^
-
-Perform ray tracing through the lens system:
-
-.. code-block:: python
-
-    from deeplens.optics import Ray
-    
-    # Create a ray bundle
-    ray = lens.sample_parallel_2D(R=5.0, M=256)
-    
-    # Trace rays through the lens
-    ray_out = lens.trace(ray)
-    
-    # Visualize the results
-    lens.plot_setup2D(M=5, plot_rays=True)
+    # Draw lens layout
+    lens.analysis()
 
 Point Spread Function (PSF)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Calculate and visualize the PSF:
+Calculate and visualize the PSF of the lens:
 
 .. code-block:: python
 
     # Calculate PSF
-    psf = lens.psf()
+    psf = lens.psf(points=torch.tensor([[0.0, 0.0, -10000.0]]))
     
     # Visualize PSF
-    lens.plot_psf(psf)
+    lens.plot_psf(psf.squeeze(0).cpu().numpy())
 
 Image Rendering
 ^^^^^^^^^^^^^^^
@@ -74,7 +54,7 @@ Render an image through the lens system:
     img_tensor = transforms.ToTensor()(img).unsqueeze(0).cuda()
     
     # Render through lens
-    img_rendered = lens.render(img_tensor, depth=1e4)
+    img_rendered = lens.render(img_tensor, depth=-10000.0, method="ray_tracing")
     
     # Save the result
     from torchvision.utils import save_image
@@ -82,6 +62,14 @@ Render an image through the lens system:
 
 Working with Different Lens Types
 ----------------------------------
+
+DeepLens supports various types of lens models to suit different simulation needs and computational requirements:
+
+* **GeoLens**: Traditional refractive lens systems using ray tracing
+* **HybridLens**: Hybrid refractive-diffractive lens systems using ray tracing and wave optics
+* **PSFNetLens**: Fast neural network-based PSF surrogate models
+* **ParaxialLens**: Simple paraxial/ABCD matrix model for defocus simulation
+* **DiffractiveLens**: Pure diffractive optical elements using wave propagation
 
 GeoLens (Geometric Lens)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -106,13 +94,17 @@ For fast PSF simulation using neural networks:
 
     from deeplens import PSFNetLens
     
+    # Create PSFNetLens with the original lens file
     lens = PSFNetLens(
-        ckpt_path='./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth',
-        device='cuda'
+        lens_path='./datasets/lenses/camera/ef50mm_f1.8.json',
+        sensor_res=(3000, 3000)
     )
     
+    # Load pretrained network weights
+    lens.load_net('./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth')
+    
     # Fast PSF calculation
-    psf = lens.psf(depth=1000, field=[0.0, 0.0])
+    psf_rgb = lens.psf_rgb(points=torch.tensor([[0.0, 0.0, -10000.0]]))
 
 HybridLens (Refractive-Diffractive)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -124,14 +116,54 @@ For hybrid refractive-diffractive lens systems:
     from deeplens import HybridLens
     
     lens = HybridLens(
-        filename='./datasets/lenses/hybridlens/hybrid_example.json',
+        filename='./datasets/lenses/hybridlens/a489_doe.json',
         device='cuda'
     )
+
+ParaxialLens (Paraxial Model)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For simple paraxial lens model with Circle of Confusion (CoC):
+
+.. code-block:: python
+
+    from deeplens import ParaxialLens
+    
+    lens = ParaxialLens(
+        foclen=50.0,
+        fnum=1.8,
+        sensor_size=(36.0, 24.0),
+        sensor_res=(2000, 2000),
+        device='cuda'
+    )
+    
+    # Refocus to a specific distance
+    lens.refocus(foc_dist=-1000.0)
+
+DiffractiveLens (Diffractive Optics)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For pure diffractive optical elements using wave propagation:
+
+.. code-block:: python
+
+    from deeplens import DiffractiveLens
+    
+    # Load from file
+    lens = DiffractiveLens(
+        filename='./datasets/lenses/diffraclens/doelens.json',
+        sensor_size=(8.0, 8.0),
+        sensor_res=(2000, 2000),
+        device='cuda'
+    )
+    
+    # Or create a simple example
+    lens = DiffractiveLens.load_example1()
 
 Camera System
 -------------
 
-Combine a lens with a sensor:
+Combine a lens with an image sensor:
 
 .. code-block:: python
 
@@ -145,8 +177,8 @@ Combine a lens with a sensor:
         device='cuda'
     )
     
-    # Capture image
-    image = camera.capture(scene, depth)
+    # Simulate an image
+    image = camera.render(data_dict, render_mode="psf_patch", output_type="rggbif")
 
 Next Steps
 ----------
