@@ -1,104 +1,122 @@
 Network API Reference
 =====================
 
-Neural network models for surrogate modeling and image reconstruction.
+DeepLens provides neural network modules for surrogate modeling of optics and for image reconstruction/restoration.
 
 Surrogate Networks
 ------------------
 
-PSFNet
-^^^^^^
+MLP
+^^^
 
-.. py:class:: deeplens.network.PSFNet(in_channels=3, out_channels=1, hidden_dim=256, num_layers=8, psf_size=64, device='cuda')
+.. py:class:: deeplens.network.MLP(in_features, out_features, hidden_features=64, hidden_layers=3)
 
-   Neural network for PSF prediction.
-
-   :param in_channels: Input dimension (depth, field)
-   :param out_channels: Output channels (1 for mono, 3 for RGB)
-   :param hidden_dim: Hidden layer dimension
-   :param num_layers: Number of layers
-   :param psf_size: Output PSF size
-   :param device: Device
-
-   **Methods:**
-
-   .. py:method:: forward(depth, field, wavelength=None)
-
-      Predict PSF.
-
-      :param depth: Object distance [B, 1]
-      :param field: Field position [B, 2]
-      :param wavelength: Wavelength [B, 1] (optional)
-      :return: PSF [B, C, H, W]
-
-SIREN
-^^^^^
-
-.. py:class:: deeplens.network.SIREN(in_features, out_features, hidden_features=256, hidden_layers=8, outermost_linear=True, first_omega_0=30.0, hidden_omega_0=30.0)
-
-   Sinusoidal representation network.
+   Multi-layer perceptron producing a normalized output vector (useful for PSF channel normalization).
 
    :param in_features: Input feature dimension
    :param out_features: Output feature dimension
-   :param hidden_features: Hidden layer size
-   :param hidden_layers: Number of hidden layers
-   :param outermost_linear: Use linear final layer
-   :param first_omega_0: First layer frequency
-   :param hidden_omega_0: Hidden layer frequency
+   :param hidden_features: Hidden layer width
+   :param hidden_layers: Number of additional hidden layers
 
    **Methods:**
 
-   .. py:method:: forward(coords)
+   .. py:method:: forward(x)
 
       Forward pass.
 
-      :param coords: Coordinate inputs [B, in_features]
-      :return: Outputs [B, out_features]
+      :param x: Input features [B, in_features]
+      :return: Normalized outputs [B, out_features]
 
 MLPConv
 ^^^^^^^
 
-.. py:class:: deeplens.network.MLPConv(spatial_dim=(64, 64), condition_dim=3, hidden_dim=512, num_layers=6, use_skip=True)
+.. py:class:: deeplens.network.MLPConv(in_features, ks, channels=3, activation='relu')
 
-   MLP with spatial convolutions.
+   MLP encoder + convolutional decoder that maps a condition vector to a spatial kernel/map. Useful for high-frequency PSF prediction.
 
-   :param spatial_dim: Spatial dimensions (H, W)
-   :param condition_dim: Conditioning vector dimension
-   :param hidden_dim: Hidden dimension
-   :param num_layers: Number of layers
-   :param use_skip: Use skip connections
+   :param in_features: Input feature dimension (e.g., condition) 
+   :param ks: Output spatial size (kernel size)
+   :param channels: Number of output channels
+   :param activation: Activation in bottleneck ("relu" or "sigmoid")
 
    **Methods:**
 
-   .. py:method:: forward(condition)
+   .. py:method:: forward(x)
 
-      Generate spatial output from condition.
+      Generate spatial output.
 
-      :param condition: Condition vector [B, condition_dim]
-      :return: Spatial map [B, C, H, W]
+      :param x: Condition vector [B, in_features]
+      :return: Spatial map [B, channels, ks, ks]
 
-ModulateSIREN
+Siren (sine linear layer)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. py:class:: deeplens.network.Siren(dim_in, dim_out, w0=1.0, c=6.0, is_first=False, use_bias=True, activation=None)
+
+   Sine-activated linear layer used to build SIREN-style implicit networks.
+
+   :param dim_in: Input dimension
+   :param dim_out: Output dimension
+   :param w0: Sine frequency multiplier
+   :param c: Initialization constant
+   :param is_first: Whether this is the first SIREN layer
+   :param use_bias: Use bias term
+   :param activation: Optional activation module (defaults to sine)
+
+   **Methods:**
+
+   .. py:method:: forward(x)
+
+      :param x: Inputs [B, dim_in]
+      :return: Outputs [B, dim_out]
+
+ModulateSiren
 ^^^^^^^^^^^^^
 
-.. py:class:: deeplens.network.ModulateSIREN(in_features, condition_features, out_features, hidden_features=256, hidden_layers=8)
+.. py:class:: deeplens.network.ModulateSiren(dim_in, dim_hidden, dim_out, dim_latent, num_layers, image_width, image_height, w0=1.0, w0_initial=30.0, use_bias=True, final_activation=None, outermost_linear=True)
 
-   SIREN with FiLM modulation.
+   SIREN-based synthesizer modulated by a latent vector (FiLM-like). Internally samples a fixed 
+   coordinate grid in [-1, 1] for the given spatial size and produces an image/map.
 
-   :param in_features: Spatial input features
-   :param condition_features: Conditioning features
-   :param out_features: Output features
-   :param hidden_features: Hidden layer size
-   :param hidden_layers: Number of layers
+   :param dim_in: Coordinate input dimension (typically 2)
+   :param dim_hidden: Hidden width in synthesizer SIREN
+   :param dim_out: Number of output channels
+   :param dim_latent: Latent vector dimension used by the modulator
+   :param num_layers: Number of SIREN layers in synthesizer/modulator
+   :param image_width: Output width
+   :param image_height: Output height
+   :param w0: Frequency scale for hidden SIREN layers
+   :param w0_initial: Frequency scale for the first SIREN layer
+   :param use_bias: Use bias terms
+   :param final_activation: Optional final activation
+   :param outermost_linear: If True, ends with Linear; otherwise another SIREN layer
 
    **Methods:**
 
-   .. py:method:: forward(coords, condition)
+   .. py:method:: forward(latent)
 
-      Modulated forward pass.
+      :param latent: Latent vector [B, dim_latent]
+      :return: Outputs [B, dim_out, image_height, image_width]
 
-      :param coords: Spatial coordinates [B, in_features]
-      :param condition: Condition vector [B, condition_features]
-      :return: Outputs [B, out_features]
+PSFNet_MLPConv
+^^^^^^^^^^^^^^
+
+.. py:class:: deeplens.network.surrogate.PSFNet_MLPConv(in_chan=2, kernel_size=128, out_chan=3, latent_dim=4096, latent_channels=16)
+
+   Combined MLP conditioner and convolutional decoder for spatially varying PSF modeling.
+
+   :param in_chan: Conditioner input dimension (e.g., 2 for (r, z))
+   :param kernel_size: Output PSF size (assumes powers of 2 per implementation)
+   :param out_chan: Output channels
+   :param latent_dim: Conditioner output (flatten) dimension
+   :param latent_channels: Channels used when reshaping latent to a feature map
+
+   **Methods:**
+
+   .. py:method:: forward(x)
+
+      :param x: Conditioner inputs [B, in_chan]
+      :return: PSF tensor [B, out_chan, kernel_size, kernel_size]
 
 Reconstruction Networks
 -----------------------
@@ -106,22 +124,16 @@ Reconstruction Networks
 UNet
 ^^^^
 
-.. py:class:: deeplens.network.UNet(in_channels=3, out_channels=3, base_channels=64, num_scales=4, use_dropout=False, device='cuda')
+.. py:class:: deeplens.network.UNet(in_channels=3, out_channels=3)
 
-   UNet for image restoration.
+   Lightweight UNet variant for image restoration.
 
    :param in_channels: Input channels
    :param out_channels: Output channels
-   :param base_channels: Base channel count
-   :param num_scales: Number of scales
-   :param use_dropout: Use dropout
-   :param device: Device
 
    **Methods:**
 
    .. py:method:: forward(x)
-
-      Restore image.
 
       :param x: Input image [B, C, H, W]
       :return: Restored image [B, C, H, W]
@@ -129,13 +141,14 @@ UNet
 NAFNet
 ^^^^^^
 
-.. py:class:: deeplens.network.NAFNet(img_channel=3, width=32, middle_blk_num=1, enc_blk_nums=[1,1,1,28], dec_blk_nums=[1,1,1,1])
+.. py:class:: deeplens.network.NAFNet(in_chan=3, out_chan=3, width=32, middle_blk_num=1, enc_blk_nums=[1,1,1,28], dec_blk_nums=[1,1,1,1])
 
-   Nonlinear Activation Free Network.
+   Nonlinear Activation Free Network for image restoration.
 
-   :param img_channel: Image channels
+   :param in_chan: Input channels
+   :param out_chan: Output channels
    :param width: Base width
-   :param middle_blk_num: Middle blocks
+   :param middle_blk_num: Number of middle blocks
    :param enc_blk_nums: Encoder blocks per scale
    :param dec_blk_nums: Decoder blocks per scale
 
@@ -143,320 +156,211 @@ NAFNet
 
    .. py:method:: forward(inp)
 
-      Restore image.
-
       :param inp: Input image [B, C, H, W]
       :return: Restored image [B, C, H, W]
 
 Restormer
 ^^^^^^^^^
 
-.. py:class:: deeplens.network.Restormer(inp_channels=3, out_channels=3, dim=48, num_blocks=[4,6,6,8], num_heads=[1,2,4,8], ffn_expansion_factor=2.66, bias=False)
+.. py:class:: deeplens.network.Restormer(inp_channels=3, out_channels=3, dim=48, num_blocks=[4,6,6,8], num_refinement_blocks=4, heads=[1,2,4,8], ffn_expansion_factor=2.66, bias=False, LayerNorm_type='WithBias', dual_pixel_task=False)
 
-   Transformer-based restoration.
+   Transformer-based restoration model.
 
    :param inp_channels: Input channels
    :param out_channels: Output channels
    :param dim: Base dimension
-   :param num_blocks: Blocks per scale
-   :param num_heads: Attention heads per scale
-   :param ffn_expansion_factor: FFN expansion
-   :param bias: Use bias
+   :param num_blocks: Blocks per encoder/decoder stage
+   :param num_refinement_blocks: Refinement blocks at the end
+   :param heads: Attention heads per scale
+   :param ffn_expansion_factor: FFN expansion factor
+   :param bias: Whether to use bias
+   :param LayerNorm_type: 'WithBias' or 'BiasFree'
+   :param dual_pixel_task: Enable dual-pixel defocus deblurring setting
 
    **Methods:**
 
    .. py:method:: forward(inp_img)
 
-      Restore image.
-
-      :param inp_img: Input [B, C, H, W]
-      :return: Restored [B, C, H, W]
+      :param inp_img: Input image [B, C, H, W]
+      :return: Restored image [B, C, H, W]
 
 SwinIR
 ^^^^^^
 
-.. py:class:: deeplens.network.SwinIR(img_size=64, patch_size=1, in_chans=3, embed_dim=180, depths=[6,6,6,6,6,6], num_heads=[6,6,6,6,6,6], window_size=8, upscale=1)
+.. py:class:: deeplens.network.reconstruction.SwinIR(img_size=64, patch_size=1, in_chans=3, embed_dim=96, depths=[6,6,6,6], num_heads=[6,6,6,6], window_size=7, mlp_ratio=4.0, qkv_bias=True, qk_scale=None, drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.1, norm_layer=nn.LayerNorm, ape=False, patch_norm=True, use_checkpoint=False, upscale=2, img_range=1.0, upsampler='', resi_connection='1conv')
 
-   Swin Transformer for restoration.
+   Swin Transformer-based restoration/upsampling model.
 
-   :param img_size: Input image size
+   :param img_size: Input image size (int or tuple)
    :param patch_size: Patch size
    :param in_chans: Input channels
    :param embed_dim: Embedding dimension
    :param depths: Depth per stage
-   :param num_heads: Heads per stage
+   :param num_heads: Attention heads per stage
    :param window_size: Window size
-   :param upscale: Upscaling factor
-
-   **Methods:**
-
-   .. py:method:: forward(x)
-
-      Process image.
-
-      :param x: Input [B, C, H, W]
-      :return: Output [B, C, H', W']
+   :param mlp_ratio: MLP ratio
+   :param upscale: Upscale factor (2/3/4/8; 1 for denoising/JPEG)
 
 Loss Functions
 --------------
 
-MSELoss
-^^^^^^^
-
-.. py:class:: deeplens.network.MSELoss()
-
-   Mean squared error loss.
-
-   .. py:method:: forward(pred, target)
-
-      Compute MSE.
-
-      :param pred: Predictions [B, C, H, W]
-      :param target: Ground truth [B, C, H, W]
-      :return: Loss scalar
-
 PSNRLoss
 ^^^^^^^^
 
-.. py:class:: deeplens.network.PSNRLoss(max_val=1.0)
+.. py:class:: deeplens.network.PSNRLoss(loss_weight=1.0, reduction='mean', toY=False)
 
-   PSNR-based loss (negative PSNR).
+   PSNR-based loss; larger PSNR corresponds to lower loss.
 
-   :param max_val: Maximum pixel value
+   **Methods:**
 
    .. py:method:: forward(pred, target)
 
-      Compute PSNR loss.
-
-      :param pred: Predictions
-      :param target: Ground truth
-      :return: Negative PSNR
+      :param pred: Predicted images [B, C, H, W]
+      :param target: Ground truth images [B, C, H, W]
+      :return: Loss scalar
 
 SSIMLoss
 ^^^^^^^^
 
 .. py:class:: deeplens.network.SSIMLoss(window_size=11, size_average=True)
 
-   SSIM-based loss.
+   SSIM-based loss returning 1 - SSIM.
 
-   :param window_size: Window size
-   :param size_average: Average over batch
+   **Methods:**
 
    .. py:method:: forward(pred, target)
 
-      Compute SSIM loss (1 - SSIM).
-
-      :param pred: Predictions
-      :param target: Ground truth
-      :return: Loss scalar
+      :param pred: Predicted images [B, C, H, W]
+      :param target: Ground truth images [B, C, H, W]
+      :return: Loss scalar (1 - SSIM)
 
 PerceptualLoss
 ^^^^^^^^^^^^^^
 
-.. py:class:: deeplens.network.PerceptualLoss(model='vgg19', layers=['relu1_2', 'relu2_2', 'relu3_4', 'relu4_4'], weights=[1.0, 1.0, 1.0, 1.0], device='cuda')
+.. py:class:: deeplens.network.PerceptualLoss(device=None, weights=[1.0, 1.0, 1.0, 1.0, 1.0])
 
-   VGG-based perceptual loss.
+   VGG16 feature-based perceptual loss using layers ``relu1_2``, ``relu2_2``, ``relu3_3``, ``relu4_3``, ``relu5_3``.
 
-   :param model: 'vgg16' or 'vgg19'
-   :param layers: Layers to use
-   :param weights: Layer weights
-   :param device: Device
+   **Methods:**
 
-   .. py:method:: forward(pred, target)
+   .. py:method:: forward(x, y)
 
-      Compute perceptual loss.
-
-      :param pred: Predictions [B, 3, H, W]
-      :param target: Ground truth [B, 3, H, W]
-      :return: Loss scalar
+      :param x: Predicted images [B, 3, H, W]
+      :param y: Target images [B, 3, H, W]
+      :return: Perceptual loss scalar
 
 Datasets
 --------
 
-PSFDataset
-^^^^^^^^^^
+ImageDataset
+^^^^^^^^^^^^
 
-.. py:class:: deeplens.network.PSFDataset(lens, num_samples=10000, depth_range=[500, 5000], field_range=[0.0, 1.0], wavelengths=[0.486, 0.550, 0.656], psf_size=64, spp=2048)
+.. py:class:: deeplens.network.ImageDataset(img_dir, img_res=None)
 
-   Dataset for PSF surrogate training.
-
-   :param lens: GeoLens object
-   :param num_samples: Number of samples
-   :param depth_range: [min, max] depth in mm
-   :param field_range: [min, max] normalized field
-   :param wavelengths: List of wavelengths in μm
-   :param psf_size: PSF image size
-   :param spp: Samples per PSF
+   Basic image dataset loader with augmentation and ImageNet-style normalization.
 
    **Methods:**
 
    .. py:method:: __getitem__(idx)
 
-      Get sample.
-
-      :return: Tuple (depth, field, wavelength, psf)
+      :return: Tensor image [C, H, W]
 
    .. py:method:: __len__()
 
-      Dataset length.
+      :return: Number of images
 
-      :return: Number of samples
+PhotographicDataset
+^^^^^^^^^^^^^^^^^^^
 
-RestorationDataset
-^^^^^^^^^^^^^^^^^^
+.. py:class:: deeplens.network.PhotographicDataset(img_dir, img_res=(512, 512), iso_range=(100, 400), is_train=True)
 
-.. py:class:: deeplens.network.RestorationDataset(clean_dir, degraded_dir, patch_size=256, augmentation=True)
-
-   Dataset for image restoration training.
-
-   :param clean_dir: Directory with clean images
-   :param degraded_dir: Directory with degraded images
-   :param patch_size: Patch size for training
-   :param augmentation: Use data augmentation
+   Image dataset that also samples ISO and field center for simulation-driven training.
 
    **Methods:**
 
    .. py:method:: __getitem__(idx)
 
-      Get image pair.
+      :return: Dict with keys ``img`` (Tensor [C, H, W]), ``iso`` (float), ``iso_scale`` (int), ``field_center`` (Tensor [2])
 
-      :return: Tuple (degraded, clean)
+   .. py:method:: __len__()
 
-Utilities
----------
+      :return: Number of images
 
-load_pretrained
-^^^^^^^^^^^^^^^
+Dataset download helpers
+^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. py:function:: deeplens.network.load_pretrained(model_name, device='cuda')
+.. py:function:: deeplens.network.dataset.download_bsd300(destination_folder='./datasets')
 
-   Load pre-trained model.
+   Download BSDS300 to ``destination_folder`` and return the image directory path.
 
-   :param model_name: Model identifier
-   :param device: Device
-   :return: Loaded model
+.. py:function:: deeplens.network.dataset.download_div2k(destination_folder)
 
-   **Available Models:**
+   Download and extract DIV2K (HR) splits into ``destination_folder``.
 
-   * ``'psfnet_ef50mm_f1.8'``: PSF network for Canon 50mm f/1.8
-   * ``'nafnet_deblur'``: NAFNet for deblurring
-   * ``'unet_aberration'``: UNet for aberration correction
+.. py:function:: deeplens.network.dataset.download_flick2k(destination_folder='./datasets')
 
-save_checkpoint
-^^^^^^^^^^^^^^^
+   Download and extract Flickr2K into ``destination_folder`` (via Hugging Face).
 
-.. py:function:: deeplens.network.save_checkpoint(model, optimizer, epoch, loss, filename)
+.. py:function:: deeplens.network.dataset.download_div8k(destination_folder='./datasets')
 
-   Save training checkpoint.
-
-   :param model: Model to save
-   :param optimizer: Optimizer state
-   :param epoch: Current epoch
-   :param loss: Current loss
-   :param filename: Output file path
-
-load_checkpoint
-^^^^^^^^^^^^^^^
-
-.. py:function:: deeplens.network.load_checkpoint(filename, model, optimizer=None)
-
-   Load training checkpoint.
-
-   :param filename: Checkpoint file
-   :param model: Model to load into
-   :param optimizer: Optimizer to load into (optional)
-   :return: Dictionary with epoch, loss info
+   Download and extract DIV8K into ``destination_folder`` (via Hugging Face).
 
 Examples
 --------
 
-Training PSFNet
-^^^^^^^^^^^^^^^
+PSF modeling with PSFNet_MLPConv
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from deeplens import GeoLens
-    from deeplens.network import PSFNet, PSFDataset
     import torch
-    from torch.utils.data import DataLoader
-    
-    # Create lens and network
-    lens = GeoLens(filename='lens.json')
-    model = PSFNet(in_channels=3, out_channels=1, psf_size=64).cuda()
-    
-    # Create dataset
-    dataset = PSFDataset(lens, num_samples=10000)
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
-    
-    # Training
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    
-    for epoch in range(100):
-        for depth, field, wvln, psf_gt in loader:
-            optimizer.zero_grad()
-            psf_pred = model(depth, field, wvln)
-            loss = torch.nn.functional.mse_loss(psf_pred, psf_gt)
-            loss.backward()
-            optimizer.step()
+    from deeplens.network.surrogate import PSFNet_MLPConv
 
-Using Pre-trained Models
-^^^^^^^^^^^^^^^^^^^^^^^^^
+    # (r, z) conditioner -> PSF
+    model = PSFNet_MLPConv(in_chan=2, kernel_size=128, out_chan=3)
+    rz = torch.tensor([[0.5, -5000.0], [-0.3, -2000.0]])  # [B=2, 2]
+    psf = model(rz)  # [2, 3, 128, 128]
+
+Image Restoration with NAFNet
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from deeplens.network import load_pretrained
-    
-    # Load pre-trained PSFNet
-    model = load_pretrained('psfnet_ef50mm_f1.8')
-    
-    # Predict PSF
-    psf = model(depth=torch.tensor([[1000.0]]), 
-                field=torch.tensor([[0.0, 0.5]]))
+    import torch
+    from deeplens.network import NAFNet
 
-Image Restoration
-^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    from deeplens.network import UNet
-    
-    # Create model
-    model = UNet(in_channels=3, out_channels=3).cuda()
-    
-    # Restore image
-    degraded = load_image('degraded.png')
+    model = NAFNet(in_chan=3, out_chan=3)
+    degraded = torch.rand(1, 3, 256, 256)
     restored = model(degraded)
-    save_image(restored, 'restored.png')
 
 Combined Loss
 ^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from deeplens.network import MSELoss, SSIMLoss, PerceptualLoss
-    
+    import torch
+    from deeplens.network import PSNRLoss, SSIMLoss, PerceptualLoss
+
     class CombinedLoss(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.mse = MSELoss()
+            self.psnr = PSNRLoss()
             self.ssim = SSIMLoss()
-            self.perceptual = PerceptualLoss()
-        
+            self.perc = PerceptualLoss()
         def forward(self, pred, target):
             loss = 0.0
-            loss += 1.0 * self.mse(pred, target)
-            loss += 0.5 * (1.0 - self.ssim(pred, target))
-            loss += 0.1 * self.perceptual(pred, target)
+            # Lower MSE -> higher PSNR -> lower PSNRLoss
+            loss += 1.0 * self.psnr(pred, target)
+            # SSIMLoss already returns (1 - SSIM)
+            loss += 0.5 * self.ssim(pred, target)
+            loss += 0.1 * self.perc(pred, target)
             return loss
-    
-    # Use in training
-    criterion = CombinedLoss()
-    loss = criterion(predicted, target)
 
 See Also
 --------
 
-* :doc:`../user_guide/neural_networks` - Detailed network guide
-* :doc:`../tutorials` - Training tutorials
-* :doc:`../examples/end2end_design` - End-to-end optimization
+* :doc:`../user_guide/neural_networks` – Overview and guidance
+* :doc:`../tutorials` – Training tutorials
+* :doc:`../examples/end2end_design` – End-to-end optimization
+
 
