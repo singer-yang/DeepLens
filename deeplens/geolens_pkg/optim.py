@@ -76,6 +76,7 @@ class GeoLensOptim:
             self.thick_min_center = 0.4
             self.flange_min = 0.8
 
+            # Air gap and thickness constraints
             self.air_max_edge = 2.0
             self.air_max_center = 0.5
             self.thick_max_edge = 2.0
@@ -85,8 +86,7 @@ class GeoLensOptim:
             # Surface shape constraints
             self.sag2diam_max = 0.1
             self.grad_max = 0.57 # tan(30deg)
-            self.grad2_max = 50.0
-            self.diam2thick_max = 10.0
+            self.diam2thick_max = 15.0
             self.tmax2tmin_max = 5.0
             
             # Ray angle constraints
@@ -112,15 +112,14 @@ class GeoLensOptim:
             # Surface shape constraints
             self.sag2diam_max = 0.1
             self.grad_max = 0.84 # tan(40deg)
-            self.grad2_max = 100.0
-            self.diam2thick_max = 15.0
-            self.tmax2tmin_max = 5.0
+            self.diam2thick_max = 20.0
+            self.tmax2tmin_max = 10.0
             
             # Ray angle constraints
             self.chief_ray_angle_max = 20.0 # deg
             self.obliq_min = 0.4
 
-    def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_gap=1.0, w_surf=1.0):
+    def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_gap=0.1, w_surf=1.0):
         """Regularization loss for lens design."""
         # Loss functions for regularization
         # loss_focus = self.loss_infocus()
@@ -178,12 +177,10 @@ class GeoLensOptim:
         """
         sag2diam_max = self.sag2diam_max
         grad_max_allowed = self.grad_max
-        grad2_max_allowed = self.grad2_max
         diam2thick_max = self.diam2thick_max
         tmax2tmin_max = self.tmax2tmin_max
 
         loss_grad = torch.tensor(0.0, device=self.device)
-        loss_grad2 = torch.tensor(0.0, device=self.device)
         loss_diam2thick = torch.tensor(0.0, device=self.device)
         loss_tmax2tmin = torch.tensor(0.0, device=self.device)
         loss_sag2diam = torch.tensor(0.0, device=self.device)
@@ -203,12 +200,6 @@ class GeoLensOptim:
             grad_max = grad_ls.abs().max()
             if grad_max > grad_max_allowed:
                 loss_grad += grad_max
-
-            # # 2nd-order derivative
-            # grad2_ls = self.surfaces[i].d2fdxyz2(x_ls, y_ls)[0]
-            # grad2_max = grad2_ls.abs().max()
-            # if grad2_max > grad2_max_allowed:
-            #     loss_grad2 += 10 * grad2_max
 
             # Diameter to thickness ratio, thick_max to thick_min ratio
             if not self.surfaces[i].mat2.name == "air":
@@ -232,7 +223,7 @@ class GeoLensOptim:
                 if tmax2tmin > tmax2tmin_max:
                     loss_tmax2tmin += tmax2tmin
 
-        return loss_sag2diam + loss_grad + loss_diam2thick + loss_tmax2tmin #+ loss_grad2
+        return loss_sag2diam + loss_grad + loss_diam2thick + loss_tmax2tmin
 
     def loss_intersec(self):
         """Loss function to avoid self-intersection.
