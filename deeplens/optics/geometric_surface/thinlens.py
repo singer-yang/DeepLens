@@ -52,7 +52,7 @@ class ThinLens(Plane):
 
         return params
 
-    def refract(self, ray, n=1.0):
+    def refract(self, ray, eta=1.0):
         """For a thin lens, all rays will converge to z = f plane. Therefore we trace the chief-ray (parallel-shift to surface center) to find the final convergence point for each ray.
 
         For coherent ray tracing, we can think it as a Fresnel lens with infinite refractive index.
