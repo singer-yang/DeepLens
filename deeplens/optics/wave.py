@@ -232,7 +232,7 @@ class ComplexWave(DeepObj):
             prop_dist_min = Nyquist_zmin(
                 wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0]
             )
-            assert np.abs(prop_dist) < prop_dist_min, (
+            assert np.abs(prop_dist) > prop_dist_min, (
                 f"Minimum required propagation distance is {prop_dist_min} mm, but propagation is still performed."
             )
             self.u = AngularSpectrumMethod(
@@ -259,18 +259,9 @@ class ComplexWave(DeepObj):
 
     def gen_xy_grid(self):
         """Generate the x and y grid."""
-        ps = self.ps
         x, y = torch.meshgrid(
-            torch.linspace(
-                -0.5 * self.phy_size[1] + 0.5 * ps,
-                0.5 * self.phy_size[1] - 0.5 * ps,
-                self.res[0],
-            ),
-            torch.linspace(
-                0.5 * self.phy_size[0] - 0.5 * ps,
-                -0.5 * self.phy_size[0] + 0.5 * ps,
-                self.res[1],
-            ),
+            torch.linspace(-0.5 * self.phy_size[1], 0.5 * self.phy_size[1], self.res[0],),
+            torch.linspace(0.5 * self.phy_size[0], -0.5 * self.phy_size[0], self.res[1],),
             indexing="xy",
         )
         return x, y
@@ -474,21 +465,19 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
         Wimg, Himg = Worg, Horg
 
     # Propagation with angular spectrum method
-    fx, fy = torch.meshgrid(
-        torch.linspace(-0.5 / ps, 0.5 / ps, Wimg, device=u.device),
-        torch.linspace(0.5 / ps, -0.5 / ps, Himg, device=u.device),
-        indexing="xy",
-    )
+    fx_1d = torch.fft.fftfreq(Wimg, d=ps, device=u.device)
+    fy_1d = torch.fft.fftfreq(Himg, d=ps, device=u.device)
+    fx, fy = torch.meshgrid(fx_1d, fy_1d, indexing="xy")
     square_root = torch.sqrt(1 - wvln_mm**2 * (fx**2 + fy**2))
+    # H is defined on the unshifted frequency grid to match fft2(u)
     H = torch.exp(1j * k * z * square_root)
-    H = ifftshift(H)
 
     # https://pytorch.org/docs/stable/generated/torch.fft.fftshift.html#torch.fft.fftshift
     u = ifft2(fft2(u) * H)
 
     # Remove padding
     if padding:
-        u = u[..., Wpad:-Wpad, Hpad:-Hpad]
+        u = u[..., Hpad:-Hpad, Wpad:-Wpad]
 
     del fx, fy
     return u
