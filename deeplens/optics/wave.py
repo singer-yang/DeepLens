@@ -217,6 +217,9 @@ class ComplexWave(DeepObj):
         """
         # Determine propagation method and perform propagation
         wvln_mm = self.wvln * 1e-3  # [um] to [mm]
+        asm_zmax = Nyquist_ASM_zmax(wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0])
+        
+        # Wave propagation methods
         if prop_dist < DELTA:
             # Zero distance: do nothing
             pass
@@ -227,18 +230,13 @@ class ComplexWave(DeepObj):
                 "The propagation distance is too short. We have to use full wave method (e.g., FDTD), which is not implemented yet."
             )
 
-        else:
+        elif prop_dist < asm_zmax:
             # Angular Spectrum Method (ASM)
-            prop_dist_min = Nyquist_zmin(
-                wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0]
-            )
-            assert np.abs(prop_dist) > prop_dist_min, (
-                f"Minimum required propagation distance is {prop_dist_min} mm, but propagation is still performed."
-            )
-            self.u = AngularSpectrumMethod(
-                self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n
-            )
+            self.u = AngularSpectrumMethod(self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n)
 
+        else:
+            raise Exception(f"Propagation distance is too long. The field is not propagated. Maximum propagation distance is {asm_zmax} mm.")
+        
         # Update z grid
         self.z += prop_dist
         return self
@@ -786,3 +784,10 @@ def Nyquist_zmin(wvln, ps, max_side_dist, n=1.0):
     wvln_mm = wvln * 1e-3
     zmin = np.sqrt((4 * ps**2 * n**2 / wvln_mm**2 - 1)) * max_side_dist
     return round(zmin, 3)
+
+
+def Nyquist_ASM_zmax(wvln, ps, max_side_dist, n=1.0):
+    """Maximum propagation distance for Angular Spectrum Method by Nyquist sampling criterion."""
+    wvln_mm = wvln * 1e-3
+    zmax = max_side_dist * ps / wvln_mm
+    return round(zmax, 3)
