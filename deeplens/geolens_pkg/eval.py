@@ -434,7 +434,7 @@ class GeoLensEval:
         assert depth != float("inf"), "depth cannot be infinity"
 
         # Sample rays from mapped sensor plane in the object space, shape (grid_size, grid_size, 3)
-        scale = self.calc_scale_pinhole(depth=depth)
+        scale = self.calc_scale(depth=depth)
         obj_size_x = self.sensor_size[1] * scale
         obj_size_y = self.sensor_size[0] * scale
         ray_x, ray_y = torch.meshgrid(

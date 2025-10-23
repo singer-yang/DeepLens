@@ -110,13 +110,13 @@ class GeoLensOptim:
             self.flange_max = 100.0  # float("inf")
 
             # Surface shape constraints
-            self.sag2diam_max = 0.1
+            self.sag2diam_max = 0.2
             self.grad_max = 0.84 # tan(40deg)
             self.diam2thick_max = 20.0
             self.tmax2tmin_max = 10.0
             
             # Ray angle constraints
-            self.chief_ray_angle_max = 20.0 # deg
+            self.chief_ray_angle_max = 40.0 # deg
             self.obliq_min = 0.4
 
     def loss_reg(self, w_focus=10.0, w_ray_angle=2.0, w_intersec=1.0, w_gap=0.1, w_surf=1.0):
