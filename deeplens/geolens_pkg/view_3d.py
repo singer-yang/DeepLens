@@ -41,7 +41,7 @@ from typing import List
 
 import numpy as np
 import torch
-from pyvista import Plotter, PolyData, merge
+from pyvista import Plotter
 
 from deeplens.optics import Ray
 from deeplens.basics import DEFAULT_WAVE
@@ -51,6 +51,76 @@ from deeplens.optics.geometric_surface import Aperture
 # Mesh class
 # (Surface mesh defined in the corresponding surface class)
 # ==========================================================
+# local dummy class for pyvista
+class PolyData:
+    def __init__(self, vertices, lines, faces):
+        self.n_points = len(vertices)
+        self.points = vertices
+        self.lines = lines
+        self.faces = faces
+        self.is_linemesh = False
+        self.is_facemesh = False
+        self.is_default = False
+        if lines is not None:
+            self.is_linemesh = True
+        if faces is not None:
+            self.is_facemesh = True
+        
+        assert not (self.is_linemesh and self.is_facemesh), "Invalid polydata"
+        
+    def save(self, filename: str):
+        # the local wrapper of the pyvista.PolyData.save method
+        # only support .obj format for now
+        
+        with open(filename, 'w') as f:
+            mesh_head = 'l' if self.is_linemesh else 'f'
+            v_head = 'v'
+            if self.is_linemesh:
+                for v in self.points:
+                    f.write(f'{v_head} {v[0]} {v[1]} {v[2]}\n')
+                for l in self.lines:
+                    f.write(f'{mesh_head} {l[0]+1} {l[1]+1}\n')
+            if self.is_facemesh:
+                for v in self.points:
+                    f.write(f'{v_head} {v[0]} {v[1]} {v[2]}\n')
+                for fm in self.faces:
+                    f.write(f'{mesh_head} {fm[0]+1} {fm[1]+1} {fm[2]+1}\n')
+    
+    # IMPLEMENT A DEFAULT METHOD FOR THE DUMMY CLASS
+    @staticmethod
+    def default():
+        """
+        Returns a default PolyData instance that can be used for type checks
+        and placeholder initialization. The default instance has an `is_default`
+        attribute set to True, which can be used to check for default status.
+        """
+        obj = PolyData(np.zeros((0, 3)), lines=None, faces=None)
+        obj.is_default = True
+        return obj
+
+def merge(meshes: List[PolyData]) -> PolyData:
+    if meshes is None or len(meshes) == 0:
+        return PolyData.default()
+    if len(meshes) == 1:
+        return meshes[0]
+    v_count = meshes[0].n_points
+    v_combined = meshes[0].points.copy()
+    is_linemesh = meshes[0].is_linemesh
+    is_facemesh = meshes[0].is_facemesh
+    mesh_combined = meshes[0].lines.copy() if is_linemesh else meshes[0].faces.copy()
+    for m in meshes[1:]:
+        # increment the vertex number by previous v_count
+        if m.is_linemesh:
+            v_combined = np.vstack([v_combined, m.points])
+            m.lines += v_count
+            mesh_combined = np.vstack([mesh_combined, m.lines])
+        if m.is_facemesh:
+            v_combined = np.vstack([v_combined, m.points])
+            m.faces += v_count
+            mesh_combined = np.vstack([mesh_combined, m.faces])
+        v_count += m.n_points
+    return PolyData(v_combined, lines=mesh_combined, faces=None) if is_linemesh else PolyData(v_combined, lines=None, faces=mesh_combined)
+
 
 class CrossPoly:
     def __init__(self):
@@ -95,9 +165,8 @@ class LineMesh(CrossPoly):
     def get_polydata(self):
         n_line = 0 if self.is_loop else -1
         n_line += self.n_vertices
-        line = [[2, i, (i + 1) % self.n_vertices] for i in range(n_line)]
-
-        return PolyData(self.vertices, lines=line)
+        line = np.array([[i, (i + 1) % self.n_vertices] for i in range(n_line)], dtype=np.uint32)
+        return PolyData(self.vertices, lines=line, faces=None)
 
 
 class Curve(LineMesh):
@@ -152,7 +221,7 @@ class FaceMesh(CrossPoly):
         self.n_vertices = n_vertices
         self.n_faces = n_faces
         self.vertices, self.faces = self._create_empty_data()
-        self.rim: LineMesh = None
+        self.rim: LineMesh = None # type: ignore
         self.create_data()
         self.create_rim()
 
@@ -171,11 +240,7 @@ class FaceMesh(CrossPoly):
         return self.get_polydata()
 
     def get_polydata(self) -> PolyData:
-        face_vertex_n = 3  # 3 vertices per face
-        face = np.hstack(
-            [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
-        )
-        return PolyData(self.vertices, face)
+        return PolyData(self.vertices, lines=None, faces=self.faces)
 
 
 class RectangleMesh(FaceMesh):
@@ -304,6 +369,21 @@ def bridge(
 
     return face_mesh
 
+def surf_to_face_mesh(surf) -> FaceMesh:
+    """Convert a Surface object to a FaceMesh object.
+    
+    Args:
+        surf: Surface. The surface object.
+    
+    Returns:
+        FaceMesh. The face mesh object.
+    """
+    n_vertices = surf.vertices.shape[0]
+    n_faces = surf.faces.shape[0]
+    face_mesh = FaceMesh(n_vertices=n_vertices, n_faces=n_faces)
+    face_mesh.vertices = surf.vertices
+    face_mesh.faces = surf.faces
+    return face_mesh
 
 # ====================================================
 # Ray visualization
@@ -417,14 +497,14 @@ def sample_parallel_3D(
     y2 = torch.concat((torch.tensor([0]), y2))
 
     z2 = torch.full_like(x2, pupilz)
-    o2 = torch.stack((x2, y2, z2), axis=-1)  # shape [M, 3]
+    o2 = torch.stack((x2, y2, z2), dim=-1)  # shape [M, 3]
 
     view_polar = view_polar / 57.3
     view_azi = view_azi / 57.3
     dx = torch.full_like(x2, np.sin(view_polar) * np.cos(view_azi))
     dy = torch.full_like(x2, np.sin(view_polar) * np.sin(view_azi))
     dz = torch.full_like(x2, np.cos(view_polar))
-    d = torch.stack((dx, dy, dz), axis=-1)
+    d = torch.stack((dx, dy, dz), dim=-1)
 
     # Move ray origins to z = - 0.1 for tracing
     if pupilz > 0:
@@ -515,7 +595,7 @@ class GeoLensVis3D:
         for i, surf in enumerate(self.surfaces):
             # Create the surface mesh (list of Surface objects)
             surf_meshes.append(surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms))
-                    
+            
             # Add the surface to the element group
             element_group.append(i)
             if surf.mat2.name == "air":
@@ -551,8 +631,10 @@ class GeoLensVis3D:
         sensor_mesh = RectangleMesh(
             np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
         )
-
-        return surf_meshes, bridge_meshes, element_groups, sensor_mesh
+        
+        # turn surf_meshes to list of FaceMesh
+        surf_meshes_cvt = [surf_to_face_mesh(surf) for surf in surf_meshes]
+        return surf_meshes_cvt, bridge_meshes, element_groups, sensor_mesh
 
 
     def draw_lens_3d(
@@ -624,7 +706,7 @@ class GeoLensVis3D:
         self,
         save_dir: str,
         mesh_rings: int = 64,
-        mesh_arms: int = 512,
+        mesh_arms: int = 128,
         save_rays: bool = False,
         fovs: List[float] = [0.0],
         fov_phis: List[float] = [0.0],
@@ -654,7 +736,7 @@ class GeoLensVis3D:
         surf_meshes, bridge_meshes, element_groups, sensor_mesh = self.create_mesh(
             mesh_rings, mesh_arms
         )
-
+        
         # Save individual lens elements
         if save_elements:
             bridge_idx = 0
@@ -668,6 +750,7 @@ class GeoLensVis3D:
                     surf2 = surf_meshes[b_idx].get_polydata()
                     bridge_mesh = bridge_meshes[bridge_idx].get_polydata()
                     bridge_idx += 1
+                    
                     element = merge([surf1, surf2, bridge_mesh])
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
                 elif len(pair) == 3:
