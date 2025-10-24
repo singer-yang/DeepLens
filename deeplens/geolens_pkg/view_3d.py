@@ -165,8 +165,7 @@ class LineMesh(CrossPoly):
     def get_polydata(self):
         n_line = 0 if self.is_loop else -1
         n_line += self.n_vertices
-        line = [[2, i, (i + 1) % self.n_vertices] for i in range(n_line)]
-
+        line = np.array([[i, (i + 1) % self.n_vertices] for i in range(n_line)], dtype=np.uint32)
         return PolyData(self.vertices, lines=line, faces=None)
 
 
@@ -241,11 +240,7 @@ class FaceMesh(CrossPoly):
         return self.get_polydata()
 
     def get_polydata(self) -> PolyData:
-        face_vertex_n = 3  # 3 vertices per face
-        face = np.hstack(
-            [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
-        )
-        return PolyData(self.vertices, lines=None, faces=face)
+        return PolyData(self.vertices, lines=None, faces=self.faces)
 
 
 class RectangleMesh(FaceMesh):
@@ -374,6 +369,21 @@ def bridge(
 
     return face_mesh
 
+def surf_to_face_mesh(surf) -> FaceMesh:
+    """Convert a Surface object to a FaceMesh object.
+    
+    Args:
+        surf: Surface. The surface object.
+    
+    Returns:
+        FaceMesh. The face mesh object.
+    """
+    n_vertices = surf.vertices.shape[0]
+    n_faces = surf.faces.shape[0]
+    face_mesh = FaceMesh(n_vertices=n_vertices, n_faces=n_faces)
+    face_mesh.vertices = surf.vertices
+    face_mesh.faces = surf.faces
+    return face_mesh
 
 # ====================================================
 # Ray visualization
@@ -585,7 +595,7 @@ class GeoLensVis3D:
         for i, surf in enumerate(self.surfaces):
             # Create the surface mesh (list of Surface objects)
             surf_meshes.append(surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms))
-                    
+            
             # Add the surface to the element group
             element_group.append(i)
             if surf.mat2.name == "air":
@@ -621,8 +631,10 @@ class GeoLensVis3D:
         sensor_mesh = RectangleMesh(
             np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
         )
-
-        return surf_meshes, bridge_meshes, element_groups, sensor_mesh
+        
+        # turn surf_meshes to list of FaceMesh
+        surf_meshes_cvt = [surf_to_face_mesh(surf) for surf in surf_meshes]
+        return surf_meshes_cvt, bridge_meshes, element_groups, sensor_mesh
 
 
     def draw_lens_3d(
@@ -694,7 +706,7 @@ class GeoLensVis3D:
         self,
         save_dir: str,
         mesh_rings: int = 64,
-        mesh_arms: int = 512,
+        mesh_arms: int = 128,
         save_rays: bool = False,
         fovs: List[float] = [0.0],
         fov_phis: List[float] = [0.0],
@@ -724,7 +736,7 @@ class GeoLensVis3D:
         surf_meshes, bridge_meshes, element_groups, sensor_mesh = self.create_mesh(
             mesh_rings, mesh_arms
         )
-
+        
         # Save individual lens elements
         if save_elements:
             bridge_idx = 0
@@ -738,6 +750,7 @@ class GeoLensVis3D:
                     surf2 = surf_meshes[b_idx].get_polydata()
                     bridge_mesh = bridge_meshes[bridge_idx].get_polydata()
                     bridge_idx += 1
+                    
                     element = merge([surf1, surf2, bridge_mesh])
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
                 elif len(pair) == 3:
