@@ -98,6 +98,29 @@ class PolyData:
         obj.is_default = True
         return obj
 
+def merge(meshes: List[PolyData]) -> PolyData:
+    if meshes is None or len(meshes) == 0:
+        return PolyData.default()
+    if len(meshes) == 1:
+        return meshes[0]
+    v_count = meshes[0].n_points
+    v_combined = meshes[0].points.copy()
+    is_linemesh = meshes[0].is_linemesh
+    is_facemesh = meshes[0].is_facemesh
+    mesh_combined = meshes[0].lines.copy() if is_linemesh else meshes[0].faces.copy()
+    for m in meshes[1:]:
+        # increment the vertex number by previous v_count
+        if m.is_linemesh:
+            v_combined = np.vstack([v_combined, m.points])
+            m.lines += v_count
+            mesh_combined = np.vstack([mesh_combined, m.lines])
+        if m.is_facemesh:
+            v_combined = np.vstack([v_combined, m.points])
+            m.faces += v_count
+            mesh_combined = np.vstack([mesh_combined, m.faces])
+        v_count += m.n_points
+    return PolyData(v_combined, lines=mesh_combined, faces=None) if is_linemesh else PolyData(v_combined, lines=None, faces=mesh_combined)
+
 
 class CrossPoly:
     def __init__(self):
