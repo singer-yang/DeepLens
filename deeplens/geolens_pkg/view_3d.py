@@ -41,7 +41,7 @@ from typing import List
 
 import numpy as np
 import torch
-from pyvista import Plotter, PolyData, merge
+from pyvista import Plotter
 
 from deeplens.optics import Ray
 from deeplens.basics import DEFAULT_WAVE
@@ -51,6 +51,53 @@ from deeplens.optics.geometric_surface import Aperture
 # Mesh class
 # (Surface mesh defined in the corresponding surface class)
 # ==========================================================
+# local dummy class for pyvista
+class PolyData:
+    def __init__(self, vertices, lines, faces):
+        self.n_points = len(vertices)
+        self.points = vertices
+        self.lines = lines
+        self.faces = faces
+        self.is_linemesh = False
+        self.is_facemesh = False
+        self.is_default = False
+        if lines is not None:
+            self.is_linemesh = True
+        if faces is not None:
+            self.is_facemesh = True
+        
+        assert not (self.is_linemesh and self.is_facemesh), "Invalid polydata"
+        
+    def save(self, filename: str):
+        # the local wrapper of the pyvista.PolyData.save method
+        # only support .obj format for now
+        
+        with open(filename, 'w') as f:
+            mesh_head = 'l' if self.is_linemesh else 'f'
+            v_head = 'v'
+            if self.is_linemesh:
+                for v in self.points:
+                    f.write(f'{v_head} {v[0]} {v[1]} {v[2]}\n')
+                for l in self.lines:
+                    f.write(f'{mesh_head} {l[0]+1} {l[1]+1}\n')
+            if self.is_facemesh:
+                for v in self.points:
+                    f.write(f'{v_head} {v[0]} {v[1]} {v[2]}\n')
+                for fm in self.faces:
+                    f.write(f'{mesh_head} {fm[0]+1} {fm[1]+1} {fm[2]+1}\n')
+    
+    # IMPLEMENT A DEFAULT METHOD FOR THE DUMMY CLASS
+    @staticmethod
+    def default():
+        """
+        Returns a default PolyData instance that can be used for type checks
+        and placeholder initialization. The default instance has an `is_default`
+        attribute set to True, which can be used to check for default status.
+        """
+        obj = PolyData(np.zeros((0, 3)), lines=None, faces=None)
+        obj.is_default = True
+        return obj
+
 
 class CrossPoly:
     def __init__(self):
@@ -97,7 +144,7 @@ class LineMesh(CrossPoly):
         n_line += self.n_vertices
         line = [[2, i, (i + 1) % self.n_vertices] for i in range(n_line)]
 
-        return PolyData(self.vertices, lines=line)
+        return PolyData(self.vertices, lines=line, faces=None)
 
 
 class Curve(LineMesh):
@@ -152,7 +199,7 @@ class FaceMesh(CrossPoly):
         self.n_vertices = n_vertices
         self.n_faces = n_faces
         self.vertices, self.faces = self._create_empty_data()
-        self.rim: LineMesh = None
+        self.rim: LineMesh = None # type: ignore
         self.create_data()
         self.create_rim()
 
@@ -175,7 +222,7 @@ class FaceMesh(CrossPoly):
         face = np.hstack(
             [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
         )
-        return PolyData(self.vertices, face)
+        return PolyData(self.vertices, lines=None, faces=face)
 
 
 class RectangleMesh(FaceMesh):
@@ -417,14 +464,14 @@ def sample_parallel_3D(
     y2 = torch.concat((torch.tensor([0]), y2))
 
     z2 = torch.full_like(x2, pupilz)
-    o2 = torch.stack((x2, y2, z2), axis=-1)  # shape [M, 3]
+    o2 = torch.stack((x2, y2, z2), dim=-1)  # shape [M, 3]
 
     view_polar = view_polar / 57.3
     view_azi = view_azi / 57.3
     dx = torch.full_like(x2, np.sin(view_polar) * np.cos(view_azi))
     dy = torch.full_like(x2, np.sin(view_polar) * np.sin(view_azi))
     dz = torch.full_like(x2, np.cos(view_polar))
-    d = torch.stack((dx, dy, dz), axis=-1)
+    d = torch.stack((dx, dy, dz), dim=-1)
 
     # Move ray origins to z = - 0.1 for tracing
     if pupilz > 0:
