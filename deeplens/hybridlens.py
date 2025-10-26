@@ -90,7 +90,7 @@ class HybridLens(Lens):
 
         # Add a Plane/Phase surface to GeoLens (DOE placeholder)
         r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
-        geolens.surfaces.append(Plane(d=doe.d, r=r_doe, mat2="air"))
+        geolens.surfaces.append(Plane(d=doe.d.item(), r=r_doe, mat2="air"))
         # r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
         # geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
         self.geolens = geolens
