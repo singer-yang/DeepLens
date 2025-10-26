@@ -95,7 +95,7 @@ class Lens(DeepObj):
         self.sensor_res = sensor_res
 
         # Change sensor size (r_sensor is fixed)
-        diam_res = np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2)
+        diam_res = float(np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2))
         self.sensor_size = (
             round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 3),
             round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 3),
