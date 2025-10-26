@@ -135,7 +135,7 @@ class Surface(DeepObj):
             d_surf = 0.0
 
         # Initial guess of t (can also use spherical surface for initial guess)
-        t = (0.0 - ray.o[..., 2]) / ray.d[..., 2]
+        t = - ray.o[..., 2] / ray.d[..., 2]
 
         # 1. Non-differentiable Newton's iterations to find the intersection points
         with torch.no_grad():
@@ -189,7 +189,7 @@ class Surface(DeepObj):
     def refract(self, ray, eta):
         """Calculate refracted ray according to Snell's law in local coordinate system.
 
-        Normal vector points from the surface toward the side where the light is coming from.
+        Normal vector points from the surface toward the side where the light is coming from. d is already normalized if both n and ray.d are normalized.
 
         Args:
             ray (Ray): incident ray.
@@ -206,16 +206,15 @@ class Surface(DeepObj):
         normal_vec = self.normal_vec(ray)
 
         # Compute refraction according to Snell's law, normal_vec * ray_d
-        cosi = (-normal_vec * ray.d).sum(-1).unsqueeze(-1)
+        dot_product = (-normal_vec * ray.d).sum(-1).unsqueeze(-1)
+        k = 1 - eta**2 * (1 - dot_product**2) 
 
-        # Total internal reflection. Shape [N] now, maybe broadcasted to [N, 1] in the future.
-        valid = (eta**2 * (1 - cosi**2) < 1).squeeze(-1) & (ray.valid > 0)
+        # Total internal reflection
+        valid = (k >= 0).squeeze(-1) & (ray.valid > 0)
+        k = k * valid.unsqueeze(-1)
 
-        # Square root term in Snell's law
-        sr = torch.sqrt(1 - eta**2 * (1 - cosi**2) * valid.unsqueeze(-1) + EPSILON)
-
-        # Update ray direction and obliquity. d is already normalized if both n and ray.d are normalized.
-        new_d = eta * ray.d + (eta * cosi - sr) * normal_vec
+        # Update ray direction and obliquity
+        new_d = eta * ray.d + (eta * dot_product - torch.sqrt(k + EPSILON)) * normal_vec
         # ==> Update obliq term to penalize steep rays in the later optimization.
         obliq = torch.sum(new_d * ray.d, axis=-1).unsqueeze(-1)
         obliq_update_mask = valid.unsqueeze(-1) & (obliq < 0.5)
@@ -247,9 +246,8 @@ class Surface(DeepObj):
         normal_vec = self.normal_vec(ray)
 
         # Reflect
-        ray.is_forward = ~ray.is_forward
-        cos_alpha = -(normal_vec * ray.d).sum(-1).unsqueeze(-1)
-        new_d = ray.d + 2 * cos_alpha * normal_vec
+        dot_product = (normal_vec * ray.d).sum(-1).unsqueeze(-1)
+        new_d = ray.d - 2 * dot_product * normal_vec
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
