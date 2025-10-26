@@ -92,9 +92,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.materials = []
             self.to(self.device)
 
-        # Initialize lens design constraints (edge thickness, etc.)
-        self.init_constraints()
-
     def read_lens(self, filename):
         """Read a GeoLens from a file.
 
@@ -1282,8 +1279,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         o1 = o1.to(device)
 
         # Sample the first surface as pupil
-        o2 = self.sample_circle(self.surfaces[0].r, z=0.0, shape=[SPP_CALC])
-        o2 *= 0.25  # Shrink sample region to improve accuracy
+        # o2 = self.sample_circle(self.surfaces[0].r, z=0.0, shape=[SPP_CALC])
+        # o2 *= 0.5  # Shrink sample region to improve accuracy
+        pupilz, pupilr = self.get_exit_pupil()
+        o2 = self.sample_circle(pupilr, pupilz, shape=[SPP_CALC])
         d = o2 - o1
         ray = Ray(o1, d, wvln, device=device)
 
@@ -1298,7 +1297,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         focus_z = focus_z[~np.isnan(focus_z) & (focus_z < 0)]
 
         if len(focus_z) > 0:
-            focal_plane = float(np.mean(focus_z))
+            # focal_plane = float(np.mean(focus_z))
+            focal_plane = float(np.median(focus_z))
         else:
             raise Exception("Focal plane in the image space, cannot be computed.")
 
@@ -1328,6 +1328,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         focus_z = focus_z[ray.valid > 0]
         focus_z = focus_z[~torch.isnan(focus_z) & (focus_z > 0)]
         d_sensor = torch.mean(focus_z)
+        # d_sensor = torch.median(focus_z)
         return d_sensor
 
     @torch.no_grad()
@@ -1502,13 +1503,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             avg_pupilr = self.surfaces[-1].r
             avg_pupilz = self.surfaces[-1].d.item()
         else:
-            # ===>
-            # avg_pupilr = torch.mean(intersection_points[:, 0]).item()
-            # avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-            # ===>
-            avg_pupilr = torch.median(intersection_points[:, 0]).item()
-            avg_pupilz = torch.median(intersection_points[:, 1]).item()
-            # ===>
+            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # avg_pupilr = torch.median(intersection_points[:, 0]).item()
+            # avg_pupilz = torch.median(intersection_points[:, 1]).item()
 
             if paraxial:
                 avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
@@ -1588,13 +1586,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
-            # ===>
-            # avg_pupilr = torch.mean(intersection_points[:, 0]).item()
-            # avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-            # ===>
-            avg_pupilr = torch.median(intersection_points[:, 0]).item()
-            avg_pupilz = torch.median(intersection_points[:, 1]).item()
-            # ===>
+            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # avg_pupilr = torch.median(intersection_points[:, 0]).item()
+            # avg_pupilz = torch.median(intersection_points[:, 1]).item()
 
             if paraxial:
                 avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
@@ -2003,6 +1998,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             list: optimizer parameters
         """
+        # Initialize lens design constraints (edge thickness, etc.)
+        self.init_constraints()
+
+        # Get optimizer
         params = self.get_optimizer_params(lrs=lrs, decay=decay, optim_surf_range=optim_surf_range, optim_mat=optim_mat)
         optimizer = torch.optim.Adam(params)
         # optimizer = torch.optim.SGD(params)
