@@ -78,8 +78,13 @@ cd DeepLens
 
 Create a conda environment:
 ```
-conda create --name deeplens_env python=3.12
+conda create -n deeplens_env python=3.12
 conda activate deeplens_env
+
+# Linux and Mac
+pip install torch torchvision
+# Windows
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 pip install -r requirements.txt
 ```
