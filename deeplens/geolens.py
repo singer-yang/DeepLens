@@ -1295,8 +1295,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         focus_z = focus_z[~np.isnan(focus_z) & (focus_z < 0)]
 
         if len(focus_z) > 0:
-            # focal_plane = float(np.mean(focus_z))
-            focal_plane = float(np.median(focus_z))
+            focal_plane = float(np.mean(focus_z))
+            # focal_plane = float(np.median(focus_z))
         else:
             raise Exception("Focal plane in the image space, cannot be computed.")
 
