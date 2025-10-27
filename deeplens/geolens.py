@@ -37,7 +37,7 @@ from deeplens.geolens_pkg.eval import GeoLensEval
 from deeplens.geolens_pkg.io import GeoLensIO
 from deeplens.geolens_pkg.optim import GeoLensOptim
 from deeplens.geolens_pkg.tolerance import GeoLensTolerance
-from deeplens.geolens_pkg.view_3d import GeoLensVis3D
+# from deeplens.geolens_pkg.view_3d import GeoLensVis3D
 from deeplens.geolens_pkg.vis import GeoLensVis
 from deeplens.lens import Lens
 from deeplens.optics.geometric_surface import (
@@ -62,7 +62,7 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTolerance, GeoLensVis3D):
+class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTolerance): #, GeoLensVis3D):
     def __init__(
         self,
         filename=None,
