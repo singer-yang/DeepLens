@@ -29,7 +29,6 @@ from deeplens.basics import (
     PSF_KS,
     SPP_CALC,
     SPP_COHERENT,
-    SPP_PARAXIAL,
     SPP_PSF,
     SPP_RENDER,
     WAVE_RGB,
@@ -82,7 +81,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Lens sensor size and resolution (will be overwritten if read from file)
         self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
-        # self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
 
         # Load lens file
         if filename is not None:
