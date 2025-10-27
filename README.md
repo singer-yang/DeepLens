@@ -78,14 +78,14 @@ cd DeepLens
 
 Create a conda environment:
 ```
-conda env create -f environment.yml -n deeplens_env
-```
-or
-```
-conda create --name deeplens_env python=3.9
+conda create --name deeplens_env python=3.12
 conda activate deeplens_env
 
 pip install -r requirements.txt
+```
+or
+```
+conda env create -f environment.yml -n deeplens_env
 ```
 
 Run the demo code:
