@@ -5,7 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Ray tracing geometric lens model. Differentiable ray tracing is used to simulate light propagation through the geometric lens. A geometric lens typically consists of refractive/reflective surfaces, but it can also contain diffractive surfaces, which are simplified as local gratings (similar to the approach used in Zemax).
+"""Geometric lens model. Differentiable ray tracing is used to simulate light propagation through a geometric lens. Accuracy is aligned with Zemax.
 
 Technical Paper:
     Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
@@ -29,7 +29,6 @@ from deeplens.basics import (
     PSF_KS,
     SPP_CALC,
     SPP_COHERENT,
-    SPP_PARAXIAL,
     SPP_PSF,
     SPP_RENDER,
     WAVE_RGB,
@@ -82,7 +81,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Lens sensor size and resolution (will be overwritten if read from file)
         self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
-        # self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
 
         # Load lens file
         if filename is not None:
@@ -91,9 +89,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.surfaces = []
             self.materials = []
             self.to(self.device)
-
-        # Initialize lens design constraints (edge thickness, etc.)
-        self.init_constraints()
 
     def read_lens(self, filename):
         """Read a GeoLens from a file.
@@ -1282,8 +1277,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         o1 = o1.to(device)
 
         # Sample the first surface as pupil
-        o2 = self.sample_circle(self.surfaces[0].r, z=0.0, shape=[SPP_CALC])
-        o2 *= 0.25  # Shrink sample region to improve accuracy
+        # o2 = self.sample_circle(self.surfaces[0].r, z=0.0, shape=[SPP_CALC])
+        # o2 *= 0.5  # Shrink sample region to improve accuracy
+        pupilz, pupilr = self.get_exit_pupil()
+        o2 = self.sample_circle(pupilr, pupilz, shape=[SPP_CALC])
         d = o2 - o1
         ray = Ray(o1, d, wvln, device=device)
 
@@ -1299,6 +1296,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         if len(focus_z) > 0:
             focal_plane = float(np.mean(focus_z))
+            # focal_plane = float(np.median(focus_z))
         else:
             raise Exception("Focal plane in the image space, cannot be computed.")
 
@@ -1328,6 +1326,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         focus_z = focus_z[ray.valid > 0]
         focus_z = focus_z[~torch.isnan(focus_z) & (focus_z > 0)]
         d_sensor = torch.mean(focus_z)
+        # d_sensor = torch.median(focus_z)
         return d_sensor
 
     @torch.no_grad()
@@ -1502,13 +1501,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             avg_pupilr = self.surfaces[-1].r
             avg_pupilz = self.surfaces[-1].d.item()
         else:
-            # ===>
-            # avg_pupilr = torch.mean(intersection_points[:, 0]).item()
-            # avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-            # ===>
-            avg_pupilr = torch.median(intersection_points[:, 0]).item()
-            avg_pupilz = torch.median(intersection_points[:, 1]).item()
-            # ===>
+            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # avg_pupilr = torch.median(intersection_points[:, 0]).item()
+            # avg_pupilz = torch.median(intersection_points[:, 1]).item()
 
             if paraxial:
                 avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
@@ -1588,13 +1584,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
-            # ===>
-            # avg_pupilr = torch.mean(intersection_points[:, 0]).item()
-            # avg_pupilz = torch.mean(intersection_points[:, 1]).item()
-            # ===>
-            avg_pupilr = torch.median(intersection_points[:, 0]).item()
-            avg_pupilz = torch.median(intersection_points[:, 1]).item()
-            # ===>
+            avg_pupilr = torch.mean(intersection_points[:, 0]).item()
+            avg_pupilz = torch.mean(intersection_points[:, 1]).item()
+            # avg_pupilr = torch.median(intersection_points[:, 0]).item()
+            # avg_pupilz = torch.median(intersection_points[:, 1]).item()
 
             if paraxial:
                 avg_pupilr = abs(avg_pupilr / DELTA_PARAXIAL * aper_r)
@@ -2003,6 +1996,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             list: optimizer parameters
         """
+        # Initialize lens design constraints (edge thickness, etc.)
+        self.init_constraints()
+
+        # Get optimizer
         params = self.get_optimizer_params(lrs=lrs, decay=decay, optim_surf_range=optim_surf_range, optim_mat=optim_mat)
         optimizer = torch.optim.Adam(params)
         # optimizer = torch.optim.SGD(params)

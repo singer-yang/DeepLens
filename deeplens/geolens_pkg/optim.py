@@ -69,19 +69,19 @@ class GeoLensOptim:
         if self.r_sensor < 12.0:
             self.is_cellphone = True
 
-            # Self intersection constraints
+            # Self intersection lower bounds
             self.air_min_edge = 0.05
             self.air_min_center = 0.05
             self.thick_min_edge = 0.25
             self.thick_min_center = 0.4
             self.flange_min = 0.8
 
-            # Air gap and thickness constraints
-            self.air_max_edge = 2.0
+            # Air gap and thickness upper bounds
+            self.air_max_edge = 3.0
             self.air_max_center = 0.5
             self.thick_max_edge = 2.0
             self.thick_max_center = 3.0
-            self.flange_max = 2.0
+            self.flange_max = 3.0
 
             # Surface shape constraints
             self.sag2diam_max = 0.1
@@ -96,13 +96,14 @@ class GeoLensOptim:
         else:
             self.is_cellphone = False
 
-            # Self-intersection constraints
+            # Self-intersection lower bounds
             self.air_min_edge = 0.1
             self.air_min_center = 0.1
             self.thick_min_edge = 1.0
             self.thick_min_center = 2.0
             self.flange_min = 5.0
             
+            # Air gap and thickness upper bounds
             self.air_max_edge = 100.0  # float("inf")
             self.air_max_center = 100.0  # float("inf")
             self.thick_max_edge = 20.0

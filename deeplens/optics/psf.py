@@ -7,15 +7,25 @@
 
 """PSF-related functions.
 
-PSF convolution for image simulation:
-1. PSF for image patch simulation.
-    - `conv_psf()`: a single PSF kernel for the whole patch, no spatial variation or defocus.
-    - `conv_psf_depth_interp()`: depth-varying PSF for the whole patch, no spatial variation.
-2. PSF map.
-    - `conv_psf_map()`: a PSF map for the whole image, spatial varying across different image patches, no spatial variation within the patch, no defocus.
-    - `conv_psf_map_depth_interp()`: depth-varying PSF map for the whole image, spatial varying across different image patches, no spatial variation within the patch.
-3. Per-pixel PSF. 
-    - `conv_psf_pixel()`: each pixel has a unique PSF, spatial variance and defocus.
+PSF convolution functions:
+    PSF for image patch simulation.
+        - conv_psf(): a single PSF kernel for the whole patch, no spatial variation or defocus.
+        - conv_psf_depth_interp(): depth-varying PSF for the whole patch, no spatial variation.
+    
+    PSF map.
+        - conv_psf_map(): a PSF map for the whole image, spatial varying across different image patches, no spatial variation within the patch, no defocus.
+        - conv_psf_map_depth_interp(): depth-varying PSF map for the whole image, spatial varying across different image patches, no spatial variation within the patch.
+    
+    Per-pixel PSF. 
+        - conv_psf_pixel(): each pixel has a unique PSF, spatial variance and defocus.
+
+Other functions:
+    - crop_psf_map(): crop a PSF map to a smaller size.
+    - interp_psf_map(): interpolate a PSF map to a different grid size.
+    - read_psf_map(): read a PSF map from a file.
+    - rotate_psf(): rotate a PSF kernel.
+    - solve_psf(): solve a PSF kernel from a given image and rendered image.
+    - solve_psf_map(): solve a PSF map from a given image and rendered image.
 """
 
 import cv2 as cv

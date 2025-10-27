@@ -5,7 +5,7 @@
 #     The material is provided as-is, with no warranties whatsoever.
 #     If you publish any code, data, or scientific work based on this, please cite our work.
 
-"""Optical materials."""
+"""Glass and plastic materials for optical lenses."""
 
 import json
 import os

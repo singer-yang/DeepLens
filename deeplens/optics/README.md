@@ -20,8 +20,6 @@ This package is essential for:
 
 -   `materials.py`: Defines a library of optical materials and their properties, which is crucial for realistic simulations.
 
--   `loss.py`: Contains custom loss functions tailored for optical design optimization.
-
 ## Sub-packages
 
 -   `geometric_surface/`: This sub-package includes classes for various types of geometric surfaces (e.g., `Aspheric`, `Conic`, `Cylindric`) that can be used to build refractive lenses.

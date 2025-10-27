@@ -17,8 +17,15 @@ from deeplens.basics import DEFAULT_WAVE, EPSILON, DeepObj
 
 class Ray(DeepObj):
     def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
-        """Optical ray class."""
+        """Initialize a ray object.
 
+        Args:
+            o (torch.Tensor): Ray origin, shape (*batch_size, num_rays, 3).
+            d (torch.Tensor): Ray direction, shape (*batch_size, num_rays, 3).
+            wvln (float or torch.Tensor): Ray wavelength, unit: [um]. If a tensor, shape must be (*batch_size, 1).
+            coherent (bool): Whether to use coherent ray tracing.
+            device (str): Device to store the ray.
+        """
         # Basic ray parameters
         self.o = o if torch.is_tensor(o) else torch.tensor(o)
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
@@ -52,7 +59,7 @@ class Ray(DeepObj):
         self.o = torch.where(valid_mask, new_o, self.o)
 
         if self.coherent:
-            if t.abs().max() > 100.0 and t.dtype != torch.float64:
+            if t.dtype != torch.float64:
                 raise Warning("Should use float64 in coherent ray tracing.")
             else:
                 new_opl = self.opl + n * t.unsqueeze(-1)
@@ -69,13 +76,13 @@ class Ray(DeepObj):
         return (self.o * self.valid.unsqueeze(-1)).sum(-2) / self.valid.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
-    
+
     def rms_error(self, center_ref=None):
         """Calculate the RMS error of the ray.
 
         Args:
             center_ref (torch.Tensor): Reference center of the ray, shape (..., 3). If None, use the centroid of the ray as reference.
-        
+
         Returns:
             torch.Tensor: average RMS error of the ray
         """
@@ -85,12 +92,12 @@ class Ray(DeepObj):
                 center_ref = self.centroid()
 
         center_ref = center_ref.unsqueeze(-2)
-        
+
         # Calculate RMS error for each region
-        rms_error = ((self.o[..., :2] - center_ref[..., :2])**2).sum(-1)
+        rms_error = ((self.o[..., :2] - center_ref[..., :2]) ** 2).sum(-1)
         rms_error = (rms_error * self.valid).sum(-1) / (self.valid.sum(-1) + EPSILON)
         rms_error = rms_error.sqrt()
-        
+
         # Average RMS error
         return rms_error.mean()
 
