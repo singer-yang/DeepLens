@@ -13,7 +13,6 @@ setup(
     install_requires=[
         'torch',
         'torchvision',
-        'torchaudio',
         'opencv-python',
         'matplotlib',
         'scikit-image',
@@ -21,7 +20,8 @@ setup(
         'lpips',
         'einops',
         'timm',
-        'tqdm'
+        'tqdm',
+        'wandb'
     ],
     classifiers=[
         'License :: CC-BY-4.0 License',
