@@ -15,6 +15,7 @@ from .view_3d import (
     geolens_ray_poly,
     CrossPoly,
     Aperture,
+    merge
 )
 from .view_3d import PolyData as BasePolyData
 
@@ -79,7 +80,7 @@ def _draw_mesh(plotter: pv.Plotter,
     poly = _wrap_base_poly(mesh.get_polydata()) # PolyData object
     plotter.add_mesh(poly, color=color, opacity=opacity)
     
-def _curve_list_to_polydata(meshes: List[Curve]) -> List[pv.PolyData]:
+def _curve_list_to_polydata(meshes: List[Curve]) -> List[BasePolyData]:
     """Convert a list of Curve objects to a list of PolyData objects.
 
     Args:
@@ -88,7 +89,7 @@ def _curve_list_to_polydata(meshes: List[Curve]) -> List[pv.PolyData]:
     Returns:
         List of PolyData objects
     """
-    return [_wrap_base_poly(c.get_polydata()) for c in meshes]
+    return [c.get_polydata() for c in meshes]
 
 def draw_lens_3d(
     plotter: pv.Plotter,
@@ -141,12 +142,14 @@ def draw_lens_3d(
     # Draw rays
     if draw_rays:
         rays_curve = geolens_ray_poly(lens, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms)
+        
         rays_poly_list = [_curve_list_to_polydata(r) for r in rays_curve]
-        rays_poly_fov = [pv.merge(r) for r in rays_poly_list]
+        rays_poly_fov = [merge(r) for r in rays_poly_list]
+        rays_poly_fov = [_wrap_base_poly(r) for r in rays_poly_fov]
         for r in rays_poly_fov:
             plotter.add_mesh(r)
 
     # Save images
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
-        plotter.screenshot(os.path.join(save_dir, "lens_layout3d.png"), return_img=False)
+        plotter.show(screenshot=os.path.join(save_dir, "lens_layout3d.png"))
