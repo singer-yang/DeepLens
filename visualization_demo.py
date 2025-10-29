@@ -6,6 +6,8 @@ import torch
 
 from deeplens import GeoLens
 
+from deeplens.geolens_pkg.view_3d_gui import draw_lens_3d
+
 # import pyvistaqt as pvqt
 # from deeplens.geolens_pkg.view_3d import draw_lens_3d, save_lens_obj
 
@@ -32,10 +34,11 @@ lens = GeoLens(lens_config)
 
 rfov = lens.rfov
 
-# lens.draw_lens_3d(
-#     fovs=[0.0, rfov * 0.99 * 57.296],
-#     fov_phis=[45.0, 135.0, 225.0, 315.0],
-#     save_dir=SAVE_DIR,
-# )
-
 lens.save_lens_obj(save_dir=SAVE_DIR, save_elements=True, save_rays=True)
+
+draw_lens_3d(
+    lens = lens,
+    save_dir=SAVE_DIR,
+    fovs=[0.0, rfov * 0.99 * 57.296],
+    fov_phis=[45.0, 135.0, 225.0, 315.0],
+)

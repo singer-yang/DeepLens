@@ -37,11 +37,11 @@ Functions:
 """
 
 import os
-from typing import List
+from typing import List, Any, Optional
 
 import numpy as np
 import torch
-from pyvista import Plotter
+# PyVista is intentionally not imported here to keep this module free of GUI deps
 
 from deeplens.optics import Ray
 from deeplens.basics import DEFAULT_WAVE
@@ -127,22 +127,10 @@ class CrossPoly:
         pass
 
     def get_polydata(self) -> PolyData:
-        pass
+        return PolyData.default()
 
     def get_obj_data(self):
         pass
-
-    def draw(self, plotter: Plotter, color: List[float], opacity: float = 1.0):
-        """Draw the mesh to the plotter.
-
-        Args:
-            plotter: Plotter
-            color: List[float]. The color of the mesh.
-            opacity: float. The opacity of the mesh.
-        """
-        poly = self.get_polydata()
-        poly["colors"] = np.vstack([color] * poly.n_points)
-        plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
 
 
 class LineMesh(CrossPoly):
@@ -172,7 +160,7 @@ class LineMesh(CrossPoly):
 class Curve(LineMesh):
     """A curve mesh with vertices and lines. Currently used for ray meshes."""
     
-    def __init__(self, vertices: np.ndarray, is_loop: bool = None):
+    def __init__(self, vertices: np.ndarray, is_loop: bool = False):
         n_vertices = vertices.shape[0]
         super().__init__(n_vertices, is_loop)
         self.vertices = vertices
@@ -552,21 +540,12 @@ def curve_from_trace(lens, ray: Ray, delete_vignetting=True):
 # ====================================================
 
 class GeoLensVis3D:
-    """GeoLens utility class for visualizing the lens geometry and rays in 3D."""
-    
-    @staticmethod
-    def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0):
-        """Draw a mesh to the plotter.
+    """GeoLens utility class for geometry/ray mesh creation and export (no GUI deps)."""
 
-        Args:
-            plotter: Plotter
-            mesh: CrossPoly
-            color: List[float]. The color of the mesh.
-            opacity: float. The opacity of the mesh.
-        """
-        poly = mesh.get_polydata() # PolyData object
-        plotter.add_mesh(poly, color=color, opacity=opacity)
-
+    # # Attribute stubs to satisfy type checkers when mixed into GeoLens
+    # surfaces: List[Any]
+    # d_sensor: Any
+    # r_sensor: float
 
     def create_mesh(
         self,
@@ -637,9 +616,10 @@ class GeoLensVis3D:
         return surf_meshes_cvt, bridge_meshes, element_groups, sensor_mesh
 
 
+    # Backward-compat shim: guide users to the standalone GUI function
     def draw_lens_3d(
         self,
-        save_dir: str = None,
+        save_dir: Optional[str] = None,
         mesh_rings: int = 32,
         mesh_arms: int = 128,
         surface_color: List[float] = [0.06, 0.3, 0.6],
@@ -649,57 +629,10 @@ class GeoLensVis3D:
         ray_rings: int = 6,
         ray_arms: int = 8,
     ):
-        """Draw lens 3D layout with rays using pyvista.
-
-        Args:
-            lens (GeoLens): The lens object.
-            save_dir (str): The directory to save the image.
-            mesh_rings (int): The number of rings in the mesh.
-            mesh_arms (int): The number of arms in the mesh.
-            surface_color (List[float]): The color of the surfaces.
-            draw_rays (bool): Whether to show the rays.
-            fovs (List[float]): The FoV angles to be sampled, unit: degree.
-            fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
-            ray_rings (int): The number of pupil rings to be sampled.
-            ray_arms (int): The number of pupil arms to be sampled.
-        """
-        surf_color = np.array(surface_color)
-        sensor_color = np.array([0.5, 0.5, 0.5])
-
-        # Initialize plotter
-        plotter = Plotter(window_size=(3840, 2160), off_screen=True)
-        plotter.camera.up = [0, 1, 0]
-        unit = self.d_sensor.item()
-        plotter.camera.position = [-2 * unit, unit, -unit / 2]
-        plotter.camera.focal_point = [0, 0, unit / 2]
-        
-        # Create meshes
-        surf_meshes, bridge_meshes, _, sensor_mesh = self.create_mesh(
-            mesh_rings, mesh_arms
+        raise ImportError(
+            "draw_lens_3d has moved to deeplens.geolens_pkg.view_3d_gui.draw_lens_3d. "
+            "This keeps PyVista optional. Please import and call the standalone function instead."
         )
-
-        # Draw meshes
-        for surf in surf_meshes:
-            if not isinstance(surf, Aperture):
-                self.draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
-
-        for bridge in bridge_meshes:
-            self.draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
-        
-        self.draw_mesh(plotter, sensor_mesh, color=sensor_color, opacity=1.0)
-
-        # Draw rays
-        if draw_rays:
-            rays_curve = geolens_ray_poly(self, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms)
-            rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
-            rays_poly_fov = [merge(r) for r in rays_poly_list]
-            for r in rays_poly_fov:
-                plotter.add_mesh(r)
-
-        # Save images
-        if save_dir is not None:
-            os.makedirs(save_dir, exist_ok=True)
-            plotter.screenshot(os.path.join(save_dir, "lens_layout3d.png"), return_img=False)
 
 
     def save_lens_obj(
