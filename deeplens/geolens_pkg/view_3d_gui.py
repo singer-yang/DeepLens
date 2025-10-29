@@ -41,7 +41,6 @@ def _wrap_base_poly(poly: BasePolyData) -> pv.PolyData:
         p = poly.points
         n_p = poly.n_points
         m = poly.lines if poly.is_linemesh else poly.faces
-        print(m.shape)
         if poly.is_linemesh:
             _add_on = np.ones((m.shape[0], 1), dtype=np.int64)
             _add_on = 2 * _add_on
@@ -92,6 +91,7 @@ def _curve_list_to_polydata(meshes: List[Curve]) -> List[pv.PolyData]:
     return [_wrap_base_poly(c.get_polydata()) for c in meshes]
 
 def draw_lens_3d(
+    plotter: pv.Plotter,
     lens: GeoLens,
     save_dir: Optional[str] = None,
     mesh_rings: int = 32,
@@ -122,12 +122,6 @@ def draw_lens_3d(
     surf_color = surface_color
     sensor_color = [0.5, 0.5, 0.5]
 
-    # Initialize plotter
-    plotter = pv.Plotter(window_size=(3840, 2160), off_screen=True)
-    plotter.camera.up = [0, 1, 0]
-    unit = lens.d_sensor.item()
-    plotter.camera.position = [-2 * unit, unit, -unit / 2]
-    plotter.camera.focal_point = [0, 0, unit / 2]
     
     # Create meshes
     surf_meshes, bridge_meshes, _, sensor_mesh = lens.create_mesh(
