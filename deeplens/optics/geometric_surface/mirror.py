@@ -27,10 +27,6 @@ class Mirror(Plane):
             device=device,
         )
 
-    @classmethod
-    def init_from_dict(cls, surf_dict):
-        return cls(surf_dict["r"], surf_dict["d"], surf_dict["mat2"])
-
     def ray_reaction(self, ray, n1=None, n2=None):
         """Compute output ray after intersection and reflection with the mirror surface."""
         ray = self.to_local_coord(ray)
