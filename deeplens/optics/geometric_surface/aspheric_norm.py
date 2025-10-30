@@ -9,10 +9,11 @@ Note: one problem for normalized aspheric coefficients is that when norm_r is sm
 import numpy as np
 import torch
 
-from deeplens.optics.geometric_surface.base import EPSILON, Surface
+from deeplens.optics.geometric_surface.base import EPSILON
+from deeplens.optics.geometric_surface.aspheric_base import AsphericBase
 
 
-class AsphericNorm(Surface):
+class AsphericNorm(AsphericBase):
     def __init__(
         self,
         r,
@@ -61,22 +62,6 @@ class AsphericNorm(Surface):
 
         self.tolerancing = False
         self.to(device)
-
-    @classmethod
-    def init_from_dict(cls, surf_dict):
-        if "roc" in surf_dict:
-            c = 1 / surf_dict["roc"]
-        else:
-            c = surf_dict["c"]
-
-        return cls(
-            r=surf_dict["r"],
-            d=surf_dict["d"],
-            c=c,
-            k=surf_dict["k"],
-            ai=surf_dict["ai"],
-            mat2=surf_dict["mat2"],
-        )
 
     def _sag(self, x, y):
         """Compute surface height."""
