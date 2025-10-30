@@ -41,19 +41,33 @@ class AsphericBase(Surface):
     # Tolerancing
     # =======================================
     def sample_tolerance(self):
-        """Randomly perturb surface parameters to simulate manufacturing errors."""
+        """Randomly perturb surface parameters to simulate manufacturing errors.
+        
+        Samples random errors for curvature (c) and conic constant (k) parameters
+        based on their tolerance values to simulate manufacturing variations.
+        """
         super().sample_tolerance()
         self.c_error = float(np.random.randn() * self.c_tole)
         self.k_error = float(np.random.randn() * self.k_tole)
 
     def zero_tolerance(self):
-        """Clear perturbation."""
+        """Reset tolerance parameters to zero to clear manufacturing perturbations.
+        
+        Clears all manufacturing error simulations by setting error values to zero.
+        """
         super().zero_tolerance()
         self.c_error = 0.0
         self.k_error = 0.0
 
     def sensitivity_score(self):
-        """Calculate tolerance sensitivity score."""
+        """Calculate tolerance sensitivity score as squared sum of parameter tolerances.
+        
+        Computes sensitivity scores for curvature and conic constant parameters
+        by calculating the product of squared tolerances and squared gradients.
+        
+        Returns:
+            dict: Dictionary containing gradient values and sensitivity scores for c and k parameters.
+        """
         score_dict = super().sensitivity_score()
         score_dict.update(
             {
