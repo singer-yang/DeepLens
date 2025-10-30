@@ -6,38 +6,18 @@ from deeplens.optics.geometric_surface.base import Surface
 
 
 class Plane(Surface):
-    def __init__(
-        self,
-        r,
-        d,
-        mat2,
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
-        is_square=False,
-        device="cpu",
-    ):
-        """Plane surface.
+    """Plane surface.
 
-        Examples:
-            - IR filter.
-            - Lens cover glass.
-            - DOE base.
+    Examples:
+        - IR filter.
+        - Lens cover glass.
+        - DOE base.
 
-        The following surfaces inherit from Plane:
-            - Aperture.
-            - Mirror.
-            - ThinLens.
-        """
-        Surface.__init__(
-            self,
-            r=r,
-            d=d,
-            mat2=mat2,
-            pos_xy=pos_xy,
-            vec_local=vec_local,
-            is_square=is_square,
-            device=device,
-        )
+    The following surfaces inherit from Plane:
+        - Aperture.
+        - Mirror.
+        - ThinLens.
+    """
 
     @classmethod
     def init_from_dict(cls, surf_dict):

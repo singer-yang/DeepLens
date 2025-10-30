@@ -3,6 +3,7 @@
 import numpy as np
 
 from deeplens.optics.geometric_surface.plane import Plane
+from deeplens.optics.geometric_surface.base import Surface
 
 
 class Aperture(Plane):
@@ -16,7 +17,7 @@ class Aperture(Plane):
         device="cpu",
     ):
         """Aperture surface."""
-        Plane.__init__(
+        Surface.__init__(
             self,
             r=r,
             d=d,

@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from deeplens.optics.geometric_surface.plane import Plane
+from deeplens.optics.geometric_surface.base import Surface
 
 
 class ThinLens(Plane):
@@ -18,7 +19,7 @@ class ThinLens(Plane):
         device="cpu",
     ):
         """Thin lens surface."""
-        Plane.__init__(
+        Surface.__init__(
             self,
             r=r,
             d=d,
@@ -111,9 +112,6 @@ class ThinLens(Plane):
 
     def _sag(self, x, y):
         return torch.zeros_like(x)
-
-    def _dfdxy(self, x, y):
-        return torch.zeros_like(x), torch.zeros_like(x)
 
     # =========================================
     # Visualization
