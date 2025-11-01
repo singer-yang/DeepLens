@@ -100,7 +100,7 @@ class Lens(DeepObj):
             round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 3),
             round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 3),
         )
-        self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 3)
+        self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
 
 
     # ===========================================
