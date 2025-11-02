@@ -346,7 +346,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             pupilz, pupilr = self.get_entrance_pupil()
             pupilr *= scale_pupil
         else:
-            pupilz, pupilr = 0, self.surfaces[0].r
+            pupilz, pupilr = 0.0, self.surfaces[0].r
             pupilr *= scale_pupil
 
         ray_o = self.sample_circle(
@@ -487,23 +487,19 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """
         device = self.device
 
-        # Generate random angles
+        # Generate random angles and radii
         theta = torch.rand(*shape, device=device) * 2 * torch.pi
-
-        # Generate random radii with square root for uniform distribution
         r2 = torch.rand(*shape, device=device) * r**2
-        radius = torch.sqrt(r2 + EPSILON)
+        radius = torch.sqrt(r2)
 
-        # Convert to Cartesian coordinates
+        # Stack to form 3D points
         x = radius * torch.cos(theta)
         y = radius * torch.sin(theta)
         z_tensor = torch.full_like(x, z)
-
-        # Stack to form 3D points
         points = torch.stack((x, y, z_tensor), dim=-1)
 
-        # Fix all chief rays to facilitate the design of telecentricity.
-        points[..., 0, :2] = 0.0
+        # Manually sample chief ray
+        # points[..., 0, :2] = 0.0
 
         return points
 
@@ -1248,7 +1244,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             [2] https://rafcamera.com/info/imaging-theory/back-focal-length
         """
         # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
-        paraxial_fov_rad = 0.001
+        paraxial_fov_rad = 0.01
         paraxial_fov_deg = float(np.rad2deg(paraxial_fov_rad))
         ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, entrance_pupil=False, scale_pupil=0.2)
         ray = self.trace2sensor(ray)
@@ -1394,10 +1390,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Args:
             paraxial (bool): If True, use paraxial approximation. Default: True.
-
-        Notes:
-            - If `self.float_enpd` is True, set ENPD based on computed pupil radius.
-            - Otherwise, override computed entrance pupil radius using fixed ENPD.
         """
         # Find aperture
         self.aper_idx = None
