@@ -112,12 +112,14 @@ def merge(meshes: List[PolyData]) -> PolyData:
         # increment the vertex number by previous v_count
         if m.is_linemesh:
             v_combined = np.vstack([v_combined, m.points])
-            m.lines += v_count
-            mesh_combined = np.vstack([mesh_combined, m.lines])
+            new_lines = m.lines.copy()
+            new_lines += v_count
+            mesh_combined = np.vstack([mesh_combined, new_lines])
         if m.is_facemesh:
             v_combined = np.vstack([v_combined, m.points])
-            m.faces += v_count
-            mesh_combined = np.vstack([mesh_combined, m.faces])
+            new_faces = m.faces.copy()
+            new_faces += v_count
+            mesh_combined = np.vstack([mesh_combined, new_faces])
         v_count += m.n_points
     return PolyData(v_combined, lines=mesh_combined, faces=None) if is_linemesh else PolyData(v_combined, lines=None, faces=mesh_combined)
 
