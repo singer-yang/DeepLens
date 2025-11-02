@@ -686,8 +686,9 @@ class GeoLensVis3D:
                     bridge_mesh = bridge_meshes[bridge_idx].get_polydata()
                     bridge_idx += 1
                     
-                    element = merge([surf1, surf2, bridge_mesh])
+                    element = merge([surf1, surf2])
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                    bridge_mesh.save(os.path.join(save_dir, f"element_bridge_{i}.obj"))
                 elif len(pair) == 3:
                     a_idx, b_idx, c_idx = pair
                     surf1 = surf_meshes[a_idx].get_polydata()
@@ -697,8 +698,10 @@ class GeoLensVis3D:
                     bridge_idx += 1
                     bridge2 = bridge_meshes[bridge_idx].get_polydata()
                     bridge_idx += 1
-                    element = merge([surf1, surf2, surf3, bridge1, bridge2])
+                    element = merge([surf1, surf2, surf3])
+                    element_bridge = merge([bridge1, bridge2])
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                    element_bridge.save(os.path.join(save_dir, f"element_bridge_{i}.obj"))
                 else:
                     raise ValueError(f"Invalid bridge group length: {len(pair)}")
 
