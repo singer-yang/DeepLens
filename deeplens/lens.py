@@ -373,7 +373,7 @@ class Lens(DeepObj):
         Image simulation methods:
             [1] PSF map, convolution by patches.
             [2] PSF patch, convolution by a single PSF.
-            [3] Ray tracing-based rendering, in GeoLens.
+            [3] Ray tracing rendering, in GeoLens.
             [4] ...
 
         Args:
