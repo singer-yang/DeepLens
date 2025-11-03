@@ -135,10 +135,6 @@ We welcome all contributions. To get started, please read our [Contributing Guid
   <img src="https://contrib.rocks/image?repo=singer-yang/DeepLens" />
 </a>
 
-## License
-
-DeepLens is released under the [Creative Commons Attribution-NonCommercial 4.0 International License](./LICENSE). This means the project can be used for non-commercial purposes with attribution. 
-
 ## Citation
 
 If you use DeepLens in your research, please cite the paper. See more in [History of DeepLens](./CITATION.md).

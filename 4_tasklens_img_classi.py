@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Task-driven lens design for image classification.
 
 We design a lens with from scratch with only image-classification loss. This makes sure no classical lens design objective (spot size, PSF...) is used in the task-driven lens design. By doing this, we can explore "unseen" lens design space to find a lens that is optimal for a specific task, because we totally get rid of classical lens design!

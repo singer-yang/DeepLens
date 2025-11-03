@@ -37,4 +37,4 @@ Our goal is to solve practical problems in optical design and computational imag
 - Understand that speech and actions have consequences, and unacceptable behavior will not be tolerated.
 - If you are the subject of, or witness to any violations of this Code of Conduct, please contact us by emailing Xinge Yang at xinge.yang@kaust.edu.sa.
 - If violations occur, project maintainers will take any action they deem appropriate for the infraction, up to and including a temporary or permanent ban from the community.
-- Portions derived from [Taichi community Code of Conduct](https://github.com/taichi-dev/taichi/blob/master/CODE_OF_CONDUCT.md) and [Slack Developer Community Code of Conduct](https://api.slack.com/community/code-of-conduct) under a Creative Commons [Attribution-ShareAlike](https://creativecommons.org/licenses/by-sa/3.0/) license.
+- Portions derived from [Taichi community Code of Conduct](https://github.com/taichi-dev/taichi/blob/master/CODE_OF_CONDUCT.md) and [Slack Developer Community Code of Conduct](https://api.slack.com/community/code-of-conduct) under a [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) license.
