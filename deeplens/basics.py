@@ -32,7 +32,7 @@ PSF_KS = 128 # kernel size for psf calculation, better to be odd number
 GEO_GRID = 21  # grid number for PSF map
 
 DELTA = 1e-6
-DELTA_PARAXIAL = 1e-3
+DELTA_PARAXIAL = 0.01
 EPSILON = 1e-9  # replace 0 with EPSILON in some cases
 
 DEFAULT_WAVE = 0.58756180 # [um] default wavelength

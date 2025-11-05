@@ -505,6 +505,7 @@ class GeoLensEval:
 
         Args:
             psf (tensor): 2D PSF tensor (e.g., ks x ks). Assumes standard orientation where the array's y-axis corresponds to the tangential/meridional direction and the x-axis to the sagittal direction.
+            pixel_size (float): Pixel size in mm.
 
         Returns:
             freq (ndarray): Frequency axis (cycles/mm).
@@ -515,32 +516,41 @@ class GeoLensEval:
             [1] https://en.wikipedia.org/wiki/Optical_transfer_function
             [2] https://www.edmundoptics.com/knowledge-center/application-notes/optics/introduction-to-modulation-transfer-function/?srsltid=AfmBOoq09vVDVlh_uuwWnFoMTg18JVgh18lFSw8Ci4Sdlry-AmwGkfDd
         """
-        psf = psf.cpu().numpy()
+        # Convert to numpy (supports torch tensors and numpy arrays)
+        try:
+            psf_np = psf.detach().cpu().numpy()
+        except AttributeError:
+            try:
+                psf_np = psf.cpu().numpy()
+            except AttributeError:
+                psf_np = np.asarray(psf)
 
-        # Extract 1D PSFs along the sagittal and tangential directions
-        center_x = psf.shape[1] // 2
-        center_y = psf.shape[0] // 2
-        sagittal_psf = psf[center_y, :]
-        tangential_psf = psf[:, center_x]
+        # Compute line spread functions (integrate PSF over orthogonal axes)
+        # y-axis corresponds to tangential; x-axis corresponds to sagittal
+        lsf_sagittal = psf_np.sum(axis=0)  # function of x
+        lsf_tangential = psf_np.sum(axis=1)  # function of y
 
-        # Fourier Transform to get the MTFs
-        sagittal_mtf = np.abs(np.fft.fft(sagittal_psf))
-        tangential_mtf = np.abs(np.fft.fft(tangential_psf))
+        # One-sided spectra (for real inputs)
+        mtf_sag = np.abs(np.fft.rfft(lsf_sagittal))
+        mtf_tan = np.abs(np.fft.rfft(lsf_tangential))
 
-        # Normalize the MTFs
-        if sagittal_mtf.max() > 0:
-            sagittal_mtf /= sagittal_mtf.max()
-        if tangential_mtf.max() > 0:
-            tangential_mtf /= tangential_mtf.max()
+        # Normalize by DC to ensure MTF(0) == 1
+        dc_sag = mtf_sag[0] if mtf_sag.size > 0 else 1.0
+        dc_tan = mtf_tan[0] if mtf_tan.size > 0 else 1.0
+        if dc_sag != 0:
+            mtf_sag = mtf_sag / dc_sag
+        if dc_tan != 0:
+            mtf_tan = mtf_tan / dc_tan
 
-        # Create frequency axis in cycles/mm
-        freq = np.fft.fftfreq(psf.shape[0], pixel_size)
+        # Frequency axis in cycles/mm (one-sided)
+        fx = np.fft.rfftfreq(lsf_sagittal.size, d=pixel_size)
+        freq = fx
         positive_freq_idx = freq > 0
 
         return (
             freq[positive_freq_idx],
-            tangential_mtf[positive_freq_idx],
-            sagittal_mtf[positive_freq_idx],
+            mtf_tan[positive_freq_idx],
+            mtf_sag[positive_freq_idx],
         )
 
     @torch.no_grad()
@@ -586,7 +596,7 @@ class GeoLensEval:
             for fov_idx, fov_relative in enumerate(relative_fov_list):
                 # Calculate rgb PSF
                 point = [0, -fov_relative, depth]
-                psf_rgb = self.psf_rgb(points=point, ks=ks, recenter=True)
+                psf_rgb = self.psf_rgb(points=point, ks=ks, recenter=False)
 
                 # Calculate MTF curves for rgb wavelengths
                 for wvln_idx, wvln in enumerate(WAVE_RGB):

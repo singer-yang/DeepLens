@@ -895,7 +895,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             # Shrink the pupil and calculate centroid ray as the chief ray
             ray = self.sample_from_points(points, scale_pupil=0.5, num_rays=SPP_CALC)
             ray = self.trace2sensor(ray)
-            assert (ray.valid == 1).any(), "When tracing chief ray, no ray arrives at the sensor."
+            if not (ray.valid == 1).any():
+                raise RuntimeError("When tracing chief ray for PSF center calculation, no ray arrives at the sensor.")
             psf_center = ray.centroid()
             psf_center = -psf_center[..., :2]  # shape [..., 2]
 
@@ -1482,7 +1483,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Handle the case where no intersection points are found or small pupil
         if len(intersection_points) == 0:
-            print("No intersection points found, use the last surface as pupil.")
+            print("No intersection points found, use the last surface as exit pupil.")
             avg_pupilr = self.surfaces[-1].r
             avg_pupilz = self.surfaces[-1].d.item()
         else:
@@ -1565,7 +1566,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Handle the case where no intersection points are found or small entrance pupil
         if len(intersection_points) == 0:
-            print("Calculate entrance pupil failed, use the first surface as entrance pupil.")
+            print("No intersection points found, use the first surface as entrance pupil.")
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
