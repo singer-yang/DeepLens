@@ -282,7 +282,8 @@ class Phase(Plane):
         """
         normal_vec = torch.zeros_like(ray.d)
         normal_vec[..., 2] = -1
-        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+        is_forward = ray.d[..., 2].unsqueeze(-1) > 0
+        normal_vec = torch.where(is_forward, normal_vec, -normal_vec)
         return normal_vec
 
     def surface_with_offset(self, *args, **kwargs):

@@ -22,22 +22,22 @@ class Renderer:
         self.device = device
 
     def __call__(self, *args, **kwargs):
-        """Render a batch of blurry and noisy RGB images."""
+        """Alias for ``render()``."""
         return self.render(*args, **kwargs)
 
     def set_device(self, device):
-        """Set the computing device for rendering operations."""
+        """Set the compute device."""
         self.device = device
 
     def move_to_device(self, data_dict):
-        """Move all tensor data in the dictionary to the specified device."""
+        """Move all tensors in the dict to the configured device."""
         for key in data_dict:
             if isinstance(data_dict[key], torch.Tensor):
                 data_dict[key] = data_dict[key].to(self.device)
         return data_dict
 
     def render(self, data_dict):
-        """Render a batch of blurry and noisy RGB images."""
+        """Subclasses must implement rendering."""
         raise NotImplementedError
 
 
@@ -80,7 +80,7 @@ class Camera(Renderer):
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
 
     def __call__(self, data_dict):
-        """Simulate camera-captured images with lens aberrations and sensor noise."""
+        """Alias for ``render()``."""
         return self.render(data_dict)
 
     def render(self, data_dict, render_mode="psf_patch", output_type="rggbif"):
@@ -140,14 +140,14 @@ class Camera(Renderer):
         return data_lq, data_gt
 
     def render_lens(self, img_linrgb, render_mode="psf_patch", **kwargs):
-        """Apply lens aberration effects to a linear RGB image.
+        """Apply lens aberrations to a linear RGB image.
 
         Args:
             img_linrgb (torch.Tensor): Linear RGB image (energy representation),
                 shape (B, 3, H, W), range [0, 1]
             render_mode (str): Rendering method to use. Options include:
-                - "psf_patch": PSF with patch-based rendering
-                - "psf_map": PSF map-based rendering
+                - "psf_patch": PSF with patch rendering
+                - "psf_map": PSF map rendering
                 - "psf_pixel": Pixel-wise PSF rendering
                 - "ray_tracing": Full ray tracing simulation
                 - "psf_patch_depth_interp": PSF patch with depth interpolation
@@ -205,7 +205,7 @@ class Camera(Renderer):
         output_type="rggbi",
         **kwargs,
     ):
-        """Package Bayer data into network-ready input and ground-truth pairs.
+        """Pack Bayer data into network-ready inputs and targets.
 
         Args:
             bayer_lq (torch.Tensor): Noisy Bayer image, shape (B, 1, H, W), range [~black_level, 2**bit - 1]

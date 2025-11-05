@@ -8,15 +8,11 @@ from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
 from deeplens.basics import (
-    BLUE_RESPONSE,
     DEFAULT_WAVE,
     DEPTH,
     EPSILON,
-    GREEN_RESPONSE,
     PSF_KS,
-    RED_RESPONSE,
     SPP_PSF,
-    WAVE_BOARD_BAND,
     WAVE_RGB,
     DeepObj,
     init_device,
@@ -130,59 +126,6 @@ class Lens(DeepObj):
             psfs.append(self.psf(points=points, ks=ks, wvln=wvln, **kwargs))
         psf_rgb = torch.stack(psfs, dim=-3)  # shape [3, ks, ks] or [N, 3, ks, ks]
         return psf_rgb
-
-    def psf_spectrum(self, points, ks=51, **kwargs):
-        """Compute RGB PSF considering full spectrum for each color.
-
-        Note:
-            The differentiability of this function is not guaranteed.
-            A placeholder RGB sensor response function is used to calculate the final PSF.
-            But the actual sensor response function will be more reasonable.
-
-        Args:
-            points (tensor): Shape of [N, 3] or [3].
-            ks (int, optional): Kernel size. Defaults to 51.
-
-        Returns:
-            psf: Shape of [3, ks, ks].
-
-        Reference:
-            https://en.wikipedia.org/wiki/Spectral_sensitivity
-        """
-        # Red
-        psf_r = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(points=points, ks=ks, wvln=wvln, **kwargs)
-            psf_r.append(psf * RED_RESPONSE[i])
-        psf_r = torch.stack(psf_r, dim=0).sum(dim=0) / sum(RED_RESPONSE)
-
-        # Green
-        psf_g = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(points=points, ks=ks, wvln=wvln, **kwargs)
-            psf_g.append(psf * GREEN_RESPONSE[i])
-        psf_g = torch.stack(psf_g, dim=0).sum(dim=0) / sum(GREEN_RESPONSE)
-
-        # Blue
-        psf_b = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(points=points, ks=ks, wvln=wvln, **kwargs)
-            psf_b.append(psf * BLUE_RESPONSE[i])
-        psf_b = torch.stack(psf_b, dim=0).sum(dim=0) / sum(BLUE_RESPONSE)
-
-        # RGB
-        psf = torch.stack([psf_r, psf_g, psf_b], dim=0)  # shape [3, ks, ks]
-        return psf
-
-    def draw_psf(self, depth=DEPTH, ks=101, save_name="./psf.png"):
-        """Draw RGB on-axis PSF."""
-        psfs = []
-        for wvln in WAVE_RGB:
-            psf = self.psf(point=[0, 0, depth], ks=ks, wvln=wvln)
-            psfs.append(psf)
-
-        psfs = torch.stack(psfs, dim=0)  # shape [3, ks, ks]
-        save_image(psfs.unsqueeze(0), save_name, normalize=True)
 
     def point_source_grid(
         self, depth, grid=(9, 9), normalized=True, quater=False, center=True
@@ -430,7 +373,7 @@ class Lens(DeepObj):
         Image simulation methods:
             [1] PSF map, convolution by patches.
             [2] PSF patch, convolution by a single PSF.
-            [3] Ray tracing-based rendering, in GeoLens.
+            [3] Ray tracing rendering, in GeoLens.
             [4] ...
 
         Args:
