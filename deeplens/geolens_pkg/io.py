@@ -62,14 +62,20 @@ class GeoLensIO:
         # Read the extracted data from each SURF
         self.surfaces = []
         d = 0.0
+        mat1_name = "air"
         for surf_idx, surf_dict in surfs_dict.items():
             if surf_idx > 0 and surf_idx < current_surf:
                 # Lens surface parameters
-                mat2 = (
-                    f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}"
-                    if "GLAS" in surf_dict
-                    else "air"
-                )
+                if "GLAS" in surf_dict:
+                    if surf_dict['GLAS'].split()[0] == "___BLANK":
+                        mat2_name = (
+                            f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}"
+                        )
+                    else:
+                        mat2_name = surf_dict['GLAS'].split()[0].lower()
+                else:
+                    mat2_name = "air"
+
                 surf_r = float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 1.0
                 surf_c = float(surf_dict["CURV"].split()[0]) if "CURV" in surf_dict else 0.0
                 surf_d_next = (
@@ -86,16 +92,16 @@ class GeoLensIO:
 
                 # Create surface object
                 if surf_dict["TYPE"] == "STANDARD":
-                    if surf_c == 0.0 and mat2 == "air":
+                    if mat2_name == "air" and mat1_name == "air":
                         # Aperture
                         s = Aperture(r=surf_r, d=d)
                     else:
                         # Spherical surface
-                        s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2)
+                        s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2_name)
                 
                 elif surf_dict["TYPE"] == "EVENASPH":
                     # Aspherical surface
-                    s = Aspheric(c=surf_c, r=surf_r, d=d, ai=[surf_param2, surf_param3, surf_param4, surf_param5, surf_param6, surf_param7, surf_param8], k=surf_conic, mat2=mat2)
+                    s = Aspheric(c=surf_c, r=surf_r, d=d, ai=[surf_param2, surf_param3, surf_param4, surf_param5, surf_param6, surf_param7, surf_param8], k=surf_conic, mat2=mat2_name)
 
                 else:
                     print(f"Surface type {surf_dict['TYPE']} not implemented.")
@@ -103,6 +109,7 @@ class GeoLensIO:
 
                 self.surfaces.append(s)
                 d += surf_d_next
+                mat1_name = mat2_name
 
             elif surf_idx == current_surf:
                 # Image sensor
