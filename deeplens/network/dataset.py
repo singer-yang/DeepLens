@@ -74,6 +74,7 @@ class PhotographicDataset(Dataset):
 
         if isinstance(img_res, int):
             img_res = (img_res, img_res)
+        self.img_res = img_res
         self.iso_range = iso_range
         self.is_train = is_train
 
