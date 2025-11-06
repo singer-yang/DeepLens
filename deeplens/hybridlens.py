@@ -331,7 +331,7 @@ class HybridLens(Lens):
             float(np.rad2deg(geolens.rfov) * 0.99),
         ]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
-        num_rays = 5
+        num_rays = 7
         for i, view in enumerate(views):
             # Draw ray tracing
             ray = geolens.sample_point_source_2D(
@@ -349,15 +349,20 @@ class HybridLens(Lens):
             )
 
             # Draw wave propagation
+            # Calculate ray center for wave propagation visualization
+            ray_center_doe = (
+                ((ray.o * ray.valid.unsqueeze(-1)).sum(dim=0) / ray.valid.sum()).cpu().numpy()
+            )  # shape [3]
             ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
-            arc_center = (ray.o[:, 0] * ray.valid).sum() / ray.valid.sum()
-            arc_center = arc_center.item()
-            # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
-            arc_radi = geolens.d_sensor.item() - self.doe.d.item()
+            ray_center_sensor = (
+                ((ray.o * ray.valid.unsqueeze(-1)).sum(dim=0) / ray.valid.sum()).cpu().numpy()
+            )  # shape [3]
+
+            arc_radi = ray_center_sensor[2] - ray_center_doe[2]
             chief_theta = np.rad2deg(
                 np.arctan2(
-                    ray.o[0, 0].item() - ray_o_record[-1][num_rays // 2, 0].item(),
-                    ray.o[0, 2].item() - ray_o_record[-1][num_rays // 2, 2].item(),
+                    ray_center_sensor[0] - ray_center_doe[0],
+                    ray_center_sensor[2] - ray_center_doe[2],
                 )
             )
             theta1 = chief_theta - 10
@@ -366,7 +371,7 @@ class HybridLens(Lens):
             for j in arc_radi_list:
                 arc_radi_j = arc_radi * j
                 arc = patches.Arc(
-                    (geolens.d_sensor.item(), arc_center),
+                    (ray_center_sensor[2], ray_center_sensor[0]),
                     arc_radi_j,
                     arc_radi_j,
                     angle=180.0,
