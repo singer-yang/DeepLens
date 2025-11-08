@@ -1792,7 +1792,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Rule 2: Fix aperture distance to the first surface if aperture in the front.
         if aper_idx == 0:
-            d_aper = 0.05 if self.is_cellphone else 1.0
+            d_aper = 0.05
 
             # If the first surface is concave, use the maximum negative sag.
             aper_r = torch.tensor(self.surfaces[aper_idx].r, device=self.device)
