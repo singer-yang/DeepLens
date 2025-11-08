@@ -112,10 +112,10 @@ class GeoLensEval:
                 save_name = save_name[:-4]
             save_name = f"{save_name}_meridional_{depth_str}.png"
 
-        plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         if show:
             plt.show()
         else:
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close()
 
     @torch.no_grad()
@@ -179,10 +179,10 @@ class GeoLensEval:
                 save_name = save_name[:-4]
             save_name = f"{save_name}_spot_{depth_str}.png"
 
-        plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         if show:
             plt.show()
         else:
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close()
 
     # ================================================================
@@ -644,10 +644,10 @@ class GeoLensEval:
                 ax.set_ylim(0, 1.05)
 
         plt.tight_layout()
-        plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
         if show:
             plt.show()
         else:
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close(fig)
 
     # ================================================================
