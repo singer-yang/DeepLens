@@ -237,6 +237,7 @@ class Lens(DeepObj):
         depth=DEPTH,
         log_scale=False,
         save_name="./psf_map.png",
+        show=False,
     ):
         """Draw RGB PSF map of the lens."""
         # Calculate RGB PSF map, shape [grid_h, grid_w, 3, ks, ks]
@@ -305,8 +306,12 @@ class Lens(DeepObj):
         # Clean up axes and save
         ax.axis("off")
         plt.tight_layout(pad=0)
-        plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
-        plt.close(fig)
+        
+        if show:
+            return fig, ax
+        else:
+            plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
+            plt.close(fig)
 
     def point_source_radial(self, depth, grid=9, center=False):
         """Compute point radial [0, 1] in the object space to compute PSF grid.
