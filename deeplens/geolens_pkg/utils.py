@@ -116,9 +116,6 @@ def create_lens(
     lens.r_sensor = imgh / 2
     lens.set_sensor_res(sensor_res=lens.sensor_res)
     lens.post_computation()
-    
-    # For optimization
-    lens.init_constraints()
 
     # Save lens
     filename = f"starting_point_f{foclen}mm_imgh{imgh}_fnum{fnum}"
