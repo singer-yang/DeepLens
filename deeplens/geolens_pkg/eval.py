@@ -20,6 +20,9 @@ Functions:
         - psf2mtf(): Convert PSF to MTF (static method)
         - draw_mtf(): Draw grid of MTF curves for multiple depths/FOVs and RGB wavelengths
 
+    Field Curvature:
+        - draw_field_curvature(): Draw field curvature visualization
+
     Vignetting:
         - vignetting(): Compute vignetting map
         - draw_vignetting(): Draw vignetting visualization
@@ -51,6 +54,13 @@ from deeplens.basics import (
     WAVE_RGB,
 )
 from deeplens.optics.ray import Ray
+
+# RGB color definitions for wavelength visualization
+RGB_RED = "#CC0000"
+RGB_GREEN = "#006600"
+RGB_BLUE = "#0066CC"
+RGB_COLORS = [RGB_RED, RGB_GREEN, RGB_BLUE]
+RGB_LABELS = ["R", "G", "B"]
 
 
 class GeoLensEval:
@@ -579,9 +589,8 @@ class GeoLensEval:
         nyquist_freq = 0.5 / pixel_size
 
         # Wavelength colors and labels
-        red, green, blue = "#CC0000", "#006600", "#0066CC"
-        wvln_colors = [red, green, blue]
-        wvln_labels = ["R", "G", "B"]
+        wvln_colors = RGB_COLORS
+        wvln_labels = RGB_LABELS
 
         # Create figure and subplots (num_depths * num_fovs subplots)
         num_fovs = len(relative_fov_list)
@@ -649,6 +658,134 @@ class GeoLensEval:
         else:
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close(fig)
+
+    # ================================================================
+    # Field Curvature
+    # ================================================================
+    @torch.no_grad()
+    def draw_field_curvature(
+        self,
+        num_points=GEO_GRID,
+        z_span=1.0,
+        z_steps=121,
+        wvln_list=WAVE_RGB,
+        spp=SPP_CALC,
+        filename=None,
+        show=False,
+    ):
+        """Draw field curvature: best-focus defocus Δz (mm) vs field angle (deg), RGB overlaid.
+
+        - Tangential (meridional) curves are solid lines (y-axis spread minimized).
+        - Sagittal curves are dashed lines (x-axis spread minimized).
+        """
+        device = self.device
+        # Convert maximum field angle to degrees
+        rfov_deg = float(self.rfov) * 180.0 / np.pi
+
+        # Sample field angles [0, rfov_deg]
+        rfov_samples = torch.linspace(0.0, rfov_deg, num_points, device=device)
+
+        # Prepare containers
+        delta_z_tan = []  # list of numpy arrays per wavelength
+        delta_z_sag = []  # list of numpy arrays per wavelength
+
+        # Defocus sweep grid (around current sensor plane)
+        d_sensor = self.d_sensor
+        z_grid = d_sensor + torch.linspace(-z_span, z_span, z_steps, device=device)
+
+        # Helper to compute best focus along a given axis (0=x sagittal, 1=y tangential)
+        def best_focus_delta_z(ray, axis_idx: int):
+            # ray: after lens surfaces (image space)
+            # Vectorized intersection with planes z_grid
+            oz = ray.o[..., 2:3]
+            dz = ray.d[..., 2:3]
+            t = (z_grid.unsqueeze(0) - oz) / (dz + 1e-12)  # [N, Z]
+
+            oa = ray.o[..., axis_idx : axis_idx + 1]
+            da = ray.d[..., axis_idx : axis_idx + 1]
+            pos_axis = (oa + da * t).squeeze(-1)  # [N, Z]
+
+            w = ray.valid.unsqueeze(-1).float()  # [N, 1] -> [N, Z] by broadcast
+            pos_axis = pos_axis * w
+            w_sum = w.sum(0)  # [Z]
+            centroid = (pos_axis.sum(0) / (w_sum + EPSILON))  # [Z]
+            ms = (((pos_axis - centroid.unsqueeze(0)) ** 2) * w).sum(0) / (w_sum + EPSILON)  # [Z]
+            best_idx = torch.argmin(ms)
+            return (z_grid[best_idx] - d_sensor).item()
+
+        # Loop wavelengths and field angles
+        for w_idx, wvln in enumerate(wvln_list):
+            dz_tan = []
+            dz_sag = []
+            for i in range(len(rfov_samples)):
+                fov_deg = rfov_samples[i].item()
+
+                # Tangential (meridional plane: y-z plane -> minimize y spread)
+                ray_t = self.sample_parallel_2D(
+                    fov=fov_deg,
+                    num_rays=spp,
+                    wvln=wvln,
+                    plane="meridional",
+                    entrance_pupil=True,
+                )
+                ray_t, _ = self.trace(ray_t)
+                dz_tan.append(best_focus_delta_z(ray_t, axis_idx=1))  # y-axis
+
+                # Sagittal (x-z plane -> minimize x spread)
+                ray_s = self.sample_parallel_2D(
+                    fov=fov_deg,
+                    num_rays=spp,
+                    wvln=wvln,
+                    plane="sagittal",
+                    entrance_pupil=True,
+                )
+                ray_s, _ = self.trace(ray_s)
+                dz_sag.append(best_focus_delta_z(ray_s, axis_idx=0))  # x-axis
+
+            delta_z_tan.append(np.asarray(dz_tan))
+            delta_z_sag.append(np.asarray(dz_sag))
+
+        # Plot
+        fov_np = rfov_samples.detach().cpu().numpy()
+        fig, ax = plt.subplots(figsize=(7, 6))
+        ax.set_title("Field Curvature (Δz vs Field Angle)")
+
+        # Determine x range
+        all_vals = np.concatenate([np.abs(np.concatenate(delta_z_tan)), np.abs(np.concatenate(delta_z_sag))])
+        x_range = float(max(0.2, all_vals.max() * 1.2)) if all_vals.size > 0 else 0.2
+
+        for w_idx in range(len(wvln_list)):
+            color = RGB_COLORS[w_idx % len(RGB_COLORS)]
+            lbl = RGB_LABELS[w_idx % len(RGB_LABELS)]
+            ax.plot(delta_z_tan[w_idx], fov_np, color=color, linestyle="-", label=f"{lbl}-Tan")
+            ax.plot(delta_z_sag[w_idx], fov_np, color=color, linestyle="--", label=f"{lbl}-Sag")
+
+        ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
+        ax.grid(True, color="gray", linestyle="-", linewidth=0.5, alpha=1.0)
+        ax.set_xlabel("Defocus Δz (mm) relative to sensor plane")
+        ax.set_ylabel("Field Angle (deg)")
+        ax.set_xlim(-x_range, x_range)
+        ax.set_ylim(0, rfov_deg)
+        ax.legend(fontsize=8)
+        plt.tight_layout()
+
+        # Save or show
+        if show:
+            plt.show()
+        else:
+            if filename is None:
+                out_name = "./field_curvature.png"
+            else:
+                out_name = f"{filename[:-4]}_field_curvature.png" if filename.endswith(".png") else f"{filename}_field_curvature.png"
+            plt.savefig(out_name, bbox_inches="tight", format="png", dpi=300)
+            plt.close(fig)
+
+        return {
+            "fov_deg": fov_np,
+            "delta_z_tan": delta_z_tan,
+            "delta_z_sag": delta_z_sag,
+            "wvln_list": wvln_list,
+        }
 
     # ================================================================
     # Vignetting
