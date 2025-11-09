@@ -1853,8 +1853,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Draw spot diagram
         self.draw_spot_radial(
-            depth=depth, 
-            save_name=f"{save_name}_spot.png", 
+            save_name=f"{save_name}_spot.png",
+            depth=depth,
             show=show,
         )
 
