@@ -69,67 +69,74 @@ class GeoLensEval:
     # ================================================================
     @torch.no_grad()
     def draw_spot_radial(
-        self, num_field=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None, show=False
+        self,
+        save_name="./lens_spot_radial.png",
+        num_fov=5,
+        depth=float("inf"),
+        spp=SPP_PSF,
+        wvln_list=WAVE_RGB,
+        show=False,
     ):
         """Draw spot diagram of the lens at different field angles along meridional (y) direction.
 
         Args:
-            num_field (int, optional): field number. Defaults to 4.
+            save_name (string, optional): filename to save. Defaults to "./lens_spot_radial.png".
+            num_fov (int, optional): field of view number. Defaults to 4.
             depth (float, optional): depth of the point source. Defaults to float("inf").
-            wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
-            save_name (string, optional): filename to save. Defaults to None.
+            spp (int, optional): number of rays to sample. Defaults to SPP_PSF.
+            wvln_list (list, optional): wavelength list to render.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
-        # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
-        ray = self.sample_radial_rays(
-            num_field=num_field, depth=depth, num_rays=SPP_PSF, wvln=wvln
-        )
+        assert isinstance(wvln_list, list), "wvln_list must be a list"
+        
+        # Prepare figure
+        fig, axs = plt.subplots(1, num_fov, figsize=(num_fov * 3, 3))
+        axs = np.atleast_1d(axs)
 
-        # Trace rays to sensor plane, shape [num_field, num_rays, 3]
-        ray = self.trace2sensor(ray)
-        ray_o = ray.o.clone().cpu().numpy()  # .squeeze(0)
-        ray_valid = ray.valid.clone().cpu().numpy()  # .squeeze(0)
+        # Trace and draw each wavelength separately, overlaying results
+        for wvln_idx, wvln in enumerate(wvln_list):
+            # Sample rays along meridional (y) direction, shape [num_fov, num_rays, 3]
+            ray = self.sample_radial_rays(
+                num_field=num_fov, depth=depth, num_rays=spp, wvln=wvln
+            )
 
-        # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(1, num_field, figsize=(num_field * 3, 3))
-        fig.suptitle("Spot diagram along y-axis for depth " + str(depth))
-        for i in range(num_field):
-            valid = ray_valid[i, :]
-            x, y = ray_o[i, :, 0], ray_o[i, :, 1]
+            # Trace rays to sensor plane, shape [num_fov, num_rays, 3]
+            ray = self.trace2sensor(ray)
+            ray_o = ray.o.clone().cpu().numpy()
+            ray_valid = ray.valid.clone().cpu().numpy()
 
-            # Filter valid rays
-            x_valid, y_valid = x[valid > 0], y[valid > 0]
-            ra_valid = valid[valid > 0]
+            color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
 
-            # Calculate center of mass for valid rays
-            if ra_valid.sum() > EPSILON:
-                xc, yc = x_valid.sum() / ra_valid.sum(), y_valid.sum() / ra_valid.sum()
-            else:
-                xc, yc = 0.0, 0.0
+            # Plot multiple spot diagrams in one figure
+            for i in range(num_fov):
+                valid = ray_valid[i, :]
+                x, y = ray_o[i, :, 0], ray_o[i, :, 1]
 
-            # Plot points and center of mass
-            axs[i].scatter(x_valid, y_valid, 3, "black", alpha=0.5)
-            axs[i].scatter([xc], [yc], 100, "r", "x")
-            axs[i].set_aspect("equal", adjustable="datalim")
-            axs[i].tick_params(axis="both", which="major", labelsize=6)
+                # Filter valid rays
+                mask = valid > 0
+                x_valid, y_valid = x[mask], y[mask]
 
-        # Save plot
-        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
-        if save_name is None:
-            save_name = f"./spot_meridional_{depth_str}.png"
-        else:
-            if save_name.endswith(".png"):
-                save_name = save_name[:-4]
-            save_name = f"{save_name}_meridional_{depth_str}.png"
+                # Plot points and center of mass for this wavelength
+                axs[i].scatter(x_valid, y_valid, 2, color=color, alpha=0.5)
+                axs[i].set_aspect("equal", adjustable="datalim")
+                axs[i].tick_params(axis="both", which="major", labelsize=6)
 
         if show:
             plt.show()
         else:
+            assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close()
 
     @torch.no_grad()
-    def draw_spot_map(self, num_grid=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None, show=False):
+    def draw_spot_map(
+        self,
+        save_name="./spot_map.png",
+        num_grid=5,
+        depth=DEPTH,
+        wvln=DEFAULT_WAVE,
+        show=False,
+    ):
         """Draw spot diagram of the lens at different field angles.
 
         Args:
@@ -708,8 +715,10 @@ class GeoLensEval:
             w = ray.valid.unsqueeze(-1).float()  # [N, 1] -> [N, Z] by broadcast
             pos_axis = pos_axis * w
             w_sum = w.sum(0)  # [Z]
-            centroid = (pos_axis.sum(0) / (w_sum + EPSILON))  # [Z]
-            ms = (((pos_axis - centroid.unsqueeze(0)) ** 2) * w).sum(0) / (w_sum + EPSILON)  # [Z]
+            centroid = pos_axis.sum(0) / (w_sum + EPSILON)  # [Z]
+            ms = (((pos_axis - centroid.unsqueeze(0)) ** 2) * w).sum(0) / (
+                w_sum + EPSILON
+            )  # [Z]
             best_idx = torch.argmin(ms)
             return (z_grid[best_idx] - d_sensor).item()
 
@@ -751,14 +760,28 @@ class GeoLensEval:
         ax.set_title("Field Curvature (Δz vs Field Angle)")
 
         # Determine x range
-        all_vals = np.concatenate([np.abs(np.concatenate(delta_z_tan)), np.abs(np.concatenate(delta_z_sag))])
+        all_vals = np.concatenate(
+            [np.abs(np.concatenate(delta_z_tan)), np.abs(np.concatenate(delta_z_sag))]
+        )
         x_range = float(max(0.2, all_vals.max() * 1.2)) if all_vals.size > 0 else 0.2
 
         for w_idx in range(len(wvln_list)):
             color = RGB_COLORS[w_idx % len(RGB_COLORS)]
             lbl = RGB_LABELS[w_idx % len(RGB_LABELS)]
-            ax.plot(delta_z_tan[w_idx], fov_np, color=color, linestyle="-", label=f"{lbl}-Tan")
-            ax.plot(delta_z_sag[w_idx], fov_np, color=color, linestyle="--", label=f"{lbl}-Sag")
+            ax.plot(
+                delta_z_tan[w_idx],
+                fov_np,
+                color=color,
+                linestyle="-",
+                label=f"{lbl}-Tan",
+            )
+            ax.plot(
+                delta_z_sag[w_idx],
+                fov_np,
+                color=color,
+                linestyle="--",
+                label=f"{lbl}-Sag",
+            )
 
         ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
         ax.grid(True, color="gray", linestyle="-", linewidth=0.5, alpha=1.0)
@@ -776,7 +799,11 @@ class GeoLensEval:
             if filename is None:
                 out_name = "./field_curvature.png"
             else:
-                out_name = f"{filename[:-4]}_field_curvature.png" if filename.endswith(".png") else f"{filename}_field_curvature.png"
+                out_name = (
+                    f"{filename[:-4]}_field_curvature.png"
+                    if filename.endswith(".png")
+                    else f"{filename}_field_curvature.png"
+                )
             plt.savefig(out_name, bbox_inches="tight", format="png", dpi=300)
             plt.close(fig)
 
