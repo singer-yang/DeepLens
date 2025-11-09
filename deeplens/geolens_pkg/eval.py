@@ -331,17 +331,20 @@ class GeoLensEval:
     def draw_distortion_radial(
         self,
         rfov,
+        save_name=None,
         num_points=GEO_GRID,
         wvln=DEFAULT_WAVE,
         plane="meridional",
         ray_aiming=True,
-        filename=None,
+        show=False,
     ):
         """Draw distortion. zemax format(default): ray_aiming = False.
 
+        Note: this function is provided by a community contributor.
+
         Args:
             rfov: view angle (degrees)
-            filename: Save filename. Defaults to None.
+            save_name: Save filename. Defaults to None.
             num_points: Number of points. Defaults to GEO_GRID.
             plane: Meridional or sagittal. Defaults to meridional.
             ray_aiming: Whether to use ray aiming. Defaults to False.
@@ -402,52 +405,31 @@ class GeoLensEval:
         # Set axis range
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(0, rfov)
-        if filename is None:
-            plt.savefig(
-                f"./{plane}_distortion_infinite_mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+
+        if show:
+            plt.show()
         else:
-            plt.savefig(
-                f"{filename[:-4]}_{plane}_distortion_infinite_mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+            if save_name is None:
+                save_name = f"./{plane}_distortion_inf.png"
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
+            plt.close()
 
     @torch.no_grad()
-    def distortion_map(self, num_grid=16, depth=DEPTH):
+    def distortion_map(self, num_grid=16, depth=DEPTH, wvln=DEFAULT_WAVE):
         """Compute distortion map at a given depth.
-
-        Note:
-            [1] When distortion is strong, the current FoV calculation is not accurate. So we sample rays from the mapped sensor plane in the object space.
-            [2] The sampling function should be implemented in the GeoLens class, and consider the sensor aspect ratio.
 
         Args:
             num_grid (int): number of grid points.
             depth (float): depth of the point source.
+            wvln (float): wavelength.
 
         Returns:
             distortion_grid (torch.Tensor): distortion map. shape (grid_size, grid_size, 2)
         """
-        assert depth != float("inf"), "depth cannot be infinity"
-
-        # Sample rays from mapped sensor plane in the object space, shape (grid_size, grid_size, 3)
-        scale = self.calc_scale(depth=depth)
-        obj_size_x = self.sensor_size[1] * scale
-        obj_size_y = self.sensor_size[0] * scale
-        ray_x, ray_y = torch.meshgrid(
-            torch.linspace(-obj_size_x / 2, obj_size_x / 2, num_grid),
-            torch.linspace(obj_size_y / 2, -obj_size_y / 2, num_grid),
-            indexing="xy",
-        )
-        ray_z = torch.full_like(ray_x, depth)
-        ray_o = torch.stack((ray_x, ray_y, ray_z), dim=-1)
-
         # Sample and trace rays, shape (grid_size, grid_size, num_rays, 3)
-        ray = self.sample_from_points(ray_o)
+        ray = self.sample_grid_rays(
+            depth=depth, num_grid=num_grid, wvln=wvln
+        )
         ray = self.trace2sensor(ray)
 
         # Calculate centroid of the rays, shape (grid_size, grid_size, 2)
@@ -457,16 +439,20 @@ class GeoLensEval:
         distortion_grid = torch.stack((x_dist, y_dist), dim=-1)
         return distortion_grid
 
-    def draw_distortion(self, filename=None, num_grid=16, depth=DEPTH):
+    def draw_distortion(
+        self, save_name=None, num_grid=16, depth=DEPTH, wvln=DEFAULT_WAVE, show=False
+    ):
         """Draw distortion map.
 
         Args:
-            filename (str, optional): filename to save. Defaults to None.
+            save_name (str, optional): filename to save. Defaults to None.
             num_grid (int, optional): number of grid points. Defaults to 16.
             depth (float, optional): depth of the point source. Defaults to DEPTH.
+            wvln (float, optional): wavelength. Defaults to DEFAULT_WAVE.
+            show (bool, optional): whether to show the plot. Defaults to False.
         """
         # Ray tracing to calculate distortion map
-        distortion_grid = self.distortion_map(num_grid=num_grid, depth=depth)
+        distortion_grid = self.distortion_map(num_grid=num_grid, depth=depth, wvln=wvln)
         x1 = distortion_grid[..., 0].cpu().numpy()
         y1 = distortion_grid[..., 1].cpu().numpy()
 
@@ -481,21 +467,14 @@ class GeoLensEval:
         ax.set_xticks(np.linspace(-1, 1, num_grid))
         ax.set_yticks(np.linspace(-1, 1, num_grid))
 
-        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
-        if filename is None:
-            plt.savefig(
-                f"./distortion_{depth_str}.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+        if show:
+            plt.show()
         else:
-            plt.savefig(
-                f"{filename[:-4]}_distortion_{depth_str}.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+            depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
+            if save_name is None:
+                save_name = f"./distortion_{depth_str}.png"
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
+            plt.close(fig)
 
     # ================================================================
     # MTF
