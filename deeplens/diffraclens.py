@@ -134,8 +134,8 @@ class DiffractiveLens(Lens):
         data = {}
         data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
         data["surfaces"] = []
-        data["d_sensor"] = round(self.d_sensor.item(), 2)
-        data["l_sensor"] = round(self.l_sensor, 2)
+        data["d_sensor"] = round(self.d_sensor.item(), 3)
+        data["l_sensor"] = round(self.l_sensor, 3)
         data["sensor_res"] = self.sensor_res
 
         # Save diffractive surfaces
