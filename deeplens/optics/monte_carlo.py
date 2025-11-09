@@ -19,7 +19,12 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
     Returns:
         field: intensity or complex amplitude, shape [N, ks, ks]
     """
-    assert len(ray.o.shape) == 3, "Only support [N, spp, 3] shaped rays for now."
+    if len(ray.o.shape) == 2:
+        single_point = True
+        ray = ray.unsqueeze(0)
+    else:
+        single_point = False
+
     points = -ray.o[..., :2]  # shape [N, spp, 2]. flip points.
     valid = ray.valid  # shape [N, spp]
 
@@ -91,6 +96,8 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
 
         field = torch.stack(field, dim=0)  # shape [N, ks, ks]
 
+    if single_point:
+        field = field.squeeze(0)
     return field
 
 

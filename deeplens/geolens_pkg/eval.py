@@ -427,9 +427,7 @@ class GeoLensEval:
             distortion_grid (torch.Tensor): distortion map. shape (grid_size, grid_size, 2)
         """
         # Sample and trace rays, shape (grid_size, grid_size, num_rays, 3)
-        ray = self.sample_grid_rays(
-            depth=depth, num_grid=num_grid, wvln=wvln
-        )
+        ray = self.sample_grid_rays(depth=depth, num_grid=num_grid, wvln=wvln)
         ray = self.trace2sensor(ray)
 
         # Calculate centroid of the rays, shape (grid_size, grid_size, 2)
@@ -543,10 +541,10 @@ class GeoLensEval:
     @torch.no_grad()
     def draw_mtf(
         self,
+        save_name="./lens_mtf.png",
         relative_fov_list=[0.0, 0.7, 1.0],
         depth_list=[DEPTH],
-        save_name="./mtf_grid.png",
-        ks=128,
+        psf_ks=128,
         show=False,
     ):
         """Draw a grid of MTF curves.
@@ -554,35 +552,30 @@ class GeoLensEval:
         Each subplot displays MTF curves for R, G, B wavelengths.
 
         Args:
-            relative_fov_list (list, optional): List of relative field of view values.
-                                              Defaults to [0.0, 0.7, 1.0].
+            relative_fov_list (list, optional): List of relative field of view values. Defaults to [0.0, 0.7, 1.0].
             depth_list (list, optional): List of depth values. Defaults to [DEPTH].
             save_name (str, optional): Filename to save the plot. Defaults to "./mtf_grid.png".
-            ks (int, optional): Kernel size for PSF calculation. Defaults to 256.
+            psf_ks (int, optional): Kernel size for intermediate PSF calculation. Defaults to 256.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
-        assert save_name.endswith(".png"), "save_name must end with .png"
         pixel_size = self.pixel_size
         nyquist_freq = 0.5 / pixel_size
-
-        # Wavelength colors and labels
-        wvln_colors = RGB_COLORS
-        wvln_labels = RGB_LABELS
+        num_fovs = len(relative_fov_list)
+        if float("inf") in depth_list:
+            depth_list = [DEPTH if x == float("inf") else x for x in depth_list]
+        num_depths = len(depth_list)
 
         # Create figure and subplots (num_depths * num_fovs subplots)
-        num_fovs = len(relative_fov_list)
-        num_depths = len(depth_list)
         fig, axs = plt.subplots(
             num_depths, num_fovs, figsize=(num_fovs * 3, num_depths * 3), squeeze=False
         )
-        fig.suptitle("MTF Curves")
 
         # Iterate over depth and field of view
         for depth_idx, depth in enumerate(depth_list):
             for fov_idx, fov_relative in enumerate(relative_fov_list):
                 # Calculate rgb PSF
                 point = [0, -fov_relative, depth]
-                psf_rgb = self.psf_rgb(points=point, ks=ks, recenter=False)
+                psf_rgb = self.psf_rgb(points=point, ks=psf_ks, recenter=False)
 
                 # Calculate MTF curves for rgb wavelengths
                 for wvln_idx, wvln in enumerate(WAVE_RGB):
@@ -592,8 +585,8 @@ class GeoLensEval:
 
                     # Plot MTF curves
                     ax = axs[depth_idx, fov_idx]
-                    color = wvln_colors[wvln_idx % len(wvln_colors)]
-                    wvln_label = wvln_labels[wvln_idx % len(wvln_labels)]
+                    color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
+                    wvln_label = RGB_LABELS[wvln_idx % len(RGB_LABELS)]
                     wvln_nm = int(wvln * 1000)
                     ax.plot(
                         freq,
@@ -633,6 +626,7 @@ class GeoLensEval:
         if show:
             plt.show()
         else:
+            assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close(fig)
 
