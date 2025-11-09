@@ -46,7 +46,7 @@ class HybridLens(Lens):
         super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution
-        self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
+        # self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
 
         # Load lens file
         if filename is not None:
@@ -87,6 +87,7 @@ class HybridLens(Lens):
         # r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
         # geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
         self.geolens = geolens
+        self.foclen = geolens.foclen
 
         # Update hybrid lens sensor resolution and pixel size
         self.set_sensor(sensor_size=geolens.sensor_size, sensor_res=geolens.sensor_res)

@@ -73,7 +73,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution (will be overwritten if read from file)
-        self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
+        # self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
 
         # Load lens file
         if filename is not None:
@@ -122,9 +122,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     def sample_grid_rays(
         self,
         depth=float("inf"),
-        num_grid=[11, 11],
+        num_grid=(11, 11),
         num_rays=SPP_PSF,
         wvln=DEFAULT_WAVE,
+        uniform_fov=True,
         sample_more_off_axis=False,
         scale_pupil=1.0,
     ):
@@ -140,6 +141,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             num_rays (int, optional): number of rays. Defaults to SPP_PSF.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
             sample_more_off_axis (bool, optional): If True, sample more off-axis rays.
+            uniform_fov (bool, optional): If True, sample uniform FoV angles.
             scale_pupil (float, optional): Scale factor for pupil radius.
 
         Returns:
@@ -156,12 +158,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             y_list = [np.sign(y) * np.abs(y) ** 0.5 for y in y_list]
 
         # Calculate FoV_x and FoV_y
-        rfov_x = np.atan(np.tan(self.rfov) * self.sensor_size[0] / self.r_sensor / 2)
-        rfov_y = np.atan(np.tan(self.rfov) * self.sensor_size[1] / self.r_sensor / 2)
-        rfov_x = np.rad2deg(rfov_x)
-        rfov_y = np.rad2deg(rfov_y)
-        fov_x_list = [float(x * rfov_x) for x in x_list]
-        fov_y_list = [float(y * rfov_y) for y in y_list]
+        if uniform_fov:
+            # Sample uniform FoV angles
+            fov_x_list = [x * self.vfov / 2 for x in x_list]
+            fov_y_list = [y * self.hfov / 2 for y in y_list]
+            fov_x_list = [float(np.rad2deg(fov_x)) for fov_x in fov_x_list]
+            fov_y_list = [float(np.rad2deg(fov_y)) for fov_y in fov_y_list]
+        else:
+            # Sample uniform object grid
+            fov_x_list = [np.atan(x * np.tan(self.vfov / 2)) for x in x_list]
+            fov_y_list = [np.atan(y * np.tan(self.hfov / 2)) for y in y_list]
+            fov_x_list = [float(np.rad2deg(fov_x)) for fov_x in fov_x_list]
+            fov_y_list = [float(np.rad2deg(fov_y)) for fov_y in fov_y_list]
 
         # Sample rays (parallel or point source)
         if depth == float("inf"):
@@ -1333,13 +1341,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Reference:
             [1] https://en.wikipedia.org/wiki/Angle_of_view_(photography)
         """
+        if not hasattr(self, "foclen"):
+            return
+        
         # 1. Perspective projection
         self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
         self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
         self.dfov = 2 * math.atan(self.r_sensor / self.foclen)
         self.rfov = self.dfov / 2 # radius (half diagonal) FoV
 
-        # 2. Ray tracing
+        # 2. Ray tracing to calculate real FoV (with distortion)
         # Sample rays from edge of sensor, shape [SPP_CALC, 3]
         o1 = torch.zeros([SPP_CALC, 3])
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
@@ -2052,12 +2063,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.float_enpd = True if self.enpd is None else False
         self.float_foclen = False
         self.float_rfov = False
-
-        sensor_res = data.get("sensor_res", self.sensor_res)
         self.r_sensor = data["r_sensor"]
 
         self.to(self.device)
+        
+        # Set sensor size and resolution
+        sensor_res = data.get("sensor_res", (2000, 2000))
         self.set_sensor_res(sensor_res=sensor_res)
+        self.post_computation()
 
     def write_lens_json(self, filename="./test.json"):
         """Write the lens into .json file."""

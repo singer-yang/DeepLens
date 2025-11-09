@@ -114,7 +114,7 @@ def create_lens(
     
     # Set sensor size and resolution
     lens.r_sensor = imgh / 2
-    lens.set_sensor_res(sensor_res=lens.sensor_res)
+    # lens.set_sensor_res(sensor_res=lens.sensor_res)
     lens.post_computation()
 
     # Save lens
