@@ -73,7 +73,7 @@ class GeoLensEval:
         save_name="./lens_spot_radial.png",
         num_fov=5,
         depth=float("inf"),
-        spp=SPP_PSF,
+        num_rays=SPP_PSF,
         wvln_list=WAVE_RGB,
         show=False,
     ):
@@ -83,21 +83,21 @@ class GeoLensEval:
             save_name (string, optional): filename to save. Defaults to "./lens_spot_radial.png".
             num_fov (int, optional): field of view number. Defaults to 4.
             depth (float, optional): depth of the point source. Defaults to float("inf").
-            spp (int, optional): number of rays to sample. Defaults to SPP_PSF.
+            num_rays (int, optional): number of rays to sample. Defaults to SPP_PSF.
             wvln_list (list, optional): wavelength list to render.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
         assert isinstance(wvln_list, list), "wvln_list must be a list"
-        
+
         # Prepare figure
-        fig, axs = plt.subplots(1, num_fov, figsize=(num_fov * 3, 3))
+        fig, axs = plt.subplots(1, num_fov, figsize=(num_fov * 3.5, 3))
         axs = np.atleast_1d(axs)
 
         # Trace and draw each wavelength separately, overlaying results
         for wvln_idx, wvln in enumerate(wvln_list):
             # Sample rays along meridional (y) direction, shape [num_fov, num_rays, 3]
             ray = self.sample_radial_rays(
-                num_field=num_fov, depth=depth, num_rays=spp, wvln=wvln
+                num_field=num_fov, depth=depth, num_rays=num_rays, wvln=wvln
             )
 
             # Trace rays to sensor plane, shape [num_fov, num_rays, 3]
@@ -131,74 +131,65 @@ class GeoLensEval:
     @torch.no_grad()
     def draw_spot_map(
         self,
-        save_name="./spot_map.png",
+        save_name="./lens_spot_map.png",
         num_grid=5,
         depth=DEPTH,
-        wvln=DEFAULT_WAVE,
+        num_rays=SPP_PSF,
+        wvln_list=WAVE_RGB,
         show=False,
     ):
         """Draw spot diagram of the lens at different field angles.
 
         Args:
+            save_name (string, optional): filename to save. Defaults to "./lens_spot_map.png".
             num_grid (int, optional): number of grid points. Defaults to 5.
             depth (float, optional): depth of the point source. Defaults to DEPTH.
-            wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
-            save_name (string, optional): filename to save. Defaults to None.
+            num_rays (int, optional): number of rays to sample. Defaults to SPP_PSF.
+            wvln_list (list, optional): wavelength list to render. Defaults to WAVE_RGB.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
-        # Sample rays, shape [num_grid, num_grid, num_rays, 3]
-        ray = self.sample_grid_rays(
-            depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
-        )
-
-        # Trace rays to sensor
-        ray = self.trace2sensor(ray)
-
-        # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
-        ray_o = -ray.o.clone().cpu().numpy()
-        ray_valid = ray.valid.clone().cpu().numpy()
+        assert isinstance(wvln_list, list), "wvln_list must be a list"
 
         # Plot multiple spot diagrams in one figure
         fig, axs = plt.subplots(
-            num_grid, num_grid, figsize=(num_grid * 2, num_grid * 2)
+            num_grid, num_grid, figsize=(num_grid * 3, num_grid * 3)
         )
-        fig.suptitle("Spot diagram")
-        for i in range(num_grid):
-            for j in range(num_grid):
-                valid = ray_valid[i, j, :]
-                x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
+        axs = np.atleast_2d(axs)
 
-                # Filter valid rays
-                x_valid, y_valid = x[valid > 0], y[valid > 0]
-                ra_valid = valid[valid > 0]
+        # Loop wavelengths and overlay scatters
+        for wvln_idx, wvln in enumerate(wvln_list):
+            # Sample rays per wavelength, shape [num_grid, num_grid, num_rays, 3]
+            ray = self.sample_grid_rays(
+                depth=depth, num_grid=num_grid, num_rays=num_rays, wvln=wvln
+            )
+            # Trace rays to sensor
+            ray = self.trace2sensor(ray)
 
-                # Calculate center of mass for valid rays
-                if ra_valid.sum() > EPSILON:
-                    xc, yc = (
-                        x_valid.sum() / ra_valid.sum(),
-                        y_valid.sum() / ra_valid.sum(),
-                    )
-                else:
-                    xc, yc = 0.0, 0.0
+            # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
+            ray_o = -ray.o.clone().cpu().numpy()
+            ray_valid = ray.valid.clone().cpu().numpy()
 
-                # Plot points and center of mass
-                axs[i, j].scatter(x_valid, y_valid, 2, "black", alpha=0.5)
-                axs[i, j].scatter([xc], [yc], 100, "r", "x")
-                axs[i, j].set_aspect("equal", adjustable="datalim")
-                axs[i, j].tick_params(axis="both", which="major", labelsize=6)
+            color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
 
-        # Save plot
-        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
-        if save_name is None:
-            save_name = f"./spot_{depth_str}.png"
-        else:
-            if save_name.endswith(".png"):
-                save_name = save_name[:-4]
-            save_name = f"{save_name}_spot_{depth_str}.png"
+            # Draw per grid cell
+            for i in range(num_grid):
+                for j in range(num_grid):
+                    valid = ray_valid[i, j, :]
+                    x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
+
+                    # Filter valid rays
+                    mask = valid > 0
+                    x_valid, y_valid = x[mask], y[mask]
+
+                    # Plot points for this wavelength
+                    axs[i, j].scatter(x_valid, y_valid, 2, color=color, alpha=0.5)
+                    axs[i, j].set_aspect("equal", adjustable="datalim")
+                    axs[i, j].tick_params(axis="both", which="major", labelsize=6)
 
         if show:
             plt.show()
         else:
+            assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close()
 
