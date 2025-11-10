@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Basic variables and classes for DeepLens."""
 
 import copy
@@ -35,11 +28,11 @@ SPP_CALC = 1024 # spp for some computation which doesnot need to be very accurat
 SPP_RENDER = 32 # spp for rendering
 SPP_PARAXIAL = 32 # spp for paraxial
 
-PSF_KS = 128 # kernel size for psf calculation, better to be odd number
+PSF_KS = 64 # kernel size for psf calculation
 GEO_GRID = 21  # grid number for PSF map
 
 DELTA = 1e-6
-DELTA_PARAXIAL = 1e-3
+DELTA_PARAXIAL = 0.01
 EPSILON = 1e-9  # replace 0 with EPSILON in some cases
 
 DEFAULT_WAVE = 0.58756180 # [um] default wavelength
@@ -49,165 +42,9 @@ WAVE_RED = [0.620, 0.660, 0.700] # [um] narrow band red spectrum
 WAVE_GREEN = [0.500, 0.530, 0.560] # [um] narrow band green spectrum
 WAVE_BLUE = [0.450, 0.470, 0.490] # [um] narrow band blue spectrum
 
-WAVE_BOARD_BAND = [
-    0.400,
-    0.410,
-    0.420,
-    0.430,
-    0.440,
-    0.450,
-    0.460,
-    0.470,
-    0.480,
-    0.490,
-    0.500,
-    0.510,
-    0.520,
-    0.530,
-    0.540,
-    0.550,
-    0.560,
-    0.570,
-    0.580,
-    0.590,
-    0.600,
-    0.610,
-    0.620,
-    0.630,
-    0.640,
-    0.650,
-    0.660,
-    0.670,
-    0.680,
-    0.690,
-    0.700,
-]
-
-RED_RESPONSE = [
-    0.00,
-    0.00,
-    0.00,
-    0.01,
-    0.02,
-    0.03,
-    0.04,
-    0.05,
-    0.05,
-    0.05,
-    0.05,
-    0.06,
-    0.07,
-    0.08,
-    0.09,
-    0.15,
-    0.20,
-    0.40,
-    0.50,
-    0.60,
-    0.70,
-    0.60,
-    0.50,
-    0.40,
-    0.30,
-    0.20,
-    0.15,
-    0.10,
-    0.05,
-    0.03,
-    0.00,
-]
-
-GREEN_RESPONSE = [
-    0.00,
-    0.03,
-    0.05,
-    0.10,
-    0.20,
-    0.30,
-    0.40,
-    0.50,
-    0.60,
-    0.70,
-    0.80,
-    0.90,
-    1.00,
-    1.00,
-    1.00,
-    0.90,
-    0.80,
-    0.70,
-    0.60,
-    0.30,
-    0.20,
-    0.10,
-    0.05,
-    0.04,
-    0.03,
-    0.02,
-    0.01,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-]
-
-BLUE_RESPONSE = [
-    0.00,
-    0.30,
-    0.60,
-    0.70,
-    0.80,
-    0.90,
-    0.80,
-    0.60,
-    0.40,
-    0.30,
-    0.20,
-    0.10,
-    0.05,
-    0.03,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-    0.00,
-]
-
-
-WAVE_SPEC = [
-    0.400,
-    0.420,
-    0.440,
-    0.460,
-    0.480,
-    0.500,
-    0.520,
-    0.540,
-    0.560,
-    0.580,
-    0.600,
-    0.620,
-    0.640,
-    0.660,
-    0.680,
-    0.700,
-]
 FULL_SPECTRUM = np.arange(0.400, 0.701, 0.02)
 HYPER_SPEC_RANGE = [0.42, 0.66]  # [um]. reference 400nm to 700nm, 20nm step size
 HYPER_SPEC_BAND = 49  # 5nm/step, according to "Shift-variant color-coded diffractive spectral imaging system"
-
 
 def wave_rgb():
     """Randomly select one wave from R, G, B spectrum and return the wvln list (length 3)"""

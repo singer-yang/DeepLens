@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Paraxial diffractive lens model. Each optical element (lens, DOE, metasurface, etc.) in the paraxial diffractive model is modeled as a phase function. This simplified optical model is easy to use (but typically not accurate enough) for many real-world applications.
 
 Reference papers:
@@ -141,8 +134,8 @@ class DiffractiveLens(Lens):
         data = {}
         data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
         data["surfaces"] = []
-        data["d_sensor"] = round(self.d_sensor.item(), 2)
-        data["l_sensor"] = round(self.l_sensor, 2)
+        data["d_sensor"] = round(self.d_sensor.item(), 3)
+        data["l_sensor"] = round(self.l_sensor, 3)
         data["sensor_res"] = self.sensor_res
 
         # Save diffractive surfaces

@@ -1,16 +1,7 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
-"""Camera contains a lens and a sensor, working as an image simulator in an end-to-end computational imaging pipeline.
-"""
+"""Camera contains a lens and a sensor, working as an image simulator in an end-to-end computational imaging pipeline."""
 
 import torch
 
-from deeplens.geolens import GeoLens
 from deeplens.sensor import RGBSensor
 
 
@@ -19,33 +10,34 @@ from deeplens.sensor import RGBSensor
 # ===========================================
 class Renderer:
     """Base class for image simulation and rendering.
-    
+
     Supports two types of renderers:
         1. Camera renderer using optical simulation.
         2. PSF renderer using calibrated PSF data.
     """
+
     def __init__(self, device=None):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
     def __call__(self, *args, **kwargs):
-        """Render a batch of blurry and noisy RGB images."""
+        """Alias for ``render()``."""
         return self.render(*args, **kwargs)
 
     def set_device(self, device):
-        """Set the computing device for rendering operations."""
+        """Set the compute device."""
         self.device = device
 
     def move_to_device(self, data_dict):
-        """Move all tensor data in the dictionary to the specified device."""
+        """Move all tensors in the dict to the configured device."""
         for key in data_dict:
             if isinstance(data_dict[key], torch.Tensor):
                 data_dict[key] = data_dict[key].to(self.device)
         return data_dict
-    
+
     def render(self, data_dict):
-        """Render a batch of blurry and noisy RGB images."""
+        """Subclasses must implement rendering."""
         raise NotImplementedError
 
 
@@ -54,14 +46,16 @@ class Renderer:
 # ===========================================
 class Camera(Renderer):
     """Camera system consisting of an optical lens and a sensor.
-    
-    This class simulates real camera-captured images for computational imaging 
+
+    This class simulates real camera-captured images for computational imaging
     applications, including lens aberrations and sensor noise characteristics.
     """
+
     def __init__(
         self,
         lens_file,
         sensor_file,
+        lens_type="geolens",
         device=None,
     ):
         super().__init__(device=device)
@@ -73,16 +67,25 @@ class Camera(Renderer):
         sensor_size = self.sensor.size
 
         # Lens (here we can use either GeoLens or other lens models)
-        self.lens = GeoLens(lens_file, device=device)
+        if lens_type == "geolens":
+            from deeplens.geolens import GeoLens
+
+            self.lens = GeoLens(lens_file, device=device)
+        elif lens_type == "hybridlens":
+            from deeplens.hybridlens import HybridLens
+
+            self.lens = HybridLens(lens_file, device=device)
+        else:
+            raise NotImplementedError(f"Unsupported lens type: {lens_type}")
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
 
     def __call__(self, data_dict):
-        """Simulate camera-captured images with lens aberrations and sensor noise."""
+        """Alias for ``render()``."""
         return self.render(data_dict)
 
     def render(self, data_dict, render_mode="psf_patch", output_type="rggbif"):
         """Simulate camera-captured images with lens aberrations and sensor noise.
-        
+
         This method performs the complete imaging pipeline: converts input to linear RGB,
         applies lens aberrations, converts to Bayer format, adds sensor noise, and prepares
         output for network training or testing.
@@ -114,14 +117,18 @@ class Camera(Renderer):
         img_linrgb = sensor.unprocess(img)  # (B, 3, H, W), [0, 1]
 
         # Lens aberration simulation in linear RGB space
-        img_lq = self.render_lens(img_linrgb, render_mode=render_mode, **data_dict)  # (B, 3, H, W), [0, 1]
+        img_lq = self.render_lens(
+            img_linrgb, render_mode=render_mode, **data_dict
+        )  # (B, 3, H, W), [0, 1]
 
         # Convert linear RGB to Bayer space
         bayer_gt = sensor.linrgb2bayer(img_linrgb)  # (B, 1, H, W), [0, 2**bit - 1]
         bayer_lq = sensor.linrgb2bayer(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
 
         # Simulate sensor noise
-        bayer_lq = sensor.simu_noise(bayer_lq, iso)  # (B, 1, H, W), [black_level, 2**bit - 1]
+        bayer_lq = sensor.simu_noise(
+            bayer_lq, iso
+        )  # (B, 1, H, W), [black_level, 2**bit - 1]
 
         # Pack output for network training
         data_lq, data_gt = self.pack_output(
@@ -133,14 +140,14 @@ class Camera(Renderer):
         return data_lq, data_gt
 
     def render_lens(self, img_linrgb, render_mode="psf_patch", **kwargs):
-        """Apply lens aberration effects to a linear RGB image.
+        """Apply lens aberrations to a linear RGB image.
 
         Args:
-            img_linrgb (torch.Tensor): Linear RGB image (energy representation), 
+            img_linrgb (torch.Tensor): Linear RGB image (energy representation),
                 shape (B, 3, H, W), range [0, 1]
             render_mode (str): Rendering method to use. Options include:
-                - "psf_patch": PSF with patch-based rendering
-                - "psf_map": PSF map-based rendering
+                - "psf_patch": PSF with patch rendering
+                - "psf_map": PSF map rendering
                 - "psf_pixel": Pixel-wise PSF rendering
                 - "ray_tracing": Full ray tracing simulation
                 - "psf_patch_depth_interp": PSF patch with depth interpolation
@@ -149,37 +156,41 @@ class Camera(Renderer):
 
         Returns:
             torch.Tensor: Degraded image with lens aberrations, shape (B, 3, H, W), range [0, 1]
-        """        
+        """
         if render_mode == "psf_patch":
             # Because different image in a batch can have different PSF, so we use for loop here
             img_lq_ls = []
             for b in range(img_linrgb.shape[0]):
                 img = img_linrgb[b, ...].unsqueeze(0)
                 psf_center = kwargs["field_center"][b, ...]
-                img_lq = self.lens.render(img, method="psf_patch", psf_center=psf_center)
+                img_lq = self.lens.render(
+                    img, method="psf_patch", psf_center=psf_center
+                )
                 img_lq_ls.append(img_lq)
             img_lq = torch.cat(img_lq_ls, dim=0)
 
         elif render_mode == "psf_map":
             img_lq = self.lens.render(img_linrgb, method="psf_map")
-        
+
         elif render_mode == "psf_pixel":
             depth = kwargs["depth"][b, ...]
             img_lq = self.lens.render(img_linrgb, method="psf_pixel", **kwargs)
-        
+
         elif render_mode == "ray_tracing":
             img_lq = self.lens.render(img_linrgb, method="ray_tracing", **kwargs)
-        
+
         elif render_mode == "psf_patch_depth_interp":
             img_lq_ls = []
             for b in range(img_linrgb.shape[0]):
                 img = img_linrgb[b, ...].unsqueeze(0)
-                psf_center = kwargs["field_center"][b, ...]
-                depth = kwargs["depth"][b, ...]
-                img_lq = self.lens.render_rgbd(img, depth, method="psf_patch", psf_center=psf_center)
+                psf_center = kwargs["field_center"][b, ...].unsqueeze(0)
+                depth = kwargs["depth"][b, ...].unsqueeze(0)
+                img_lq = self.lens.render_rgbd(
+                    img, depth, method="psf_patch", psf_center=psf_center
+                )
                 img_lq_ls.append(img_lq)
             img_lq = torch.cat(img_lq_ls, dim=0)
-        
+
         else:
             raise NotImplementedError(f"Invalid render mode: {render_mode}")
 
@@ -194,7 +205,7 @@ class Camera(Renderer):
         output_type="rggbi",
         **kwargs,
     ):
-        """Package Bayer data into network-ready input and ground-truth pairs.
+        """Pack Bayer data into network-ready inputs and targets.
 
         Args:
             bayer_lq (torch.Tensor): Noisy Bayer image, shape (B, 1, H, W), range [~black_level, 2**bit - 1]
@@ -269,9 +280,7 @@ class Camera(Renderer):
             field_channel = torch.cat(field_channels, dim=0).unsqueeze(1)
 
             # Concatenate to RGGBIF 6 channels
-            rggbif_lq = torch.cat(
-                [rggb_lq, iso_channel, field_channel], dim=1
-            )
+            rggbif_lq = torch.cat([rggb_lq, iso_channel, field_channel], dim=1)
             return rggbif_lq, rggb_gt
 
         else:

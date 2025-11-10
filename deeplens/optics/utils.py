@@ -88,3 +88,39 @@ class PSFLoss(nn.Module):
             self.w_psf_size * concentration_loss + self.w_achromatic * channel_diff
         )
         return total_loss
+
+class PSFStrehlLoss(nn.Module):
+    def __init__(self):
+        super(PSFStrehlLoss, self).__init__()
+
+    def forward(self, psf):
+        """Compute Strehl-like score for PSFs with shape [B, 3, ks, ks].
+
+        The score is the center-pixel intensity after per-channel spatial
+        normalization (sum over HxW equals 1), averaged over channels and batch.
+        This value should be maximized during optimization.
+        """
+        # Ensure shape [B, 3, H, W]
+        if psf.dim() == 3:
+            psf = psf.unsqueeze(0)
+        assert psf.dim() == 4 and psf.size(1) == 3, (
+            f"Expected psf shape [B, 3, ks, ks], got {tuple(psf.shape)}"
+        )
+
+        eps = torch.finfo(psf.dtype).eps
+        # Normalize per-sample, per-channel over spatial dims
+        psf_sum = psf.sum(dim=(2, 3), keepdim=True)
+        psf_norm = psf / (psf_sum + eps)
+
+        # Center pixel indices
+        h, w = psf.shape[-2:]
+        cy, cx = h // 2, w // 2
+
+        # Center intensity per sample and per channel
+        center_vals = psf_norm[:, :, cy, cx]  # [B, 3]
+
+        # Average across channels, then across batch
+        strehl_per_sample = center_vals.mean(dim=1)  # [B]
+        strehl = strehl_per_sample.mean()  # scalar
+
+        return strehl

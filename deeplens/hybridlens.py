@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Ray-wave model for hybrid refractive-diffractive lens. A hybrid lens consists of a GeoLens and a DOE in the back. A differentiable ray-wave model is used for optical simulation: first calculating the complex wavefield at the DOE plane by coherent ray tracing, then propagating the wavefield to the sensor plane by angular spectrum method. This hybrid lens model can simulate: (1) GeoLens aberration, and (2) DOE phase modulation.
 
 Technical Paper:
@@ -53,7 +46,7 @@ class HybridLens(Lens):
         super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution
-        self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
+        # self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
 
         # Load lens file
         if filename is not None:
@@ -94,6 +87,7 @@ class HybridLens(Lens):
         # r_doe = float(np.sqrt(doe.w**2 + doe.h**2) / 2)
         # geolens.surfaces.append(Phase(r=r_doe, d=doe.d))
         self.geolens = geolens
+        self.foclen = geolens.foclen
 
         # Update hybrid lens sensor resolution and pixel size
         self.set_sensor(sensor_size=geolens.sensor_size, sensor_res=geolens.sensor_res)
@@ -319,6 +313,7 @@ class HybridLens(Lens):
     # =====================================================================
     # Visualization
     # =====================================================================
+    @torch.no_grad()
     def draw_layout(self, save_name="./DOELens.png", depth=-10000.0, ax=None, fig=None):
         """Draw DOELens layout with ray-tracing and wave-propagation."""
         geolens = self.geolens
@@ -338,7 +333,7 @@ class HybridLens(Lens):
             float(np.rad2deg(geolens.rfov) * 0.99),
         ]
         arc_radi_list = [0.1, 0.4, 0.7, 1.0, 1.4, 1.8]
-        num_rays = 5
+        num_rays = 7
         for i, view in enumerate(views):
             # Draw ray tracing
             ray = geolens.sample_point_source_2D(
@@ -356,15 +351,20 @@ class HybridLens(Lens):
             )
 
             # Draw wave propagation
+            # Calculate ray center for wave propagation visualization
+            ray_center_doe = (
+                ((ray.o * ray.valid.unsqueeze(-1)).sum(dim=0) / ray.valid.sum()).cpu().numpy()
+            )  # shape [3]
             ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
-            arc_center = (ray.o[:, 0] * ray.valid).sum() / ray.valid.sum()
-            arc_center = arc_center.item()
-            # arc_radi = geolens.d_sensor.item() - geolens.surfaces[-1].d.item()
-            arc_radi = geolens.d_sensor.item() - self.doe.d.item()
+            ray_center_sensor = (
+                ((ray.o * ray.valid.unsqueeze(-1)).sum(dim=0) / ray.valid.sum()).cpu().numpy()
+            )  # shape [3]
+
+            arc_radi = ray_center_sensor[2] - ray_center_doe[2]
             chief_theta = np.rad2deg(
                 np.arctan2(
-                    ray.o[0, 0].item() - ray_o_record[-1][num_rays // 2, 0].item(),
-                    ray.o[0, 2].item() - ray_o_record[-1][num_rays // 2, 2].item(),
+                    ray_center_sensor[0] - ray_center_doe[0],
+                    ray_center_sensor[2] - ray_center_doe[2],
                 )
             )
             theta1 = chief_theta - 10
@@ -373,7 +373,7 @@ class HybridLens(Lens):
             for j in arc_radi_list:
                 arc_radi_j = arc_radi * j
                 arc = patches.Arc(
-                    (geolens.d_sensor.item(), arc_center),
+                    (ray_center_sensor[2], ray_center_sensor[0]),
                     arc_radi_j,
                     arc_radi_j,
                     angle=180.0,

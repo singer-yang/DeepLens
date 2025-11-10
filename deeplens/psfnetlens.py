@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Surrogate lens model that represents the Point Spread Function (PSF) of a lens using a neural network. This surrogate model can significantly accelerate PSF calculations compared to traditional ray tracing methods.
 
 Technical Paper:
@@ -127,11 +120,11 @@ class PSFNetLens(Lens):
             net_path (str): path to load the network
         """
         psfnet_dict = torch.load(net_path, map_location="cpu", weights_only=False)
-        assert psfnet_dict["pixel_size"] == self.pixel_size, (
-            "Pixel size mismatch between network and lens"
+        print(
+            f"Network pixel size: {round(psfnet_dict['pixel_size'], 4)} mm, Lens pixel size: {round(self.pixel_size, 4)} mm"
         )
-        assert psfnet_dict["lens_path"] == self.lens_path, (
-            "Lens path mismatch between network and lens"
+        print(
+            f"Network lens path: {psfnet_dict['lens_path']}, Lens path: {self.lens_path}"
         )
         self.psfnet.load_state_dict(psfnet_dict["psfnet_model_weights"])
 

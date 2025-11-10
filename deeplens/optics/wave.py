@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Complex wave field class for diffraction simulation.
 
 This file contains:
@@ -780,7 +773,7 @@ def Nyquist_ASM_zmax(wvln, ps, side_length, n=1.0):
     """
     wvln_mm = wvln * 1e-3
     zmax = side_length * ps * n / wvln_mm
-    return round(zmax, 3)
+    return zmax
 
 def Fresnel_zmin(wvln, ps, side_length, n=1.0):
     """Minimum propagation distance for Fresnel diffraction by Nyquist sampling criterion.
@@ -793,4 +786,4 @@ def Fresnel_zmin(wvln, ps, side_length, n=1.0):
     """
     wvln_mm = wvln * 1e-3
     zmin = float(np.sqrt(side_length**2) / (wvln_mm / n))
-    return round(zmin, 3)
+    return zmin

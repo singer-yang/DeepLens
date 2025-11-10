@@ -121,10 +121,12 @@ class Phase(Plane):
     # ==============================
     def ray_reaction(self, ray, n1=None, n2=None):
         """Ray reaction on DOE surface."""
+        ray = self.to_local_coord(ray)
         ray = self.intersect(ray)
         ray = self.refract(ray, n1 / n2)
         if self.diffraction:
             ray = self.diffract(ray)
+        ray = self.to_global_coord(ray)
         return ray
 
     def diffract(self, ray):
@@ -282,7 +284,8 @@ class Phase(Plane):
         """
         normal_vec = torch.zeros_like(ray.d)
         normal_vec[..., 2] = -1
-        normal_vec = torch.where(ray.is_forward, normal_vec, -normal_vec)
+        is_forward = ray.d[..., 2].unsqueeze(-1) > 0
+        normal_vec = torch.where(is_forward, normal_vec, -normal_vec)
         return normal_vec
 
     def surface_with_offset(self, *args, **kwargs):
@@ -354,15 +357,16 @@ class Phase(Plane):
 
         return params
 
-    def get_optimizer(self, lr=None):
+    def get_optimizer(self, lrs):
         """Generate optimizer.
 
         Args:
-            lr (float, optional): Learning rate. Defaults to 1e-3.
-            iterations (float, optional): Iterations. Defaults to 1e4.
+            lrs (list or float): Learning rates for different parameters.
         """
+        if isinstance(lrs, float):
+            lrs = [lrs]
         assert self.diffraction, "Diffraction is not activated yet."
-        params = self.get_optimizer_params(lr)
+        params = self.get_optimizer_params(lrs)
         optimizer = torch.optim.Adam(params)
         return optimizer
 
