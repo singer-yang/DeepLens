@@ -98,6 +98,8 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
 
     if single_point:
         field = field.squeeze(0)
+        ray = ray.squeeze(0)
+    
     return field
 
 
