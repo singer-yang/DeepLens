@@ -126,7 +126,7 @@ class GeoLensEval:
         else:
             assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close()
+        plt.close(fig)
 
     @torch.no_grad()
     def draw_spot_map(
@@ -191,7 +191,7 @@ class GeoLensEval:
         else:
             assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close()
+        plt.close(fig)
 
     # ================================================================
     # RMS map
@@ -412,7 +412,7 @@ class GeoLensEval:
             if save_name is None:
                 save_name = f"./{plane}_distortion_inf.png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close()
+        plt.close(fig)
 
     @torch.no_grad()
     def distortion_map(self, num_grid=16, depth=DEPTH, wvln=DEFAULT_WAVE):
@@ -427,7 +427,7 @@ class GeoLensEval:
             distortion_grid (torch.Tensor): distortion map. shape (grid_size, grid_size, 2)
         """
         # Sample and trace rays, shape (grid_size, grid_size, num_rays, 3)
-        ray = self.sample_grid_rays(depth=depth, num_grid=num_grid, wvln=wvln)
+        ray = self.sample_grid_rays(depth=depth, num_grid=num_grid, wvln=wvln, uniform_fov=False)
         ray = self.trace2sensor(ray)
 
         # Calculate centroid of the rays, shape (grid_size, grid_size, 2)
@@ -472,7 +472,7 @@ class GeoLensEval:
             if save_name is None:
                 save_name = f"./distortion_{depth_str}.png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close(fig)
+        plt.close(fig)
 
     # ================================================================
     # MTF
@@ -621,7 +621,7 @@ class GeoLensEval:
         else:
             assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close(fig)
+        plt.close(fig)
 
     # ================================================================
     # Field Curvature
@@ -732,7 +732,7 @@ class GeoLensEval:
             if save_name is None:
                 save_name = "./field_curvature.png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close(fig)
+        plt.close(fig)
 
     # ================================================================
     # Vignetting
@@ -749,7 +749,7 @@ class GeoLensEval:
         vignetting = ray.valid.sum(-1) / (ray.valid.shape[-1])
         return vignetting
 
-    def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512):
+    def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512, show=False):
         """Draw vignetting."""
         # Calculate vignetting map
         vignetting = self.vignetting(depth=depth)
@@ -765,12 +765,17 @@ class GeoLensEval:
         # Scale vignetting to [0.5, 1] range
         vignetting = 0.5 + 0.5 * vignetting
 
-        plt.imshow(vignetting.cpu().numpy(), cmap="gray", vmin=0.5, vmax=1.0)
-        plt.colorbar(ticks=[0.5, 0.75, 1.0])
+        fig, ax = plt.subplots()
+        ax.imshow(vignetting.cpu().numpy(), cmap="gray", vmin=0.5, vmax=1.0)
+        ax.colorbar(ticks=[0.5, 0.75, 1.0])
 
-        filename = f"./vignetting_{depth}.png" if filename is None else filename
-        plt.savefig(filename, bbox_inches="tight", format="png", dpi=300)
-        plt.close()
+        if show:
+            plt.show()
+        else:
+            if filename is None:
+                filename = f"./vignetting_{depth}.png"
+            plt.savefig(filename, bbox_inches="tight", format="png", dpi=300)
+        plt.close(fig)
 
     # ================================================================
     # Wavefront error

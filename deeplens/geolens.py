@@ -137,19 +137,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Args:
             depth (float, optional): sampling depth. Defaults to float("inf").
-            num_grid (list, optional): number of grid points. Defaults to [11, 11].
+            num_grid (tuple, optional): number of grid points. Defaults to [11, 11].
             num_rays (int, optional): number of rays. Defaults to SPP_PSF.
             wvln (float, optional): ray wvln. Defaults to DEFAULT_WAVE.
-            sample_more_off_axis (bool, optional): If True, sample more off-axis rays.
             uniform_fov (bool, optional): If True, sample uniform FoV angles.
+            sample_more_off_axis (bool, optional): If True, sample more off-axis rays.
             scale_pupil (float, optional): Scale factor for pupil radius.
 
         Returns:
-            ray (Ray object): Ray object. Shape [num_grid, num_grid, num_rays, 3]
+            ray (Ray object): Ray object. Shape [num_grid[1], num_grid[0], num_rays, 3]
         """
-        if isinstance(num_grid, int):
-            num_grid = [num_grid, num_grid]
-
         # Calculate field angles for grid source. Top-left field has positive fov_x and negative fov_y
         x_list = [x for x in np.linspace(1, -1, num_grid[0])]
         y_list = [y for y in np.linspace(-1, 1, num_grid[1])]
@@ -881,6 +878,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             plt.title("Rendered image")
             plt.axis("off")
             plt.show()
+            plt.close()
 
         return img_render
 
@@ -925,7 +923,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """Single wavelength geometric (incoherent) PSF calculation.
 
         Args:
-            points (Tnesor): Normalized point source position. Shape of [N, 3], x, y in range [-1, 1], z in range [-Inf, 0].
+            points (Tensor): Normalized point source position. Shape of [N, 3], x, y in range [-1, 1], z in range [-Inf, 0].
             ks (int, optional): Output kernel size.
             wvln (float, optional): Wavelength.
             spp (int, optional): Sample per pixel.
