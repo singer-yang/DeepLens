@@ -914,7 +914,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             tan_point_fov_y = -points[..., 1] / points[..., 2]
             psf_center_x = self.foclen * tan_point_fov_x
             psf_center_y = self.foclen * tan_point_fov_y
-            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1)
+            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1).to(self.device)
 
         else:
             raise ValueError(f"Unsupported method for PSF center calculation: {method}.")

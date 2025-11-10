@@ -581,7 +581,7 @@ class GeoLensEval:
                 for wvln_idx, wvln in enumerate(WAVE_RGB):
                     # Calculate MTF curves from PSF
                     psf = psf_rgb[wvln_idx]
-                    freq, mtf_tan, mtf_sag = self.psf2mtf(psf, pixel_size)
+                    freq, mtf_tan, _ = self.psf2mtf(psf, pixel_size)
 
                     # Plot MTF curves
                     ax = axs[depth_idx, fov_idx]
@@ -593,13 +593,6 @@ class GeoLensEval:
                         mtf_tan,
                         color=color,
                         label=f"{wvln_label}({wvln_nm}nm)-Tan",
-                    )
-                    ax.plot(
-                        freq,
-                        mtf_sag,
-                        color=color,
-                        label=f"{wvln_label}({wvln_nm}nm)-Sag",
-                        linestyle="--",
                     )
 
                 # Draw Nyquist frequency
@@ -636,19 +629,19 @@ class GeoLensEval:
     @torch.no_grad()
     def draw_field_curvature(
         self,
-        num_points=GEO_GRID,
+        save_name=None,
+        num_points=32,
         z_span=1.0,
-        z_steps=121,
+        z_steps=1001,
         wvln_list=WAVE_RGB,
         spp=SPP_CALC,
-        filename=None,
         show=False,
     ):
         """Draw field curvature: best-focus defocus Δz (mm) vs field angle (deg), RGB overlaid.
 
         - Tangential (meridional) curves are solid lines (y-axis spread minimized).
-        - Sagittal curves are dashed lines (x-axis spread minimized).
         """
+        print("This function is not optimized for the best speed.")
         device = self.device
         # Convert maximum field angle to degrees
         rfov_deg = float(self.rfov) * 180.0 / np.pi
@@ -658,7 +651,6 @@ class GeoLensEval:
 
         # Prepare containers
         delta_z_tan = []  # list of numpy arrays per wavelength
-        delta_z_sag = []  # list of numpy arrays per wavelength
 
         # Defocus sweep grid (around current sensor plane)
         d_sensor = self.d_sensor
@@ -689,7 +681,6 @@ class GeoLensEval:
         # Loop wavelengths and field angles
         for w_idx, wvln in enumerate(wvln_list):
             dz_tan = []
-            dz_sag = []
             for i in range(len(rfov_samples)):
                 fov_deg = rfov_samples[i].item()
 
@@ -704,29 +695,15 @@ class GeoLensEval:
                 ray_t, _ = self.trace(ray_t)
                 dz_tan.append(best_focus_delta_z(ray_t, axis_idx=1))  # y-axis
 
-                # Sagittal (x-z plane -> minimize x spread)
-                ray_s = self.sample_parallel_2D(
-                    fov=fov_deg,
-                    num_rays=spp,
-                    wvln=wvln,
-                    plane="sagittal",
-                    entrance_pupil=True,
-                )
-                ray_s, _ = self.trace(ray_s)
-                dz_sag.append(best_focus_delta_z(ray_s, axis_idx=0))  # x-axis
-
             delta_z_tan.append(np.asarray(dz_tan))
-            delta_z_sag.append(np.asarray(dz_sag))
 
         # Plot
         fov_np = rfov_samples.detach().cpu().numpy()
         fig, ax = plt.subplots(figsize=(7, 6))
         ax.set_title("Field Curvature (Δz vs Field Angle)")
 
-        # Determine x range
-        all_vals = np.concatenate(
-            [np.abs(np.concatenate(delta_z_tan)), np.abs(np.concatenate(delta_z_sag))]
-        )
+        # Determine x range (tangential only)
+        all_vals = np.abs(np.concatenate(delta_z_tan)) if len(delta_z_tan) > 0 else np.array([0.0])
         x_range = float(max(0.2, all_vals.max() * 1.2)) if all_vals.size > 0 else 0.2
 
         for w_idx in range(len(wvln_list)):
@@ -739,13 +716,6 @@ class GeoLensEval:
                 linestyle="-",
                 label=f"{lbl}-Tan",
             )
-            ax.plot(
-                delta_z_sag[w_idx],
-                fov_np,
-                color=color,
-                linestyle="--",
-                label=f"{lbl}-Sag",
-            )
 
         ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
         ax.grid(True, color="gray", linestyle="-", linewidth=0.5, alpha=1.0)
@@ -756,27 +726,13 @@ class GeoLensEval:
         ax.legend(fontsize=8)
         plt.tight_layout()
 
-        # Save or show
         if show:
             plt.show()
         else:
-            if filename is None:
-                out_name = "./field_curvature.png"
-            else:
-                out_name = (
-                    f"{filename[:-4]}_field_curvature.png"
-                    if filename.endswith(".png")
-                    else f"{filename}_field_curvature.png"
-                )
-            plt.savefig(out_name, bbox_inches="tight", format="png", dpi=300)
+            if save_name is None:
+                save_name = "./field_curvature.png"
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
             plt.close(fig)
-
-        return {
-            "fov_deg": fov_np,
-            "delta_z_tan": delta_z_tan,
-            "delta_z_sag": delta_z_sag,
-            "wvln_list": wvln_list,
-        }
 
     # ================================================================
     # Vignetting

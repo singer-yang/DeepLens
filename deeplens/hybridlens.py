@@ -313,6 +313,7 @@ class HybridLens(Lens):
     # =====================================================================
     # Visualization
     # =====================================================================
+    @torch.no_grad()
     def draw_layout(self, save_name="./DOELens.png", depth=-10000.0, ax=None, fig=None):
         """Draw DOELens layout with ray-tracing and wave-propagation."""
         geolens = self.geolens
