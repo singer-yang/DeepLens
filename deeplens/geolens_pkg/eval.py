@@ -20,6 +20,9 @@ Functions:
         - psf2mtf(): Convert PSF to MTF (static method)
         - draw_mtf(): Draw grid of MTF curves for multiple depths/FOVs and RGB wavelengths
 
+    Field Curvature:
+        - draw_field_curvature(): Draw field curvature visualization
+
     Vignetting:
         - vignetting(): Compute vignetting map
         - draw_vignetting(): Draw vignetting visualization
@@ -52,6 +55,13 @@ from deeplens.basics import (
 )
 from deeplens.optics.ray import Ray
 
+# RGB color definitions for wavelength visualization
+RGB_RED = "#CC0000"
+RGB_GREEN = "#006600"
+RGB_BLUE = "#0066CC"
+RGB_COLORS = [RGB_RED, RGB_GREEN, RGB_BLUE]
+RGB_LABELS = ["R", "G", "B"]
+
 
 class GeoLensEval:
     # ================================================================
@@ -59,131 +69,129 @@ class GeoLensEval:
     # ================================================================
     @torch.no_grad()
     def draw_spot_radial(
-        self, num_field=5, depth=float("inf"), wvln=DEFAULT_WAVE, save_name=None, show=False
+        self,
+        save_name="./lens_spot_radial.png",
+        num_fov=5,
+        depth=float("inf"),
+        num_rays=SPP_PSF,
+        wvln_list=WAVE_RGB,
+        show=False,
     ):
         """Draw spot diagram of the lens at different field angles along meridional (y) direction.
 
         Args:
-            num_field (int, optional): field number. Defaults to 4.
+            save_name (string, optional): filename to save. Defaults to "./lens_spot_radial.png".
+            num_fov (int, optional): field of view number. Defaults to 4.
             depth (float, optional): depth of the point source. Defaults to float("inf").
-            wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
-            save_name (string, optional): filename to save. Defaults to None.
+            num_rays (int, optional): number of rays to sample. Defaults to SPP_PSF.
+            wvln_list (list, optional): wavelength list to render.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
-        # Sample rays along meridional (y) direction, shape [num_field, num_rays, 3]
-        ray = self.sample_radial_rays(
-            num_field=num_field, depth=depth, num_rays=SPP_PSF, wvln=wvln
-        )
+        assert isinstance(wvln_list, list), "wvln_list must be a list"
 
-        # Trace rays to sensor plane, shape [num_field, num_rays, 3]
-        ray = self.trace2sensor(ray)
-        ray_o = ray.o.clone().cpu().numpy()  # .squeeze(0)
-        ray_valid = ray.valid.clone().cpu().numpy()  # .squeeze(0)
+        # Prepare figure
+        fig, axs = plt.subplots(1, num_fov, figsize=(num_fov * 3.5, 3))
+        axs = np.atleast_1d(axs)
 
-        # Plot multiple spot diagrams in one figure
-        fig, axs = plt.subplots(1, num_field, figsize=(num_field * 3, 3))
-        fig.suptitle("Spot diagram along y-axis for depth " + str(depth))
-        for i in range(num_field):
-            valid = ray_valid[i, :]
-            x, y = ray_o[i, :, 0], ray_o[i, :, 1]
+        # Trace and draw each wavelength separately, overlaying results
+        for wvln_idx, wvln in enumerate(wvln_list):
+            # Sample rays along meridional (y) direction, shape [num_fov, num_rays, 3]
+            ray = self.sample_radial_rays(
+                num_field=num_fov, depth=depth, num_rays=num_rays, wvln=wvln
+            )
 
-            # Filter valid rays
-            x_valid, y_valid = x[valid > 0], y[valid > 0]
-            ra_valid = valid[valid > 0]
+            # Trace rays to sensor plane, shape [num_fov, num_rays, 3]
+            ray = self.trace2sensor(ray)
+            ray_o = ray.o.clone().cpu().numpy()
+            ray_valid = ray.valid.clone().cpu().numpy()
 
-            # Calculate center of mass for valid rays
-            if ra_valid.sum() > EPSILON:
-                xc, yc = x_valid.sum() / ra_valid.sum(), y_valid.sum() / ra_valid.sum()
-            else:
-                xc, yc = 0.0, 0.0
+            color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
 
-            # Plot points and center of mass
-            axs[i].scatter(x_valid, y_valid, 3, "black", alpha=0.5)
-            axs[i].scatter([xc], [yc], 100, "r", "x")
-            axs[i].set_aspect("equal", adjustable="datalim")
-            axs[i].tick_params(axis="both", which="major", labelsize=6)
+            # Plot multiple spot diagrams in one figure
+            for i in range(num_fov):
+                valid = ray_valid[i, :]
+                x, y = ray_o[i, :, 0], ray_o[i, :, 1]
 
-        # Save plot
-        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
-        if save_name is None:
-            save_name = f"./spot_meridional_{depth_str}.png"
-        else:
-            if save_name.endswith(".png"):
-                save_name = save_name[:-4]
-            save_name = f"{save_name}_meridional_{depth_str}.png"
+                # Filter valid rays
+                mask = valid > 0
+                x_valid, y_valid = x[mask], y[mask]
+
+                # Plot points and center of mass for this wavelength
+                axs[i].scatter(x_valid, y_valid, 2, color=color, alpha=0.5)
+                axs[i].set_aspect("equal", adjustable="datalim")
+                axs[i].tick_params(axis="both", which="major", labelsize=6)
 
         if show:
             plt.show()
         else:
+            assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close()
+        plt.close(fig)
 
     @torch.no_grad()
-    def draw_spot_map(self, num_grid=5, depth=DEPTH, wvln=DEFAULT_WAVE, save_name=None, show=False):
+    def draw_spot_map(
+        self,
+        save_name="./lens_spot_map.png",
+        num_grid=5,
+        depth=DEPTH,
+        num_rays=SPP_PSF,
+        wvln_list=WAVE_RGB,
+        show=False,
+    ):
         """Draw spot diagram of the lens at different field angles.
 
         Args:
+            save_name (string, optional): filename to save. Defaults to "./lens_spot_map.png".
             num_grid (int, optional): number of grid points. Defaults to 5.
             depth (float, optional): depth of the point source. Defaults to DEPTH.
-            wvln (float, optional): wavelength of the ray. Defaults to DEFAULT_WAVE.
-            save_name (string, optional): filename to save. Defaults to None.
+            num_rays (int, optional): number of rays to sample. Defaults to SPP_PSF.
+            wvln_list (list, optional): wavelength list to render. Defaults to WAVE_RGB.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
-        # Sample rays, shape [num_grid, num_grid, num_rays, 3]
-        ray = self.sample_grid_rays(
-            depth=depth, num_grid=num_grid, num_rays=SPP_PSF, wvln=wvln
-        )
-
-        # Trace rays to sensor
-        ray = self.trace2sensor(ray)
-
-        # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
-        ray_o = -ray.o.clone().cpu().numpy()
-        ray_valid = ray.valid.clone().cpu().numpy()
+        assert isinstance(wvln_list, list), "wvln_list must be a list"
 
         # Plot multiple spot diagrams in one figure
         fig, axs = plt.subplots(
-            num_grid, num_grid, figsize=(num_grid * 2, num_grid * 2)
+            num_grid, num_grid, figsize=(num_grid * 3, num_grid * 3)
         )
-        fig.suptitle("Spot diagram")
-        for i in range(num_grid):
-            for j in range(num_grid):
-                valid = ray_valid[i, j, :]
-                x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
+        axs = np.atleast_2d(axs)
 
-                # Filter valid rays
-                x_valid, y_valid = x[valid > 0], y[valid > 0]
-                ra_valid = valid[valid > 0]
+        # Loop wavelengths and overlay scatters
+        for wvln_idx, wvln in enumerate(wvln_list):
+            # Sample rays per wavelength, shape [num_grid, num_grid, num_rays, 3]
+            ray = self.sample_grid_rays(
+                depth=depth, num_grid=num_grid, num_rays=num_rays, wvln=wvln
+            )
+            # Trace rays to sensor
+            ray = self.trace2sensor(ray)
 
-                # Calculate center of mass for valid rays
-                if ra_valid.sum() > EPSILON:
-                    xc, yc = (
-                        x_valid.sum() / ra_valid.sum(),
-                        y_valid.sum() / ra_valid.sum(),
-                    )
-                else:
-                    xc, yc = 0.0, 0.0
+            # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
+            ray_o = -ray.o.clone().cpu().numpy()
+            ray_valid = ray.valid.clone().cpu().numpy()
 
-                # Plot points and center of mass
-                axs[i, j].scatter(x_valid, y_valid, 2, "black", alpha=0.5)
-                axs[i, j].scatter([xc], [yc], 100, "r", "x")
-                axs[i, j].set_aspect("equal", adjustable="datalim")
-                axs[i, j].tick_params(axis="both", which="major", labelsize=6)
+            color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
 
-        # Save plot
-        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
-        if save_name is None:
-            save_name = f"./spot_{depth_str}.png"
-        else:
-            if save_name.endswith(".png"):
-                save_name = save_name[:-4]
-            save_name = f"{save_name}_spot_{depth_str}.png"
+            # Draw per grid cell
+            for i in range(num_grid):
+                for j in range(num_grid):
+                    valid = ray_valid[i, j, :]
+                    x, y = ray_o[i, j, :, 0], ray_o[i, j, :, 1]
+
+                    # Filter valid rays
+                    mask = valid > 0
+                    x_valid, y_valid = x[mask], y[mask]
+
+                    # Plot points for this wavelength
+                    axs[i, j].scatter(x_valid, y_valid, 2, color=color, alpha=0.5)
+                    axs[i, j].set_aspect("equal", adjustable="datalim")
+                    axs[i, j].tick_params(axis="both", which="major", labelsize=6)
 
         if show:
             plt.show()
         else:
+            assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close()
+        plt.close(fig)
 
     # ================================================================
     # RMS map
@@ -323,17 +331,20 @@ class GeoLensEval:
     def draw_distortion_radial(
         self,
         rfov,
+        save_name=None,
         num_points=GEO_GRID,
         wvln=DEFAULT_WAVE,
         plane="meridional",
         ray_aiming=True,
-        filename=None,
+        show=False,
     ):
         """Draw distortion. zemax format(default): ray_aiming = False.
 
+        Note: this function is provided by a community contributor.
+
         Args:
             rfov: view angle (degrees)
-            filename: Save filename. Defaults to None.
+            save_name: Save filename. Defaults to None.
             num_points: Number of points. Defaults to GEO_GRID.
             plane: Meridional or sagittal. Defaults to meridional.
             ray_aiming: Whether to use ray aiming. Defaults to False.
@@ -394,52 +405,29 @@ class GeoLensEval:
         # Set axis range
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(0, rfov)
-        if filename is None:
-            plt.savefig(
-                f"./{plane}_distortion_infinite_mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+
+        if show:
+            plt.show()
         else:
-            plt.savefig(
-                f"{filename[:-4]}_{plane}_distortion_infinite_mm.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+            if save_name is None:
+                save_name = f"./{plane}_distortion_inf.png"
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
+        plt.close(fig)
 
     @torch.no_grad()
-    def distortion_map(self, num_grid=16, depth=DEPTH):
+    def distortion_map(self, num_grid=16, depth=DEPTH, wvln=DEFAULT_WAVE):
         """Compute distortion map at a given depth.
-
-        Note:
-            [1] When distortion is strong, the current FoV calculation is not accurate. So we sample rays from the mapped sensor plane in the object space.
-            [2] The sampling function should be implemented in the GeoLens class, and consider the sensor aspect ratio.
 
         Args:
             num_grid (int): number of grid points.
             depth (float): depth of the point source.
+            wvln (float): wavelength.
 
         Returns:
             distortion_grid (torch.Tensor): distortion map. shape (grid_size, grid_size, 2)
         """
-        assert depth != float("inf"), "depth cannot be infinity"
-
-        # Sample rays from mapped sensor plane in the object space, shape (grid_size, grid_size, 3)
-        scale = self.calc_scale(depth=depth)
-        obj_size_x = self.sensor_size[1] * scale
-        obj_size_y = self.sensor_size[0] * scale
-        ray_x, ray_y = torch.meshgrid(
-            torch.linspace(-obj_size_x / 2, obj_size_x / 2, num_grid),
-            torch.linspace(obj_size_y / 2, -obj_size_y / 2, num_grid),
-            indexing="xy",
-        )
-        ray_z = torch.full_like(ray_x, depth)
-        ray_o = torch.stack((ray_x, ray_y, ray_z), dim=-1)
-
         # Sample and trace rays, shape (grid_size, grid_size, num_rays, 3)
-        ray = self.sample_from_points(ray_o)
+        ray = self.sample_grid_rays(depth=depth, num_grid=num_grid, wvln=wvln, uniform_fov=False)
         ray = self.trace2sensor(ray)
 
         # Calculate centroid of the rays, shape (grid_size, grid_size, 2)
@@ -449,16 +437,20 @@ class GeoLensEval:
         distortion_grid = torch.stack((x_dist, y_dist), dim=-1)
         return distortion_grid
 
-    def draw_distortion(self, filename=None, num_grid=16, depth=DEPTH):
+    def draw_distortion(
+        self, save_name=None, num_grid=16, depth=DEPTH, wvln=DEFAULT_WAVE, show=False
+    ):
         """Draw distortion map.
 
         Args:
-            filename (str, optional): filename to save. Defaults to None.
+            save_name (str, optional): filename to save. Defaults to None.
             num_grid (int, optional): number of grid points. Defaults to 16.
             depth (float, optional): depth of the point source. Defaults to DEPTH.
+            wvln (float, optional): wavelength. Defaults to DEFAULT_WAVE.
+            show (bool, optional): whether to show the plot. Defaults to False.
         """
         # Ray tracing to calculate distortion map
-        distortion_grid = self.distortion_map(num_grid=num_grid, depth=depth)
+        distortion_grid = self.distortion_map(num_grid=num_grid, depth=depth, wvln=wvln)
         x1 = distortion_grid[..., 0].cpu().numpy()
         y1 = distortion_grid[..., 1].cpu().numpy()
 
@@ -473,21 +465,14 @@ class GeoLensEval:
         ax.set_xticks(np.linspace(-1, 1, num_grid))
         ax.set_yticks(np.linspace(-1, 1, num_grid))
 
-        depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
-        if filename is None:
-            plt.savefig(
-                f"./distortion_{depth_str}.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+        if show:
+            plt.show()
         else:
-            plt.savefig(
-                f"{filename[:-4]}_distortion_{depth_str}.png",
-                bbox_inches="tight",
-                format="png",
-                dpi=300,
-            )
+            depth_str = "inf" if depth == float("inf") else f"{-depth}mm"
+            if save_name is None:
+                save_name = f"./distortion_{depth_str}.png"
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
+        plt.close(fig)
 
     # ================================================================
     # MTF
@@ -556,10 +541,10 @@ class GeoLensEval:
     @torch.no_grad()
     def draw_mtf(
         self,
+        save_name="./lens_mtf.png",
         relative_fov_list=[0.0, 0.7, 1.0],
         depth_list=[DEPTH],
-        save_name="./mtf_grid.png",
-        ks=128,
+        psf_ks=128,
         show=False,
     ):
         """Draw a grid of MTF curves.
@@ -567,60 +552,47 @@ class GeoLensEval:
         Each subplot displays MTF curves for R, G, B wavelengths.
 
         Args:
-            relative_fov_list (list, optional): List of relative field of view values.
-                                              Defaults to [0.0, 0.7, 1.0].
+            relative_fov_list (list, optional): List of relative field of view values. Defaults to [0.0, 0.7, 1.0].
             depth_list (list, optional): List of depth values. Defaults to [DEPTH].
             save_name (str, optional): Filename to save the plot. Defaults to "./mtf_grid.png".
-            ks (int, optional): Kernel size for PSF calculation. Defaults to 256.
+            psf_ks (int, optional): Kernel size for intermediate PSF calculation. Defaults to 256.
             show (bool, optional): whether to show the plot. Defaults to False.
         """
-        assert save_name.endswith(".png"), "save_name must end with .png"
         pixel_size = self.pixel_size
         nyquist_freq = 0.5 / pixel_size
-
-        # Wavelength colors and labels
-        red, green, blue = "#CC0000", "#006600", "#0066CC"
-        wvln_colors = [red, green, blue]
-        wvln_labels = ["R", "G", "B"]
+        num_fovs = len(relative_fov_list)
+        if float("inf") in depth_list:
+            depth_list = [DEPTH if x == float("inf") else x for x in depth_list]
+        num_depths = len(depth_list)
 
         # Create figure and subplots (num_depths * num_fovs subplots)
-        num_fovs = len(relative_fov_list)
-        num_depths = len(depth_list)
         fig, axs = plt.subplots(
             num_depths, num_fovs, figsize=(num_fovs * 3, num_depths * 3), squeeze=False
         )
-        fig.suptitle("MTF Curves")
 
         # Iterate over depth and field of view
         for depth_idx, depth in enumerate(depth_list):
             for fov_idx, fov_relative in enumerate(relative_fov_list):
                 # Calculate rgb PSF
                 point = [0, -fov_relative, depth]
-                psf_rgb = self.psf_rgb(points=point, ks=ks, recenter=False)
+                psf_rgb = self.psf_rgb(points=point, ks=psf_ks, recenter=False)
 
                 # Calculate MTF curves for rgb wavelengths
                 for wvln_idx, wvln in enumerate(WAVE_RGB):
                     # Calculate MTF curves from PSF
                     psf = psf_rgb[wvln_idx]
-                    freq, mtf_tan, mtf_sag = self.psf2mtf(psf, pixel_size)
+                    freq, mtf_tan, _ = self.psf2mtf(psf, pixel_size)
 
                     # Plot MTF curves
                     ax = axs[depth_idx, fov_idx]
-                    color = wvln_colors[wvln_idx % len(wvln_colors)]
-                    wvln_label = wvln_labels[wvln_idx % len(wvln_labels)]
+                    color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
+                    wvln_label = RGB_LABELS[wvln_idx % len(RGB_LABELS)]
                     wvln_nm = int(wvln * 1000)
                     ax.plot(
                         freq,
                         mtf_tan,
                         color=color,
                         label=f"{wvln_label}({wvln_nm}nm)-Tan",
-                    )
-                    ax.plot(
-                        freq,
-                        mtf_sag,
-                        color=color,
-                        label=f"{wvln_label}({wvln_nm}nm)-Sag",
-                        linestyle="--",
                     )
 
                 # Draw Nyquist frequency
@@ -647,8 +619,120 @@ class GeoLensEval:
         if show:
             plt.show()
         else:
+            assert save_name.endswith(".png"), "save_name must end with .png"
             plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
-            plt.close(fig)
+        plt.close(fig)
+
+    # ================================================================
+    # Field Curvature
+    # ================================================================
+    @torch.no_grad()
+    def draw_field_curvature(
+        self,
+        save_name=None,
+        num_points=32,
+        z_span=1.0,
+        z_steps=1001,
+        wvln_list=WAVE_RGB,
+        spp=SPP_CALC,
+        show=False,
+    ):
+        """Draw field curvature: best-focus defocus Δz (mm) vs field angle (deg), RGB overlaid.
+
+        - Tangential (meridional) curves are solid lines (y-axis spread minimized).
+        """
+        print("This function is not optimized for the best speed.")
+        device = self.device
+        # Convert maximum field angle to degrees
+        rfov_deg = float(self.rfov) * 180.0 / np.pi
+
+        # Sample field angles [0, rfov_deg]
+        rfov_samples = torch.linspace(0.0, rfov_deg, num_points, device=device)
+
+        # Prepare containers
+        delta_z_tan = []  # list of numpy arrays per wavelength
+
+        # Defocus sweep grid (around current sensor plane)
+        d_sensor = self.d_sensor
+        z_grid = d_sensor + torch.linspace(-z_span, z_span, z_steps, device=device)
+
+        # Helper to compute best focus along a given axis (0=x sagittal, 1=y tangential)
+        def best_focus_delta_z(ray, axis_idx: int):
+            # ray: after lens surfaces (image space)
+            # Vectorized intersection with planes z_grid
+            oz = ray.o[..., 2:3]
+            dz = ray.d[..., 2:3]
+            t = (z_grid.unsqueeze(0) - oz) / (dz + 1e-12)  # [N, Z]
+
+            oa = ray.o[..., axis_idx : axis_idx + 1]
+            da = ray.d[..., axis_idx : axis_idx + 1]
+            pos_axis = (oa + da * t).squeeze(-1)  # [N, Z]
+
+            w = ray.valid.unsqueeze(-1).float()  # [N, 1] -> [N, Z] by broadcast
+            pos_axis = pos_axis * w
+            w_sum = w.sum(0)  # [Z]
+            centroid = pos_axis.sum(0) / (w_sum + EPSILON)  # [Z]
+            ms = (((pos_axis - centroid.unsqueeze(0)) ** 2) * w).sum(0) / (
+                w_sum + EPSILON
+            )  # [Z]
+            best_idx = torch.argmin(ms)
+            return (z_grid[best_idx] - d_sensor).item()
+
+        # Loop wavelengths and field angles
+        for w_idx, wvln in enumerate(wvln_list):
+            dz_tan = []
+            for i in range(len(rfov_samples)):
+                fov_deg = rfov_samples[i].item()
+
+                # Tangential (meridional plane: y-z plane -> minimize y spread)
+                ray_t = self.sample_parallel_2D(
+                    fov=fov_deg,
+                    num_rays=spp,
+                    wvln=wvln,
+                    plane="meridional",
+                    entrance_pupil=True,
+                )
+                ray_t, _ = self.trace(ray_t)
+                dz_tan.append(best_focus_delta_z(ray_t, axis_idx=1))  # y-axis
+
+            delta_z_tan.append(np.asarray(dz_tan))
+
+        # Plot
+        fov_np = rfov_samples.detach().cpu().numpy()
+        fig, ax = plt.subplots(figsize=(7, 6))
+        ax.set_title("Field Curvature (Δz vs Field Angle)")
+
+        # Determine x range (tangential only)
+        all_vals = np.abs(np.concatenate(delta_z_tan)) if len(delta_z_tan) > 0 else np.array([0.0])
+        x_range = float(max(0.2, all_vals.max() * 1.2)) if all_vals.size > 0 else 0.2
+
+        for w_idx in range(len(wvln_list)):
+            color = RGB_COLORS[w_idx % len(RGB_COLORS)]
+            lbl = RGB_LABELS[w_idx % len(RGB_LABELS)]
+            ax.plot(
+                delta_z_tan[w_idx],
+                fov_np,
+                color=color,
+                linestyle="-",
+                label=f"{lbl}-Tan",
+            )
+
+        ax.axvline(x=0, color="k", linestyle="-", linewidth=0.8)
+        ax.grid(True, color="gray", linestyle="-", linewidth=0.5, alpha=1.0)
+        ax.set_xlabel("Defocus Δz (mm) relative to sensor plane")
+        ax.set_ylabel("Field Angle (deg)")
+        ax.set_xlim(-x_range, x_range)
+        ax.set_ylim(0, rfov_deg)
+        ax.legend(fontsize=8)
+        plt.tight_layout()
+
+        if show:
+            plt.show()
+        else:
+            if save_name is None:
+                save_name = "./field_curvature.png"
+            plt.savefig(save_name, bbox_inches="tight", format="png", dpi=300)
+        plt.close(fig)
 
     # ================================================================
     # Vignetting
@@ -665,7 +749,7 @@ class GeoLensEval:
         vignetting = ray.valid.sum(-1) / (ray.valid.shape[-1])
         return vignetting
 
-    def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512):
+    def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512, show=False):
         """Draw vignetting."""
         # Calculate vignetting map
         vignetting = self.vignetting(depth=depth)
@@ -681,12 +765,17 @@ class GeoLensEval:
         # Scale vignetting to [0.5, 1] range
         vignetting = 0.5 + 0.5 * vignetting
 
-        plt.imshow(vignetting.cpu().numpy(), cmap="gray", vmin=0.5, vmax=1.0)
-        plt.colorbar(ticks=[0.5, 0.75, 1.0])
+        fig, ax = plt.subplots()
+        ax.imshow(vignetting.cpu().numpy(), cmap="gray", vmin=0.5, vmax=1.0)
+        ax.colorbar(ticks=[0.5, 0.75, 1.0])
 
-        filename = f"./vignetting_{depth}.png" if filename is None else filename
-        plt.savefig(filename, bbox_inches="tight", format="png", dpi=300)
-        plt.close()
+        if show:
+            plt.show()
+        else:
+            if filename is None:
+                filename = f"./vignetting_{depth}.png"
+            plt.savefig(filename, bbox_inches="tight", format="png", dpi=300)
+        plt.close(fig)
 
     # ================================================================
     # Wavefront error

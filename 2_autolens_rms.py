@@ -215,7 +215,7 @@ if __name__ == "__main__":
         fnum=args["fnum"],
         flange=args["flange"],
         thickness=args["thickness"],
-        lens_type=args["lens_type"],
+        surf_list=args["surf_list"],
         save_dir=result_dir,
     )
     lens.set_target_fov_fnum(

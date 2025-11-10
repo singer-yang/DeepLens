@@ -773,7 +773,7 @@ def Nyquist_ASM_zmax(wvln, ps, side_length, n=1.0):
     """
     wvln_mm = wvln * 1e-3
     zmax = side_length * ps * n / wvln_mm
-    return round(zmax, 3)
+    return zmax
 
 def Fresnel_zmin(wvln, ps, side_length, n=1.0):
     """Minimum propagation distance for Fresnel diffraction by Nyquist sampling criterion.
@@ -786,4 +786,4 @@ def Fresnel_zmin(wvln, ps, side_length, n=1.0):
     """
     wvln_mm = wvln * 1e-3
     zmin = float(np.sqrt(side_length**2) / (wvln_mm / n))
-    return round(zmin, 3)
+    return zmin

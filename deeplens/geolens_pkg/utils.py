@@ -29,7 +29,7 @@ def create_lens(
     flange,
     enpd=None,
     thickness=None,
-    lens_type=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
+    surf_list=[["Spheric", "Spheric"], ["Aperture"], ["Spheric", "Aspheric"]],
     save_dir="./",
 ):
     """Create a lens design starting point with flat surfaces.
@@ -42,7 +42,7 @@ def create_lens(
         fnum: Maximum f number.
         flange: Distance from last surface to sensor.
         thickness: Total thickness if specified.
-        lens_type: List of surface types defining each lens element and aperture.
+        surf_list: List of surface types defining each lens element and aperture.
     """
     from deeplens.geolens import GeoLens
 
@@ -64,7 +64,7 @@ def create_lens(
     surfaces = lens.surfaces
 
     d_total = 0.0
-    for elem_type in lens_type:
+    for elem_type in surf_list:
         if elem_type == "Aperture":
             d_next = (torch.rand(1) + 0.5).item()
             surfaces.append(Aperture(r=aper_r, d=d_total))
@@ -104,17 +104,17 @@ def create_lens(
     for s in surfaces:
         s.d = s.d / d_opt_actual * d_opt
 
-    # Lens calculation
+    # Lens sensor (dummy sensor resolution)
     lens = lens.to(lens.device)
     lens.d_sensor = torch.tensor(thickness).to(lens.device)
+    lens.r_sensor = imgh / 2
+    lens.set_sensor_res(sensor_res=(2000, 2000))
+    
+    # Lens calculation
     lens.enpd = enpd
     lens.float_enpd = True if enpd is None else False
     lens.float_foclen = False
     lens.float_rfov = False
-    
-    # Set sensor size and resolution
-    lens.r_sensor = imgh / 2
-    lens.set_sensor_res(sensor_res=lens.sensor_res)
     lens.post_computation()
 
     # Save lens

@@ -1,5 +1,4 @@
-"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and rewrite core functions.
-"""
+"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and rewrite core functions."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -61,7 +60,7 @@ class Lens(DeepObj):
 
     def set_sensor(self, sensor_size, sensor_res):
         """Set sensor size and resolution.
-        
+
         Args:
             sensor_size (tuple): Sensor size (w, h) in [mm].
             sensor_res (tuple): Sensor resolution (W, H) in [pixels].
@@ -73,6 +72,7 @@ class Lens(DeepObj):
         self.sensor_res = sensor_res
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
         self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
+        self.calc_fov()
 
     def set_sensor_res(self, sensor_res):
         """Set sensor resolution (and aspect ratio) while keeping sensor radius unchanged.
@@ -86,11 +86,26 @@ class Lens(DeepObj):
         # Change sensor size (r_sensor is fixed)
         diam_res = float(np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2))
         self.sensor_size = (
-            round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 3),
-            round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 3),
+            round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 4),
+            round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 4),
         )
-        self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
+        self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 4)
+        self.calc_fov()
 
+    @torch.no_grad()
+    def calc_fov(self):
+        """Compute FoV (radian) of the lens.
+
+        Reference:
+            [1] https://en.wikipedia.org/wiki/Angle_of_view_(photography)
+        """
+        if not hasattr(self, "foclen"):
+            return
+        
+        self.vfov = 2 * float(np.atan(self.sensor_size[0] / 2 / self.foclen))
+        self.hfov = 2 * float(np.atan(self.sensor_size[1] / 2 / self.foclen))
+        self.dfov = 2 * float(np.atan(self.r_sensor / self.foclen))
+        self.rfov = self.dfov / 2  # radius (half diagonal) FoV
 
     # ===========================================
     # PSF-ralated functions
@@ -306,7 +321,7 @@ class Lens(DeepObj):
         # Clean up axes and save
         ax.axis("off")
         plt.tight_layout(pad=0)
-        
+
         if show:
             return fig, ax
         else:
@@ -418,7 +433,9 @@ class Lens(DeepObj):
             )
 
         elif method == "psf_pixel":
-            raise NotImplementedError("Per-pixel PSF convolution has not been implemented.")
+            raise NotImplementedError(
+                "Per-pixel PSF convolution has not been implemented."
+            )
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
@@ -449,9 +466,13 @@ class Lens(DeepObj):
             points = torch.tensor(points).unsqueeze(0)
         elif isinstance(psf_center, torch.Tensor):
             depth = torch.full_like(psf_center[..., 0], depth)
-            points = torch.stack([psf_center[..., 0], psf_center[..., 1], depth], dim=-1)
+            points = torch.stack(
+                [psf_center[..., 0], psf_center[..., 1], depth], dim=-1
+            )
         else:
-            raise Exception(f"PSF center must be a list or tuple or tensor, but got {type(psf_center)}.")
+            raise Exception(
+                f"PSF center must be a list or tuple or tensor, but got {type(psf_center)}."
+            )
 
         # Compute PSF and perform PSF convolution
         psf = self.psf_rgb(points=points, ks=psf_ks).squeeze(0)
@@ -524,7 +545,7 @@ class Lens(DeepObj):
 
         elif method == "psf_map":
             # Render full resolution image with PSF map convolution
-            psf_grid = kwargs.get("psf_grid", (10, 10)) # (grid_w, grid_h)
+            psf_grid = kwargs.get("psf_grid", (10, 10))  # (grid_w, grid_h)
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
@@ -536,10 +557,14 @@ class Lens(DeepObj):
             for depth in tqdm(depths_ref):
                 psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
                 psf_maps.append(psf_map)
-            psf_map = torch.stack(psf_maps, dim=2) # shape [grid_h, grid_w, num_depth, 3, ks, ks]
-            
+            psf_map = torch.stack(
+                psf_maps, dim=2
+            )  # shape [grid_h, grid_w, num_depth, 3, ks, ks]
+
             # Image simulation
-            img_render = conv_psf_map_depth_interp(img_obj, depth_map, psf_map, depths_ref)
+            img_render = conv_psf_map_depth_interp(
+                img_obj, depth_map, psf_map, depths_ref
+            )
             return img_render
 
         elif method == "psf_pixel":

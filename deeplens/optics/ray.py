@@ -119,3 +119,19 @@ class Ray(DeepObj):
         self.obliq = self.obliq.squeeze(dim)
         self.is_forward = self.is_forward.squeeze(dim)
         return self
+
+    def unsqueeze(self, dim=None):
+        """Unsqueeze the ray.
+
+        Args:
+            dim (int, optional): dimension to unsqueeze. Defaults to None.
+        """
+        self.o = self.o.unsqueeze(dim)
+        self.d = self.d.unsqueeze(dim)
+        self.wvln = self.wvln.unsqueeze(dim)
+        self.valid = self.valid.unsqueeze(dim)
+        self.en = self.en.unsqueeze(dim)
+        self.opl = self.opl.unsqueeze(dim)
+        self.obliq = self.obliq.unsqueeze(dim)
+        self.is_forward = self.is_forward.unsqueeze(dim)
+        return self
