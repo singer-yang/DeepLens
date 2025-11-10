@@ -922,7 +922,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return psf_center
 
     def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=False):
-        """Single wavelength incoherent PSF calculation.
+        """Single wavelength geometric (incoherent) PSF calculation.
 
         Args:
             points (Tnesor): Normalized point source position. Shape of [N, 3], x, y in range [-1, 1], z in range [-Inf, 0].
@@ -933,6 +933,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
+
+        References:
+            [1] https://optics.ansys.com/hc/en-us/articles/42661723066515-What-is-a-Point-Spread-Function
+            [2] https://optics.ansys.com/hc/en-us/articles/42661795535251-What-is-the-difference-between-the-FFT-and-Huygens-PSF
         """
         sensor_w, sensor_h = self.sensor_size
         pixel_size = self.pixel_size
@@ -959,22 +963,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Trace rays to sensor plane
         ray = self.trace2sensor(ray)
 
-        # Calculate PSF
+        # Calculate PSF, shape [N, 2]
         if recenter:
-            # PSF center on the sensor plane defined by chief ray
-            assert (depth == float("inf")).all(), "Currently, infinite depth is not supported for chief ray PSF center calculation."
-            pointc = self.psf_center(point_obj, method="chief_ray")  # shape [N, 2]
-            psf = forward_integral(
-                ray, ps=pixel_size, ks=ks, pointc=pointc
-            )
+            pointc = self.psf_center(point_obj, method="chief_ray")
         else:
-            # PSF center on the sensor plane defined by pinhole projection
-            pointc = points.clone()[:, :2].to(device)
-            pointc[:, 0] *= sensor_w / 2
-            pointc[:, 1] *= sensor_h / 2
-            psf = forward_integral(
-                ray, ps=pixel_size, ks=ks, pointc=pointc
-            )
+            pointc = self.psf_center(point_obj, method="pinhole")
+        
+        psf = forward_integral(ray, ps=pixel_size, ks=ks, pointc=pointc)
 
         # Normalize to sum to 1
         psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
