@@ -266,7 +266,8 @@ class RGBSensor(Sensor):
         bayer[:, 0, 1 : 2 * H : 2, 1 : 2 * W : 2] = rggb[:, 3, :, :]
 
         # Data range [0, 1] -> [0, 2**bit-1]
-        bayer = torch.round(bayer * (2**bit - 1 - black_level) + black_level)
+        # bayer = torch.round(bayer * (2**bit - 1 - black_level) + black_level)
+        bayer = bayer * (2**bit - 1 - black_level) + black_level
 
         if single_image:
             bayer = bayer.squeeze(0)

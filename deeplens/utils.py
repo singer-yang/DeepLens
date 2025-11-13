@@ -7,6 +7,7 @@ import cv2 as cv
 import lpips
 import numpy as np
 import torch
+import torch.nn.functional as F
 from skimage.metrics import peak_signal_noise_ratio
 from skimage.metrics import structural_similarity
 from tqdm import tqdm
@@ -17,7 +18,7 @@ from tqdm import tqdm
 # ==================================
 def interp1d(query, key, value, mode="linear"):
     """Interpolate 1D query points to the key points.
-    
+
     Args:
         query (torch.Tensor): Query points, shape [N, 1]
         key (torch.Tensor): Key points, shape [M, 1]
@@ -33,54 +34,81 @@ def interp1d(query, key, value, mode="linear"):
     if mode == "linear":
         # Flatten query and key tensors for processing
         query_flat = query.flatten()  # [N]
-        key_flat = key.flatten()      # [M]
-        
+        key_flat = key.flatten()  # [M]
+
         # Get the original value shape to preserve extra dimensions
         value_shape = value.shape  # [M, ...]
         M = value_shape[0]
         extra_dims = value_shape[1:]
         value_reshaped = value.view(M, -1)  # [M, D] where D = product of extra dims
-        
+
         # Sort key and value
         sort_idx = torch.argsort(key_flat)
-        key_sorted = key_flat[sort_idx]                   # [M]
-        value_sorted = value_reshaped[sort_idx]           # [M, D]
-        
+        key_sorted = key_flat[sort_idx]  # [M]
+        value_sorted = value_reshaped[sort_idx]  # [M, D]
+
         # Find the indices for interpolation
         indices = torch.searchsorted(key_sorted, query_flat, right=False)  # [N]
         indices = torch.clamp(indices, 1, len(key_sorted) - 1)  # [N]
-        
+
         # Get the left and right key points
-        key_left = key_sorted[indices - 1]      # [N]
-        key_right = key_sorted[indices]         # [N]
+        key_left = key_sorted[indices - 1]  # [N]
+        key_right = key_sorted[indices]  # [N]
         value_left = value_sorted[indices - 1]  # [N, D]
-        value_right = value_sorted[indices]     # [N, D]
+        value_right = value_sorted[indices]  # [N, D]
 
         # Linear interpolation
-        result = value_left.clone()   # [N, D]
+        result = value_left.clone()  # [N, D]
         mask = key_left != key_right  # [N]
         if mask.any():
             # Compute interpolation weights
             weight = (query_flat - key_left) / (key_right - key_left)  # [N]
             weight = weight.unsqueeze(-1)  # [N, 1] for broadcasting
-            
+
             # Apply interpolation only where mask is True
             interpolated = value_left + weight * (value_right - value_left)  # [N, D]
             result = torch.where(mask.unsqueeze(-1), interpolated, value_left)  # [N, D]
-        
+
         # Reshape result back to [N, ...] maintaining the extra dimensions
         result_shape = (query.shape[0],) + extra_dims
         query_value = result.view(result_shape)
-    
+
     elif mode == "grid_sample":
         # https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.grid_sample.html
         # This requires uniform spacing between key points.
         raise NotImplementedError("Grid sample is not implemented yet.")
-    
+
     else:
         raise ValueError(f"Invalid interpolation mode: {mode}")
 
     return query_value
+
+
+def grid_sample_xy(
+    input, grid_xy, mode="bilinear", padding_mode="zeros", align_corners=False
+):
+    """This function is slightly modified from torch.nn.functional.grid_sample to use xy-coordinate grid.
+    
+    Args:
+        input (torch.Tensor): Input tensor, shape [B, C, H, W]
+        grid_xy (torch.Tensor): Grid xy coordinates, shape [B, H, W, 2]. Data range from [-1, 1] * [-1, 1]. Top-left is (-1, 1), bottom-right is (1, -1).
+        mode (str): Interpolation mode, "bilinear" or "nearest"
+        padding_mode (str): Padding mode, "zeros" or "border"
+        align_corners (bool): Whether to align corners
+
+    Returns:
+        torch.Tensor: Output tensor, shape [B, C, H, W]
+    """
+    grid_x = grid_xy[..., 0]
+    grid_y = grid_xy[..., 1]
+    grid = torch.stack([-grid_y, grid_x], dim=-1)
+    return F.grid_sample(
+        input,
+        grid,
+        mode=mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+    )
 
 
 # ==================================
@@ -98,17 +126,19 @@ def img2batch(img):
     # Tensor shape
     if len(img.shape) == 2:
         if isinstance(img, np.ndarray):
-            img = torch.tensor(img).unsqueeze(0).unsqueeze(0) # (H, W) -> (1, 1, H, W)
+            img = torch.tensor(img).unsqueeze(0).unsqueeze(0)  # (H, W) -> (1, 1, H, W)
         else:
             raise ValueError("Image should be numpy array.")
-    
+
     elif len(img.shape) == 3:
         if isinstance(img, np.ndarray):
             assert img.shape[-1] in [1, 3], "Image channel should be 1 or 3."
-            img = torch.tensor(img).unsqueeze(0).permute(0, 3, 1, 2) # (H, W, C) -> (1, C, H, W)
+            img = (
+                torch.tensor(img).unsqueeze(0).permute(0, 3, 1, 2)
+            )  # (H, W, C) -> (1, C, H, W)
         else:
             raise ValueError("Image should be numpy array.")
-    
+
     # Tensor dtype
     if img.dtype == torch.uint8:
         img = img.to(torch.float32) / 255.0
@@ -116,8 +146,9 @@ def img2batch(img):
         pass
     else:
         raise ValueError("Image type should be uint8 or float32.")
-        
+
     return img
+
 
 # ==================================
 # Image batch quality evaluation
@@ -133,41 +164,44 @@ def batch_PSNR(img_clean, img):
         PSNR += peak_signal_noise_ratio(Img_clean[i, :, :, :], Img[i, :, :, :])
     return round(PSNR / Img.shape[0], 4)
 
-def batch_psnr(pred, target, max_val=1.0, eps=1e-8):  
-    """Calculate PSNR between two image batches.  
+
+def batch_psnr(pred, target, max_val=1.0, eps=1e-8):
+    """Calculate PSNR between two image batches.
 
     Reference: https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio
-    
-    Args:  
-        pred (torch.Tensor): Predicted images, shape [B, C, H, W]  
-        target (torch.Tensor): Target images, shape [B, C, H, W]  
-        max_val (float): Maximum value of the images (1.0 for normalized, 255 for uint8)  
-        eps (float): Small constant to avoid log(0)  
-        
-    Returns:  
-        torch.Tensor: PSNR value for each image in batch, shape [B]  
-    """  
-    assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"  
-    
-    # Calculate MSE along spatial and channel dimensions  
-    mse = torch.mean((pred - target) ** 2, dim=[1, 2, 3])  # Shape: [B]  
-    
-    # Calculate PSNR  
-    psnr = 20 * torch.log10(max_val / torch.sqrt(mse + eps))  
-    
+
+    Args:
+        pred (torch.Tensor): Predicted images, shape [B, C, H, W]
+        target (torch.Tensor): Target images, shape [B, C, H, W]
+        max_val (float): Maximum value of the images (1.0 for normalized, 255 for uint8)
+        eps (float): Small constant to avoid log(0)
+
+    Returns:
+        torch.Tensor: PSNR value for each image in batch, shape [B]
+    """
+    assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
+
+    # Calculate MSE along spatial and channel dimensions
+    mse = torch.mean((pred - target) ** 2, dim=[1, 2, 3])  # Shape: [B]
+
+    # Calculate PSNR
+    psnr = 20 * torch.log10(max_val / torch.sqrt(mse + eps))
+
     return psnr.item()
+
 
 def batch_SSIM(img, img_clean):
     """Compute SSIM for image batch."""
     return batch_ssim(img, img_clean)
 
+
 def batch_ssim(img, img_clean):
     """Compute SSIM for image batch.
-    
+
     Args:
         img (torch.Tensor): Input image batch, shape [B, C, H, W]
         img_clean (torch.Tensor): Reference image batch, shape [B, C, H, W]
-        
+
     Returns:
         float: Average SSIM score across batch
     """
@@ -176,16 +210,19 @@ def batch_ssim(img, img_clean):
     Img_clean = (
         img_clean.mul(255).add_(0.5).clamp_(0, 255).to("cpu", torch.uint8).numpy()
     )
-    
+
     SSIM = 0.0
     for i in range(Img.shape[0]):
         # Auto detect if multichannel based on number of dimensions
         if Img.shape[1] > 1:  # Multiple channels
-            SSIM += structural_similarity(Img_clean[i, ...], Img[i, ...], channel_axis=0)
+            SSIM += structural_similarity(
+                Img_clean[i, ...], Img[i, ...], channel_axis=0
+            )
         else:  # Single channel
             SSIM += structural_similarity(Img_clean[i, 0, ...], Img[i, 0, ...])
-            
+
     return round(SSIM / Img.shape[0], 4)
+
 
 def batch_LPIPS(img, img_clean):
     """Compute LPIPS loss for image batch."""
@@ -246,7 +283,7 @@ def foc_dist_balanced(d1, d2):
 # ==================================
 def create_video_from_images(image_folder, output_video_path, fps=30):
     """Create a video from a folder of images.
-    
+
     Args:
         image_folder (str): The path to the folder containing the images.
         output_video_path (str): The path to save the output video.
