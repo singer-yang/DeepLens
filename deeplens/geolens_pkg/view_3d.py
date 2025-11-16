@@ -37,7 +37,7 @@ Functions:
 """
 
 import os
-from typing import List, Any, Optional
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -106,8 +106,8 @@ def merge(meshes: List[PolyData]) -> PolyData:
     v_count = meshes[0].n_points
     v_combined = meshes[0].points.copy()
     is_linemesh = meshes[0].is_linemesh
-    is_facemesh = meshes[0].is_facemesh
     mesh_combined = meshes[0].lines.copy() if is_linemesh else meshes[0].faces.copy()
+    
     for m in meshes[1:]:
         # increment the vertex number by previous v_count
         if m.is_linemesh:
@@ -115,14 +115,13 @@ def merge(meshes: List[PolyData]) -> PolyData:
             new_lines = m.lines.copy()
             new_lines += v_count
             mesh_combined = np.vstack([mesh_combined, new_lines])
-        if m.is_facemesh:
+        elif m.is_facemesh:
             v_combined = np.vstack([v_combined, m.points])
             new_faces = m.faces.copy()
             new_faces += v_count
             mesh_combined = np.vstack([mesh_combined, new_faces])
         v_count += m.n_points
     return PolyData(v_combined, lines=mesh_combined, faces=None) if is_linemesh else PolyData(v_combined, lines=None, faces=mesh_combined)
-
 
 class CrossPoly:
     def __init__(self):
@@ -162,7 +161,9 @@ class LineMesh(CrossPoly):
 class Curve(LineMesh):
     """A curve mesh with vertices and lines. Currently used for ray meshes."""
     
-    def __init__(self, vertices: np.ndarray, is_loop: bool = False):
+    def __init__(self, vertices: np.ndarray, is_loop: Optional[bool] = None):
+        if is_loop is None:
+            is_loop = False
         n_vertices = vertices.shape[0]
         super().__init__(n_vertices, is_loop)
         self.vertices = vertices

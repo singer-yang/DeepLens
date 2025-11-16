@@ -9,8 +9,6 @@ from deeplens import GeoLens
 
 # Import only non-GUI helpers from the core module
 from .view_3d import (
-    FaceMesh,
-    LineMesh,
     Curve,
     geolens_ray_poly,
     CrossPoly,
@@ -40,7 +38,6 @@ def _wrap_base_poly(poly: BasePolyData) -> pv.PolyData:
         return pv.PolyData()
     else:
         p = poly.points
-        n_p = poly.n_points
         m = poly.lines if poly.is_linemesh else poly.faces
         if poly.is_linemesh:
             _add_on = np.ones((m.shape[0], 1), dtype=np.int64)
@@ -51,18 +48,6 @@ def _wrap_base_poly(poly: BasePolyData) -> pv.PolyData:
             _add_on = 3 * _add_on
             new_m = np.hstack([_add_on, m])
         return pv.PolyData(p, lines=new_m) if poly.is_linemesh else pv.PolyData(p, faces=new_m)
-
-def _draw_crosspoly(cross_poly: CrossPoly, plotter: pv.Plotter, color: List[float], opacity: float = 1.0):
-        """Draw the mesh to the plotter.
-
-        Args:
-            plotter: Plotter
-            color: List[float]. The color of the mesh.
-            opacity: float. The opacity of the mesh.
-        """
-        poly = _wrap_base_poly(cross_poly.get_polydata())
-        poly["colors"] = np.vstack([color] * poly.n_points)
-        plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
 
 def _draw_mesh(plotter: pv.Plotter,
                mesh: CrossPoly,
@@ -135,7 +120,7 @@ def draw_lens_3d(
             _draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
 
     for bridge in bridge_meshes:
-            _draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
+        _draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
     
     _draw_mesh(plotter, sensor_mesh, color=sensor_color, opacity=1.0)
 
