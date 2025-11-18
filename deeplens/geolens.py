@@ -38,11 +38,11 @@ from deeplens.optics.geometric_surface import (
     Aspheric,
     AsphericNorm,
     Cubic,
-    Phase,
     Plane,
     Spheric,
     ThinLens,
 )
+from deeplens.optics.phase_surface import Phase
 from deeplens.optics.materials import Material
 from deeplens.optics.monte_carlo import forward_integral
 from deeplens.optics.ray import Ray
