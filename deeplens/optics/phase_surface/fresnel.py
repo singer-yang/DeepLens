@@ -2,8 +2,8 @@
 
 import torch
 
-from deeplens.optics.geometric_surface.base import EPSILON
-from .phase import Phase
+from deeplens.basics import EPSILON
+from deeplens.optics.phase_surface.phase import Phase
 
 
 class FresnelPhase(Phase):

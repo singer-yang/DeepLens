@@ -3,8 +3,8 @@
 import numpy as np
 import torch
 
-from deeplens.optics.geometric_surface.base import EPSILON
-from .phase import Phase
+from deeplens.basics import EPSILON
+from deeplens.optics.phase_surface.phase import Phase
 
 
 class Poly1DPhase(Phase):
@@ -62,9 +62,7 @@ class Poly1DPhase(Phase):
         r_norm = torch.sqrt(x_norm**2 + y_norm**2 + EPSILON)
 
         phi_even = (
-            self.order2 * r_norm**2
-            + self.order4 * r_norm**4
-            + self.order6 * r_norm**6
+            self.order2 * r_norm**2 + self.order4 * r_norm**4 + self.order6 * r_norm**6
         )
         phi_odd = (
             self.order3 * (x_norm**3 + y_norm**3)
@@ -106,7 +104,9 @@ class Poly1DPhase(Phase):
 
         return dphidx, dphidy
 
-    def get_optimizer_params(self, lrs=[1e-4, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7], optim_mat=False):
+    def get_optimizer_params(
+        self, lrs=[1e-4, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7], optim_mat=False
+    ):
         """Generate optimizer parameters."""
         params = []
 

@@ -5,8 +5,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from deeplens.optics.geometric_surface.base import EPSILON, Surface
-from .plane import Plane
+from deeplens.basics import EPSILON
+from deeplens.optics.geometric_surface.plane import Plane
 
 
 class Phase(Plane):
@@ -32,8 +32,7 @@ class Phase(Plane):
         is_square=True,
         device="cpu",
     ):
-        Surface.__init__(
-            self,
+        super().__init__(
             r=r,
             d=d,
             mat2=mat2,
@@ -68,11 +67,15 @@ class Phase(Plane):
 
     def init_param_model(self):
         """Initialize parameterization parameters. Must be implemented by subclasses."""
-        raise NotImplementedError("init_param_model() must be implemented by subclasses")
+        raise NotImplementedError(
+            "init_param_model() must be implemented by subclasses"
+        )
 
     def get_optimizer_params(self, lrs=[1e-4, 1e-2], optim_mat=False):
         """Generate optimizer parameters. Must be implemented by subclasses."""
-        raise NotImplementedError("get_optimizer_params() must be implemented by subclasses")
+        raise NotImplementedError(
+            "get_optimizer_params() must be implemented by subclasses"
+        )
 
     def save_ckpt(self, save_path="./doe.pth"):
         """Save DOE parameters. Must be implemented by subclasses."""
@@ -86,14 +89,15 @@ class Phase(Plane):
         """Return surface parameters. Must be implemented by subclasses."""
         raise NotImplementedError("surf_dict() must be implemented by subclasses")
 
+    # ==============================
+    # Computation (ray tracing)
+    # ==============================
     def activate_diffraction(self, diffraction_order=1):
+        """Activate diffraction of DOE in ray tracing."""
         self.diffraction = True
         self.diffraction_order = diffraction_order
         print("Diffraction of DOE in ray tracing is enabled.")
 
-    # ==============================
-    # Computation (ray tracing)
-    # ==============================
     def ray_reaction(self, ray, n1=None, n2=None):
         """Ray reaction on DOE surface."""
         ray = self.to_local_coord(ray)
@@ -140,7 +144,6 @@ class Phase(Plane):
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         return ray
-
 
     def _sag(self, x, y):
         """Diffractive surface is now attached to a plane surface."""

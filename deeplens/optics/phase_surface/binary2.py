@@ -2,8 +2,8 @@
 
 import torch
 
-from deeplens.optics.geometric_surface.base import EPSILON
-from .phase import Phase
+from deeplens.basics import EPSILON
+from deeplens.optics.phase_surface.phase import Phase
 
 
 class Binary2Phase(Phase):
@@ -63,7 +63,7 @@ class Binary2Phase(Phase):
             surf_dict.get("order10", 0.0),
             surf_dict.get("order12", 0.0),
             norm_radii,
-            mat2
+            mat2,
         )
         return obj
 
