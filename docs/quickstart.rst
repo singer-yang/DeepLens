@@ -9,7 +9,7 @@ Hello DeepLens
 Let's create a simple geometric lens system and perform ray tracing.
 
 Create a lens (GeoLens for example)
-^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
@@ -19,12 +19,14 @@ Create a lens (GeoLens for example)
     # Create a lens from a JSON file
     lens = GeoLens(
         filename='./datasets/lenses/camera/ef50mm_f1.8.json',
-        sensor_res=(256, 256),
         device='cuda'
     )
     
-    # Draw lens layout
-    lens.analysis()
+    # Optionally change sensor resolution (keeps sensor radius fixed)
+    lens.set_sensor_res(sensor_res=(256, 256))
+    
+    # Draw lens layout, spot diagram, and MTF
+    lens.analysis(save_name='./lens_analysis')
 
 Point Spread Function (PSF)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -33,11 +35,13 @@ Calculate and visualize the PSF of the lens:
 
 .. code-block:: python
 
-    # Calculate PSF
-    psf = lens.psf(points=torch.tensor([[0.0, 0.0, -10000.0]]))
+    # Calculate PSF for a point source
+    # points: [x, y, z] where x,y are normalized [-1, 1], z is depth in mm (negative)
+    point = torch.tensor([0.0, 0.0, -10000.0])  # On-axis, 10m away
+    psf = lens.psf(points=point, ks=128, spp=16384)
     
-    # Visualize PSF
-    lens.plot_psf(psf.squeeze(0).cpu().numpy())
+    # Visualize PSF across the field
+    lens.draw_psf_radial(save_name='./psf_radial.png', depth=-10000.0)
 
 Image Rendering
 ^^^^^^^^^^^^^^^
@@ -48,16 +52,20 @@ Render an image through the lens system:
 
     from PIL import Image
     import torchvision.transforms as transforms
+    from torchvision.utils import save_image
     
     # Load an image
     img = Image.open('./datasets/bird.png')
     img_tensor = transforms.ToTensor()(img).unsqueeze(0).cuda()
     
+    # Resize to match sensor resolution (required for ray_tracing method)
+    img_tensor = transforms.functional.resize(img_tensor, lens.sensor_res[::-1])
+    
     # Render through lens
-    img_rendered = lens.render(img_tensor, depth=-10000.0, method="ray_tracing")
+    # Methods: 'ray_tracing' (accurate), 'psf_map' (efficient), 'psf_patch' (single PSF)
+    img_rendered = lens.render(img_tensor, depth=-10000.0, method='ray_tracing', spp=32)
     
     # Save the result
-    from torchvision.utils import save_image
     save_image(img_rendered, 'rendered_image.png')
 
 Working with Different Lens Types
@@ -113,12 +121,17 @@ For hybrid refractive-diffractive lens systems:
 
 .. code-block:: python
 
-    from deeplens import HybridLens
+    import torch
+    from deeplens.hybridlens import HybridLens
+    
+    # Set double precision for accurate wave optics
+    torch.set_default_dtype(torch.float64)
     
     lens = HybridLens(
-        filename='./datasets/lenses/hybridlens/a489_doe.json',
+        filename='./datasets/lenses/hybrid/hybridlens_example.json',
         device='cuda'
     )
+    lens.double()  # Ensure double precision for coherent ray tracing
 
 ParaxialLens (Paraxial Model)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -127,17 +140,17 @@ For simple paraxial lens model with Circle of Confusion (CoC):
 
 .. code-block:: python
 
-    from deeplens import ParaxialLens
+    from deeplens.paraxiallens import ParaxialLens
     
     lens = ParaxialLens(
-        foclen=50.0,
-        fnum=1.8,
-        sensor_size=(36.0, 24.0),
-        sensor_res=(2000, 2000),
+        foclen=50.0,           # Focal length in mm
+        fnum=1.8,              # F-number
+        sensor_size=(36.0, 24.0),  # Sensor size in mm
+        sensor_res=(2000, 2000),   # Sensor resolution in pixels
         device='cuda'
     )
     
-    # Refocus to a specific distance
+    # Refocus to a specific distance (negative = object in front)
     lens.refocus(foc_dist=-1000.0)
 
 DiffractiveLens (Diffractive Optics)
@@ -147,18 +160,17 @@ For pure diffractive optical elements using wave propagation:
 
 .. code-block:: python
 
-    from deeplens import DiffractiveLens
+    from deeplens.diffraclens import DiffractiveLens
     
     # Load from file
     lens = DiffractiveLens(
-        filename='./datasets/lenses/diffraclens/doelens.json',
-        sensor_size=(8.0, 8.0),
-        sensor_res=(2000, 2000),
+        filename='./datasets/lenses/diffractive/doelens.json',
         device='cuda'
     )
     
-    # Or create a simple example
+    # Or create a simple example with Fresnel DOE
     lens = DiffractiveLens.load_example1()
+    lens.to('cuda')
 
 Camera System
 -------------
@@ -168,17 +180,24 @@ Combine a lens with an image sensor:
 .. code-block:: python
 
     from deeplens import Camera
-    from deeplens.sensor import RGBSensor
     
-    # Create camera
+    # Create camera with lens and sensor configuration files
     camera = Camera(
-        lens=lens,
-        sensor=RGBSensor(),
+        lens_file='./datasets/lenses/camera/ef50mm_f1.8.json',
+        sensor_file='./datasets/sensors/imx586.json',
+        lens_type='geolens',  # 'geolens' or 'hybridlens'
         device='cuda'
     )
     
-    # Simulate an image
-    image = camera.render(data_dict, render_mode="psf_patch", output_type="rggbif")
+    # Prepare input data dictionary
+    data_dict = {
+        'img': img_tensor,           # sRGB image [B, 3, H, W], range [0, 1]
+        'iso': torch.tensor([100]),  # ISO value
+        'field_center': torch.tensor([[0.0, 0.0]])  # Field center [-1, 1]
+    }
+    
+    # Simulate camera-captured image with aberrations and noise
+    data_lq, data_gt = camera.render(data_dict, render_mode='psf_patch', output_type='rggbif')
 
 Next Steps
 ----------
