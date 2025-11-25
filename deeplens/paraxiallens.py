@@ -1,3 +1,9 @@
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
+#
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
+
 """Paraxial geometric/ABCD matrix lens model. The paraxial lens model can simulate defocus (Circle of Confusion) but not optical aberrations. This model is commonly used in software such as Blender.
 
 Reference:

@@ -1,3 +1,9 @@
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
+#
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
+
 """Pixel2D DOE parameterization. Each pixel is an independent parameter."""
 
 import torch

@@ -1,3 +1,9 @@
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
+#
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
+
 """Surrogate lens model that represents the Point Spread Function (PSF) of a lens using a neural network. This surrogate model can significantly accelerate PSF calculations compared to traditional ray tracing methods.
 
 Technical Paper:

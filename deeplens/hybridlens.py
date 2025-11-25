@@ -1,3 +1,9 @@
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
+#
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
+
 """Ray-wave model for hybrid refractive-diffractive lens. A hybrid lens consists of a GeoLens and a DOE in the back. A differentiable ray-wave model is used for optical simulation: first calculating the complex wavefield at the DOE plane by coherent ray tracing, then propagating the wavefield to the sensor plane by angular spectrum method. This hybrid lens model can simulate: (1) GeoLens aberration, and (2) DOE phase modulation.
 
 Technical Paper:
