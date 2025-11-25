@@ -17,7 +17,6 @@ The ``GeoLens`` class inherits from:
 - ``GeoLensVis`` - 2D visualization
 - ``GeoLensIO`` - File I/O operations
 - ``GeoLensTolerance`` - Tolerance analysis
-- ``GeoLensVis3D`` - 3D visualization
 
 Main Class
 ----------
@@ -99,10 +98,13 @@ Initialization & Configuration
 
 .. py:method:: GeoLens.read_lens(filename)
 
-   Load lens from file (.json, .zmx, or .seq format).
+   Load lens from file (.json or .zmx format).
 
    :param filename: Path to lens file
    :type filename: str
+
+   .. note::
+      The .seq format is not yet supported.
 
 .. py:method:: GeoLens.post_computation()
 
@@ -124,23 +126,25 @@ Ray Sampling
 Grid Sampling
 ~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.sample_grid_rays(depth=float("inf"), num_grid=[11, 11], num_rays=2048, wvln=0.589, sample_more_off_axis=False, scale_pupil=1.0)
+.. py:method:: GeoLens.sample_grid_rays(depth=float("inf"), num_grid=(11, 11), num_rays=16384, wvln=0.58756180, uniform_fov=True, sample_more_off_axis=False, scale_pupil=1.0)
 
    Sample grid rays from object space for PSF map or spot diagram analysis.
 
    :param depth: Object depth. ``float("inf")`` for parallel rays, finite for point sources
    :type depth: float
-   :param num_grid: Grid size [rows, cols]
-   :type num_grid: list or int
+   :param num_grid: Grid size (cols, rows)
+   :type num_grid: tuple or int
    :param num_rays: Rays per grid point
    :type num_rays: int
    :param wvln: Wavelength in micrometers
    :type wvln: float
+   :param uniform_fov: If True, sample uniform FoV angles; otherwise sample uniform object grid
+   :type uniform_fov: bool
    :param sample_more_off_axis: If True, sample more rays at off-axis fields
    :type sample_more_off_axis: bool
    :param scale_pupil: Scale factor for pupil radius
    :type scale_pupil: float
-   :return: Ray object with shape [num_grid[0], num_grid[1], num_rays, 3]
+   :return: Ray object with shape [num_grid[1], num_grid[0], num_rays, 3]
    :rtype: Ray
 
 .. py:method:: GeoLens.sample_radial_rays(num_field=5, depth=float("inf"), num_rays=2048, wvln=0.589)
@@ -544,33 +548,37 @@ Optical Analysis (GeoLensEval)
 Spot Diagrams
 ~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.draw_spot_radial(num_field=5, depth=float("inf"), wvln=0.589, save_name=None, show=False)
+.. py:method:: GeoLens.draw_spot_radial(save_name='./lens_spot_radial.png', num_fov=5, depth=float("inf"), num_rays=16384, wvln_list=[0.656, 0.588, 0.486], show=False)
 
    Draw spot diagrams along meridional direction.
 
-   :param num_field: Number of field angles
-   :type num_field: int
+   :param save_name: Save filename
+   :type save_name: str
+   :param num_fov: Number of field of view angles
+   :type num_fov: int
    :param depth: Object depth
    :type depth: float
-   :param wvln: Wavelength
-   :type wvln: float
-   :param save_name: Save filename
-   :type save_name: str or None
+   :param num_rays: Number of rays to sample
+   :type num_rays: int
+   :param wvln_list: List of wavelengths to render (RGB)
+   :type wvln_list: list
    :param show: Display plot
    :type show: bool
 
-.. py:method:: GeoLens.draw_spot_map(num_grid=5, depth=-10000.0, wvln=0.589, save_name=None, show=False)
+.. py:method:: GeoLens.draw_spot_map(save_name='./lens_spot_map.png', num_grid=5, depth=-20000.0, num_rays=16384, wvln_list=[0.656, 0.588, 0.486], show=False)
 
    Draw spot diagram grid.
 
+   :param save_name: Save filename
+   :type save_name: str
    :param num_grid: Grid size
    :type num_grid: int
    :param depth: Object depth
    :type depth: float
-   :param wvln: Wavelength
-   :type wvln: float
-   :param save_name: Save filename
-   :type save_name: str or None
+   :param num_rays: Number of rays to sample
+   :type num_rays: int
+   :param wvln_list: List of wavelengths to render (RGB)
+   :type wvln_list: list
    :param show: Display plot
    :type show: bool
 
@@ -615,31 +623,37 @@ RMS Error Maps
 Distortion
 ~~~~~~~~~~
 
-.. py:method:: GeoLens.calc_distortion_2D(fov_x=0.0, fov_y=20.0, depth=-10000.0, num_rays=512)
+.. py:method:: GeoLens.calc_distortion_2D(rfov, wvln=0.58756180, plane='meridional', ray_aiming=True)
 
-   Calculate distortion at specific field angle.
+   Calculate distortion at a specific field angle.
 
-   :param fov_x: Field angle in x (degrees)
-   :type fov_x: float
-   :param fov_y: Field angle in y (degrees)
-   :type fov_y: float
-   :param depth: Object depth
-   :type depth: float
-   :param num_rays: Number of rays
-   :type num_rays: int
-   :return: Distortion percentage
-   :rtype: float
+   :param rfov: View angle in degrees
+   :type rfov: float or torch.Tensor
+   :param wvln: Wavelength in micrometers
+   :type wvln: float
+   :param plane: 'meridional' or 'sagittal'
+   :type plane: str
+   :param ray_aiming: Whether the chief ray passes through the center of the stop
+   :type ray_aiming: bool
+   :return: Distortion at the specific field angle
+   :rtype: float or numpy.ndarray
 
-.. py:method:: GeoLens.draw_distortion_radial(depth=-10000.0, num_field=16, save_name=None, show=False)
+.. py:method:: GeoLens.draw_distortion_radial(rfov, save_name=None, num_points=21, wvln=0.58756180, plane='meridional', ray_aiming=True, show=False)
 
    Draw distortion curve vs field angle (Zemax-style).
 
-   :param depth: Object depth
-   :type depth: float
-   :param num_field: Number of field samples
-   :type num_field: int
+   :param rfov: Maximum view angle in degrees
+   :type rfov: float
    :param save_name: Save filename
    :type save_name: str or None
+   :param num_points: Number of field samples
+   :type num_points: int
+   :param wvln: Wavelength in micrometers
+   :type wvln: float
+   :param plane: 'meridional' or 'sagittal'
+   :type plane: str
+   :param ray_aiming: Whether to use ray aiming
+   :type ray_aiming: bool
    :param show: Display plot
    :type show: bool
 
@@ -691,14 +705,18 @@ MTF Analysis
    :return: MTF curve
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.draw_mtf(depth_list=[-10000.0], save_name=None, show=False)
+.. py:method:: GeoLens.draw_mtf(save_name='./lens_mtf.png', relative_fov_list=[0.0, 0.7, 1.0], depth_list=[-20000.0], psf_ks=128, show=False)
 
-   Draw MTF curves for multiple depths and RGB wavelengths.
+   Draw MTF curves for multiple depths, FOVs and RGB wavelengths.
 
-   :param depth_list: List of object depths
-   :type depth_list: list
    :param save_name: Save filename
-   :type save_name: str or None
+   :type save_name: str
+   :param relative_fov_list: List of relative field of view values (0.0 to 1.0)
+   :type relative_fov_list: list
+   :param depth_list: List of object depths in mm
+   :type depth_list: list
+   :param psf_ks: Kernel size for PSF calculation
+   :type psf_ks: int
    :param show: Display plot
    :type show: bool
 
@@ -1190,18 +1208,20 @@ Visualization (GeoLensVis)
 2D Layout
 ~~~~~~~~~
 
-.. py:method:: GeoLens.draw_layout(filename=None, lens_title=None, depth=float("inf"), num_rays=7, show=False)
+.. py:method:: GeoLens.draw_layout(filename, depth=float("inf"), zmx_format=True, multi_plot=False, lens_title=None, show=False)
 
    Draw 2D lens layout with ray paths.
 
-   :param filename: Save filename
-   :type filename: str or None
-   :param lens_title: Plot title
-   :type lens_title: str or None
+   :param filename: Save filename (required)
+   :type filename: str
    :param depth: Object depth
    :type depth: float
-   :param num_rays: Number of rays to draw
-   :type num_rays: int
+   :param zmx_format: Whether to use Zemax-style format
+   :type zmx_format: bool
+   :param multi_plot: Whether to create multiple plots (one per wavelength)
+   :type multi_plot: bool
+   :param lens_title: Plot title
+   :type lens_title: str or None
    :param show: Display plot
    :type show: bool
 

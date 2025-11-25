@@ -43,6 +43,7 @@ Contents
    :maxdepth: 2
    :caption: User Guide
 
+   user_guide/architecture
    user_guide/lens_systems
    user_guide/optical_elements
    user_guide/sensors

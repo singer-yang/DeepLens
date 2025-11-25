@@ -390,35 +390,30 @@ Basic Sensor Usage
 
     from deeplens.sensor import RGBSensor
     
-    # Create sensor
-    sensor = RGBSensor(
-        resolution=(1920, 1080),
-        pixel_size=4.0e-3,
-        device='cuda'
-    )
+    # Create sensor from configuration file
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
     
-    # Capture image
-    irradiance = get_irradiance()  # From lens system
-    raw = sensor.capture(irradiance, exposure_time=0.01, iso=100)
+    # Process raw image with noise and ISP
+    # img_nbit: raw RGB tensor [B, 3, H, W] in n-bit DN range
+    img_rgb = sensor.forward(img_nbit, iso=100)
 
 Complete ISP Pipeline
 ^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from deeplens.sensor import RGBSensor, ISP
+    from deeplens.sensor import RGBSensor
     
-    # Create sensor and ISP
-    sensor = RGBSensor(resolution=(1920, 1080))
-    isp = ISP(
-        demosaic_method='malvar',
-        white_balance=True,
-        gamma_correction=True
-    )
+    # Create sensor with built-in ISP from config file
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
     
-    # Capture and process
-    raw = sensor.capture(irradiance, exposure_time=0.01)
-    rgb = isp(raw)
+    # The sensor includes an InvertibleISP pipeline
+    # Forward: raw -> noise -> ISP -> RGB
+    img_rgb = sensor.forward(img_nbit, iso=100)
+    
+    # Reverse: RGB -> unprocess -> linear RGB -> raw
+    img_raw = sensor.unprocess(img_rgb, in_type='rgb')
+    bayer = sensor.linrgb2bayer(img_raw)
 
 Custom ISP Pipeline
 ^^^^^^^^^^^^^^^^^^^
@@ -473,22 +468,17 @@ Noise Simulation
 
 .. code-block:: python
 
-    # Enable all noise sources
-    sensor = RGBSensor(
-        resolution=(1920, 1080),
-        enable_shot_noise=True,
-        enable_dark_noise=True,
-        enable_read_noise=True
-    )
+    from deeplens.sensor import RGBSensor
     
-    # Capture with noise
-    raw_noisy = sensor.capture(irradiance, exposure_time=0.01)
+    # Create sensor from config file
+    # Noise parameters are specified in the config JSON:
+    # - iso_base, read_noise_std, shot_noise_std_alpha, shot_noise_std_beta
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
     
-    # Capture without noise
-    sensor.enable_shot_noise = False
-    sensor.enable_dark_noise = False
-    sensor.enable_read_noise = False
-    raw_clean = sensor.capture(irradiance, exposure_time=0.01)
+    # Forward pass applies noise based on ISO setting
+    # Higher ISO = more noise amplification
+    img_noisy_low_iso = sensor.forward(img_nbit, iso=100)
+    img_noisy_high_iso = sensor.forward(img_nbit, iso=3200)
 
 White Balance Estimation
 ^^^^^^^^^^^^^^^^^^^^^^^^^

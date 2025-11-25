@@ -13,33 +13,41 @@ Base Lens Class
    :param device: Device to use ('cuda' or 'cpu')
    :param dtype: Data type for computations (default: torch.float32)
 
-   .. py:method:: psf(depth=1000, spp=2048, method='wave', wavelength=None, field=[0, 0])
+   .. py:method:: psf(points, wvln=0.589, ks=51, **kwargs)
 
-      Calculate the Point Spread Function.
+      Compute monochrome point PSF. This function should be differentiable.
 
-      :param depth: Object distance in mm
-      :param spp: Samples per pixel (number of rays)
-      :param method: 'ray', 'wave', or 'coherent'
-      :param wavelength: Wavelength in micrometers (None for RGB)
-      :param field: Field position [x, y] normalized
-      :return: PSF tensor [C, H, W]
+      :param points: Point positions, shape [N, 3] or [3], normalized xy in [-1, 1], z < 0
+      :type points: torch.Tensor
+      :param wvln: Wavelength in micrometers
+      :type wvln: float
+      :param ks: Kernel size
+      :type ks: int
+      :return: PSF tensor [ks, ks] or [N, ks, ks]
+      :rtype: torch.Tensor
 
-   .. py:method:: render(img, depth=1000, spp=256, method='fft')
+   .. py:method:: render(img_obj, depth=-20000.0, method='psf_patch', **kwargs)
 
-      Render an image through the lens system.
+      Differentiable image simulation through the lens.
 
-      :param img: Input image tensor [B, C, H, W]
-      :param depth: Object distance in mm
-      :param spp: Samples per pixel
-      :param method: 'fft' or 'conv'
+      :param img_obj: Input image tensor [B, C, H, W]
+      :type img_obj: torch.Tensor
+      :param depth: Object depth in mm
+      :type depth: float
+      :param method: Rendering method - 'psf_map' or 'psf_patch'
+      :type method: str
+      :param kwargs: Additional method-specific arguments (psf_grid, psf_ks, psf_center)
       :return: Rendered image tensor [B, C, H, W]
+      :rtype: torch.Tensor
 
-   .. py:method:: set_sensor(sensor_size=(10, 10), sensor_res=(512, 512))
+   .. py:method:: set_sensor(sensor_size, sensor_res)
 
       Set sensor dimensions.
 
       :param sensor_size: Physical sensor size (W, H) in mm
+      :type sensor_size: tuple
       :param sensor_res: Sensor resolution (W, H) in pixels
+      :type sensor_res: tuple
 
    .. py:method:: to(device)
 
@@ -114,32 +122,60 @@ GeoLens
       :param ray: Input Ray object
       :return: Output Ray object
 
-   .. py:method:: sample_parallel_2D(R=5.0, M=256)
+   .. py:method:: sample_parallel_2D(fov=0.0, num_rays=7, wvln=0.589, plane='meridional', entrance_pupil=True, depth=0.0)
 
-      Sample parallel ray bundle.
+      Sample 2D parallel rays for layout visualization.
 
-      :param R: Radius in mm
-      :param M: Number of rays along one dimension
-      :return: Ray object
+      :param fov: Field angle in degrees
+      :type fov: float
+      :param num_rays: Number of rays
+      :type num_rays: int
+      :param wvln: Wavelength in micrometers
+      :type wvln: float
+      :param plane: 'meridional' or 'sagittal'
+      :type plane: str
+      :param entrance_pupil: Use entrance pupil
+      :type entrance_pupil: bool
+      :param depth: Sampling depth
+      :type depth: float
+      :return: Ray object with shape [num_rays, 3]
+      :rtype: Ray
 
-   .. py:method:: sample_point_source(depth=1000, M=256, R=None)
+   .. py:method:: sample_point_source(fov_x=[0.0], fov_y=[0.0], depth=-20000.0, num_rays=16384, wvln=0.589, entrance_pupil=True, scale_pupil=1.0)
 
-      Sample rays from point source.
+      Sample point source rays from object space with given field angles.
 
-      :param depth: Source distance in mm
-      :param M: Number of rays along one dimension
-      :param R: Pupil radius (default: entrance_pupilr)
-      :return: Ray object
+      :param fov_x: Field angle(s) in x direction in degrees
+      :type fov_x: float or list
+      :param fov_y: Field angle(s) in y direction in degrees
+      :type fov_y: float or list
+      :param depth: Object depth in mm
+      :type depth: float
+      :param num_rays: Rays per field point
+      :type num_rays: int
+      :param wvln: Wavelength in micrometers
+      :type wvln: float
+      :param entrance_pupil: If True, use entrance pupil
+      :type entrance_pupil: bool
+      :param scale_pupil: Scale factor for pupil radius
+      :type scale_pupil: float
+      :return: Ray object with shape [len(fov_y), len(fov_x), num_rays, 3]
+      :rtype: Ray
 
-   .. py:method:: sample_from_points(depth=1000, M=256, spp=100, field=[0, 0])
+   .. py:method:: sample_from_points(points=[[0.0, 0.0, -10000.0]], num_rays=16384, wvln=0.589, scale_pupil=1.0)
 
-      Sample rays from off-axis point source.
+      Sample rays from point sources at absolute 3D coordinates.
 
-      :param depth: Source distance in mm
-      :param M: Grid resolution
-      :param spp: Samples per point
-      :param field: Field position [x, y]
-      :return: Ray object
+      :param points: Point source positions in shape [3], [N, 3], or [Nx, Ny, 3]
+      :type points: list or torch.Tensor
+      :param num_rays: Rays per point
+      :type num_rays: int
+      :param wvln: Wavelength in micrometers
+      :type wvln: float
+      :param scale_pupil: Scale factor for pupil radius
+      :type scale_pupil: float
+      :return: Sampled rays with shape [*points.shape[:-1], num_rays, 3]
+      :rtype: Ray
 
    .. py:method:: set_optimizer_params(params_dict)
 
@@ -222,22 +258,32 @@ GeoLens
 PSFNetLens
 ----------
 
-.. py:class:: PSFNetLens(ckpt_path, device='cuda')
+.. py:class:: PSFNetLens(lens_path, in_chan=3, psf_chan=3, model_name='mlp_conv', kernel_size=64, sensor_res=(3000, 3000))
 
-   Neural surrogate lens model.
+   Neural surrogate lens model that represents the PSF using a neural network.
 
-   :param ckpt_path: Path to checkpoint file
-   :param device: Device to use
+   :param lens_path: Path to the lens JSON file
+   :type lens_path: str
+   :param in_chan: Number of input channels (fov, depth, foc_dist)
+   :type in_chan: int
+   :param psf_chan: Number of output PSF channels (RGB)
+   :type psf_chan: int
+   :param model_name: Network architecture ('mlp' or 'mlpconv')
+   :type model_name: str
+   :param kernel_size: PSF kernel size
+   :type kernel_size: int
+   :param sensor_res: Sensor resolution (W, H)
+   :type sensor_res: tuple
 
    **Attributes:**
 
-   .. py:attribute:: foclen
+   .. py:attribute:: lens
 
-      Focal length in mm (float)
+      Embedded GeoLens object
 
-   .. py:attribute:: fnum
+   .. py:attribute:: psfnet
 
-      F-number (float)
+      Neural network for PSF prediction
 
    .. py:attribute:: pixel_size
 
@@ -245,53 +291,114 @@ PSFNetLens
 
    **Methods:**
 
-   .. py:method:: psf(depth, field=[0, 0], wvln=0.550)
+   .. py:method:: psf_rgb(points, ks=64)
 
-      Fast PSF prediction.
+      Fast RGB PSF prediction using neural network.
 
-      :param depth: Object distance in mm
-      :param field: Field position [x, y]
-      :param wvln: Wavelength in micrometers
-      :return: PSF tensor [1, H, W]
+      :param points: Point positions [N, 3], normalized xy in [-1, 1], z is depth in mm
+      :type points: torch.Tensor
+      :param ks: Kernel size
+      :type ks: int
+      :return: PSF tensor [N, 3, ks, ks]
+      :rtype: torch.Tensor
 
-   .. py:method:: render(img, depth=1000)
+   .. py:method:: render_rgbd(img, depth, foc_dist, ks=64, high_res=False)
 
-      Fast image rendering.
+      Render image with depth map using per-pixel PSF convolution.
 
-      :param img: Input image [B, C, H, W]
-      :param depth: Object distance in mm
-      :return: Rendered image [B, C, H, W]
+      :param img: Input image [1, C, H, W]
+      :type img: torch.Tensor
+      :param depth: Depth map [1, H, W] in mm
+      :type depth: torch.Tensor
+      :param foc_dist: Focus distance in mm
+      :type foc_dist: float
+      :param ks: PSF kernel size
+      :type ks: int
+      :param high_res: Use high resolution rendering
+      :type high_res: bool
+      :return: Rendered image [1, C, H, W]
+      :rtype: torch.Tensor
+
+   .. py:method:: refocus(foc_dist)
+
+      Refocus the lens to a given focus distance.
+
+      :param foc_dist: Focus distance in mm
+      :type foc_dist: float
+
+   .. py:method:: load_net(net_path)
+
+      Load pretrained network weights.
+
+      :param net_path: Path to network checkpoint
+      :type net_path: str
+
+   .. py:method:: train_psfnet(iters=100000, bs=128, lr=5e-5, evaluate_every=500, spp=16384, concentration_factor=2.0, result_dir='./results/psfnet')
+
+      Train the PSF surrogate network.
+
+      :param iters: Number of training iterations
+      :type iters: int
+      :param bs: Batch size
+      :type bs: int
+      :param lr: Learning rate
+      :type lr: float
+      :param evaluate_every: Evaluation interval
+      :type evaluate_every: int
+      :param spp: Samples per pixel for ray tracing
+      :type spp: int
+      :param concentration_factor: Concentration factor for training data sampling
+      :type concentration_factor: float
+      :param result_dir: Directory to save results
+      :type result_dir: str
 
 HybridLens
 ----------
 
-.. py:class:: HybridLens(filename=None, sensor_res=(2000, 2000), sensor_size=(8.0, 8.0), wave_method='asm', device=None)
+.. py:class:: HybridLens(filename=None, sensor_res=(2000, 2000), sensor_size=(8.0, 8.0), device=None, dtype=torch.float64)
 
-   Hybrid refractive-diffractive lens system.
+   Hybrid refractive-diffractive lens using a differentiable ray-wave model.
 
-   :param filename: Path to lens file
-   :param sensor_res: Sensor resolution
-   :param sensor_size: Sensor size in mm
-   :param wave_method: Wave propagation method ('asm' or 'fresnel')
-   :param device: Device to use
+   :param filename: Path to hybrid-lens JSON file. If None, create empty hybrid lens
+   :type filename: str or None
+   :param sensor_res: Sensor resolution (W, H) in pixels
+   :type sensor_res: tuple
+   :param sensor_size: Sensor physical size (W, H) in mm
+   :type sensor_size: tuple
+   :param device: Computing device ('cuda' or 'cpu'). If None, auto-selects
+   :type device: str or None
+   :param dtype: Data type for computations (default: torch.float64)
+   :type dtype: torch.dtype
 
    **Methods:**
 
-   .. py:method:: trace_hybrid(ray)
+   .. py:method:: psf(points=[0.0, 0.0, -10000.0], ks=101, wvln=0.589, spp=1000000)
 
-      Trace through hybrid system (ray + wave).
+      Single point monochromatic PSF using ray-wave model.
 
-      :param ray: Input Ray object
-      :return: Complex field at sensor
+      :param points: Point source position [x, y, z] (normalized x,y in [-1, 1], z < 0)
+      :type points: list or torch.Tensor
+      :param ks: Output PSF kernel size
+      :type ks: int or None
+      :param wvln: Wavelength in micrometers
+      :type wvln: float
+      :param spp: Rays per point for coherent tracing (>= 1e6 recommended)
+      :type spp: int
+      :return: Normalized PSF patch [ks, ks]
+      :rtype: torch.Tensor
 
-   .. py:method:: render(img, depth=1000, spp=512)
+   .. py:method:: draw_layout(save_name='./DOELens.png', depth=-10000.0, ax=None, fig=None)
 
-      Render image through hybrid lens.
+      Draw the hybrid system layout with ray-tracing and wave-propagation.
 
-      :param img: Input image
-      :param depth: Object distance
-      :param spp: Samples per pixel
-      :return: Rendered image
+      :param save_name: Output figure path
+      :type save_name: str
+      :param depth: Object depth for ray bundles (mm)
+      :type depth: float
+      :param ax: Optional matplotlib axis
+      :type ax: matplotlib.axes.Axes or None
+      :param fig: Optional matplotlib figure
+      :type fig: matplotlib.figure.Figure or None
 
 ParaxialLens
 ------------

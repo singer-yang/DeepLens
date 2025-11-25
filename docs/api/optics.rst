@@ -252,9 +252,13 @@ Propagation Functions
 
    Rayleigh–Sommerfeld diffraction (reference, more expensive).
 
-.. py:function:: deeplens.optics.Nyquist_zmin(wvln, ps, max_side_dist, n=1.0)
+.. py:function:: deeplens.optics.wave.Fresnel_zmin(wvln, ps, side_length, n=1.0)
 
-   Minimum required propagation distance for sampling.
+   Minimum propagation distance for Fresnel diffraction (Nyquist sampling criterion).
+
+.. py:function:: deeplens.optics.wave.Nyquist_ASM_zmax(wvln, ps, side_length, n=1.0)
+
+   Maximum propagation distance for Angular Spectrum Method (Nyquist sampling criterion).
 
 PSF Utilities
 -------------
