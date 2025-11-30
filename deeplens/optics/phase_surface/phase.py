@@ -1,4 +1,4 @@
-"""Base phase surface class for diffractive surfaces (metasurface or DOE)."""
+"""Phase class: a plane surface with phase pattern on it."""
 
 import matplotlib.pyplot as plt
 import numpy as np
