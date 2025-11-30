@@ -16,11 +16,15 @@ class GratingPhase(Phase):
         alpha=0.0,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         super().__init__(
             r=r,
             d=d,
@@ -42,7 +46,35 @@ class GratingPhase(Phase):
     def init_param_model(self):
         """Initialize grating parameters."""
         self.param_model = "grating"
-        self.to(self.device)
+
+    @classmethod
+    def init_from_dict(cls, param_dict):
+        """
+        Initialize GratingPhase from a dictionary of parameters.
+        """
+        # Extract parameters with defaults matching __init__ signature
+        r = param_dict.get("r")
+        d = param_dict.get("d")
+        theta = param_dict.get("theta", 0.0)
+        alpha = param_dict.get("alpha", 0.0)
+        norm_radii = param_dict.get("norm_radii", None)
+        mat2 = param_dict.get("mat2", "air")
+        pos_xy = param_dict.get("pos_xy", [0.0, 0.0])
+        vec_local = param_dict.get("vec_local", [0.0, 0.0, 1.0])
+        is_square = param_dict.get("is_square", True)
+        device = param_dict.get("device", "cpu")
+        return cls(
+            r=r,
+            d=d,
+            theta=theta,
+            alpha=alpha,
+            norm_radii=norm_radii,
+            mat2=mat2,
+            pos_xy=pos_xy,
+            vec_local=vec_local,
+            is_square=is_square,
+            device=device,
+        )
 
     def phi(self, x, y):
         """Reference phase map at design wavelength."""
@@ -58,8 +90,9 @@ class GratingPhase(Phase):
 
     def dphi_dxy(self, x, y):
         """Calculate phase derivatives (dphi/dx, dphi/dy) for given points."""
-        dphidx = self.alpha * torch.sin(self.theta) / self.norm_radii
-        dphidy = self.alpha * torch.cos(self.theta) / self.norm_radii
+        # Expand scalar derivatives to match input tensor shape
+        dphidx = torch.ones_like(x) * self.alpha * torch.sin(self.theta) / self.norm_radii
+        dphidy = torch.ones_like(y) * self.alpha * torch.cos(self.theta) / self.norm_radii
         return dphidx, dphidy
 
     def get_optimizer_params(self, lrs=[1e-4, 1e-3], optim_mat=False):
@@ -103,10 +136,12 @@ class GratingPhase(Phase):
         surf_dict = {
             "type": self.__class__.__name__,
             "r": self.r,
+            "is_square": self.is_square,
             "param_model": self.param_model,
             "theta": round(self.theta.item(), 4),
             "alpha": round(self.alpha.item(), 4),
-            "(d)": round(self.d.item(), 4),
+            "norm_radii": round(self.norm_radii, 4),
+            "d": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
         return surf_dict

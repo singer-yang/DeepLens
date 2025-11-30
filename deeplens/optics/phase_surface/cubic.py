@@ -3,7 +3,6 @@
 import numpy as np
 import torch
 
-from deeplens.basics import EPSILON
 from deeplens.optics.phase_surface.phase import Phase
 
 
@@ -22,11 +21,15 @@ class CubicPhase(Phase):
         coeff_xy3=0.0,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         super().__init__(
             r=r,
             d=d,
@@ -53,7 +56,6 @@ class CubicPhase(Phase):
     def init_param_model(self):
         """Initialize cubic parameters."""
         self.param_model = "cubic"
-        self.to(self.device)
 
     def phi(self, x, y):
         """Reference phase map at design wavelength."""
@@ -160,6 +162,7 @@ class CubicPhase(Phase):
         surf_dict = {
             "type": self.__class__.__name__,
             "r": self.r,
+            "is_square": self.is_square,
             "param_model": self.param_model,
             "coeff_x3": round(self.coeff_x3.item(), 4),
             "coeff_y3": round(self.coeff_y3.item(), 4),
@@ -167,7 +170,8 @@ class CubicPhase(Phase):
             "coeff_xy2": round(self.coeff_xy2.item(), 4),
             "coeff_x3y": round(self.coeff_x3y.item(), 4),
             "coeff_xy3": round(self.coeff_xy3.item(), 4),
-            "(d)": round(self.d.item(), 4),
+            "norm_radii": round(self.norm_radii, 4),
+            "d": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
         return surf_dict

@@ -27,12 +27,17 @@ class Phase(DeepObj):
         d,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
         super().__init__()
+
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
 
         # Global direction vector, always pointing to the positive z-axis
         self.vec_global = torch.tensor([0.0, 0.0, 1.0])
@@ -335,7 +340,7 @@ class Phase(DeepObj):
     # Visualization
     # =========================================
     def draw_phase_map(self, save_name="./DOE_phase_map.png"):
-        """Draw height map. Range from [0, max_height]."""
+        """Draw phase map. Range from [0, 2*pi]."""
         x, y = torch.meshgrid(
             torch.linspace(-self.w / 2, self.w / 2, 2000),
             torch.linspace(self.h / 2, -self.h / 2, 2000),
@@ -344,11 +349,11 @@ class Phase(DeepObj):
         x, y = x.to(self.device), y.to(self.device)
         pmap = self.phi(x, y)
 
-        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        ax[0].imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * torch.pi)
-        ax[0].set_title("Phase map 0.55um", fontsize=10)
-        ax[0].grid(False)
-        fig.colorbar(ax[0].get_images()[0])
+        fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+        im = ax.imshow(pmap.cpu().numpy(), vmin=0, vmax=2 * torch.pi)
+        ax.set_title("Phase map 0.55um", fontsize=10)
+        ax.grid(False)
+        fig.colorbar(im)
         fig.savefig(save_name, dpi=600, bbox_inches="tight")
         plt.close(fig)
 

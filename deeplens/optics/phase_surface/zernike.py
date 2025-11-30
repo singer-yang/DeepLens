@@ -29,11 +29,15 @@ class ZernikePhase(Phase):
         zernike_coeff=None,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=False,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         """Initialize Zernike phase surface.
 
         Args:
@@ -671,14 +675,14 @@ class ZernikePhase(Phase):
     def surf_dict(self):
         """Return surface parameters."""
         surf_dict = {
-            "type": "Phase",
+            "type": self.__class__.__name__,
             "r": self.r,
             "is_square": self.is_square,
-            "param_model": "zernike",
+            "param_model": self.param_model,
             "z_coeff": self.z_coeff.clone().detach().cpu().tolist(),
             "zernike_order": self.zernike_order,
             "norm_radii": round(self.norm_radii, 4),
-            "(d)": round(self.d.item(), 4),
+            "d": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
         return surf_dict

@@ -21,11 +21,15 @@ class Binary2Phase(Phase):
         order12=0.0,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         super().__init__(
             r=r,
             d=d,
@@ -70,7 +74,6 @@ class Binary2Phase(Phase):
     def init_param_model(self):
         """Initialize Binary2 parameters."""
         self.param_model = "binary2"
-        self.to(self.device)
 
     def phi(self, x, y):
         """Reference phase map at design wavelength."""
@@ -175,6 +178,7 @@ class Binary2Phase(Phase):
         surf_dict = {
             "type": self.__class__.__name__,
             "r": self.r,
+            "is_square": self.is_square,
             "param_model": self.param_model,
             "order2": round(self.order2.item(), 4),
             "order4": round(self.order4.item(), 4),
@@ -183,7 +187,7 @@ class Binary2Phase(Phase):
             "order10": round(self.order10.item(), 4),
             "order12": round(self.order12.item(), 4),
             "norm_radii": round(self.norm_radii, 4),
-            "(d)": round(self.d.item(), 4),
+            "d": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
         return surf_dict

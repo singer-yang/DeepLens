@@ -1,7 +1,6 @@
 """NURBS (Non-Uniform Rational B-Spline) phase on a plane surface."""
 
 import torch
-import numpy as np
 
 from deeplens.basics import EPSILON
 from deeplens.optics.phase_surface.phase import Phase
@@ -34,11 +33,15 @@ class NURBSPhase(Phase):
         weights=None,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         """Initialize NURBS phase surface.
 
         Args:
@@ -170,6 +173,8 @@ class NURBSPhase(Phase):
     def _basis_functions(self, knots, degree, u, span):
         """Compute B-spline basis functions using Cox-de Boor recursion.
 
+        This implements the standard Piegl-Tiller algorithm from "The NURBS Book".
+
         Args:
             knots: Knot vector
             degree: B-spline degree
@@ -180,29 +185,28 @@ class NURBSPhase(Phase):
             Array of basis function values
         """
         N = torch.zeros(degree + 1, dtype=torch.float32, device=knots.device)
+        left = torch.zeros(degree + 1, dtype=torch.float32, device=knots.device)
+        right = torch.zeros(degree + 1, dtype=torch.float32, device=knots.device)
 
-        # Initialize zeroth-degree functions
+        # Initialize zeroth-degree function
         N[0] = 1.0
 
-        # Compute basis functions using recursion
-        for i in range(1, degree + 1):
+        # Compute basis functions using Cox-de Boor recursion
+        for j in range(1, degree + 1):
+            left[j] = u - knots[span + 1 - j]
+            right[j] = knots[span + j] - u
             saved = 0.0
-            for j in range(i):
-                # Compute denominator terms
-                if knots[span - i + j + 1] - knots[span - i + j] != 0:
-                    term1 = (u - knots[span - i + j]) / (knots[span - i + j + 1] - knots[span - i + j])
+
+            for r in range(j):
+                denom = right[r + 1] + left[j - r]
+                if denom != 0:
+                    temp = N[r] / denom
                 else:
-                    term1 = 0.0
+                    temp = 0.0
+                N[r] = saved + right[r + 1] * temp
+                saved = left[j - r] * temp
 
-                if knots[span - i + j + 2] - knots[span - i + j + 1] != 0:
-                    term2 = (knots[span - i + j + 2] - u) / (knots[span - i + j + 2] - knots[span - i + j + 1])
-                else:
-                    term2 = 0.0
-
-                N[j] = saved + term1 * N[j]
-                saved = term2 * N[j]
-
-            N[i] = saved
+            N[j] = saved
 
         return N
 
@@ -260,7 +264,6 @@ class NURBSPhase(Phase):
     def init_param_model(self):
         """Initialize NURBS parameters."""
         self.param_model = "nurbs"
-        self.to(self.device)
 
     @classmethod
     def init_from_dict(cls, surf_dict):

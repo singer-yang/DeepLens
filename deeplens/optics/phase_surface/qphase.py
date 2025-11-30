@@ -3,7 +3,6 @@
 import numpy as np
 import torch
 
-from deeplens.basics import EPSILON
 from deeplens.optics.phase_surface.phase import Phase
 
 
@@ -25,11 +24,15 @@ class QuarticPhase(Phase):
         coeff_x2y3=0.0,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         super().__init__(
             r=r,
             d=d,
@@ -59,7 +62,6 @@ class QuarticPhase(Phase):
     def init_param_model(self):
         """Initialize quartic parameters."""
         self.param_model = "quartic"
-        self.to(self.device)
 
     def phi(self, x, y):
         """Reference phase map at design wavelength."""
@@ -187,6 +189,7 @@ class QuarticPhase(Phase):
         surf_dict = {
             "type": self.__class__.__name__,
             "r": self.r,
+            "is_square": self.is_square,
             "param_model": self.param_model,
             "coeff_x4": round(self.coeff_x4.item(), 4),
             "coeff_y4": round(self.coeff_y4.item(), 4),
@@ -198,7 +201,7 @@ class QuarticPhase(Phase):
             "coeff_x3y2": round(self.coeff_x3y2.item(), 4),
             "coeff_x2y3": round(self.coeff_x2y3.item(), 4),
             "norm_radii": round(self.norm_radii, 4),
-            "(d)": round(self.d.item(), 4),
+            "d": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
         return surf_dict

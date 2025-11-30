@@ -22,11 +22,15 @@ class PolyPhase(Phase):
         order7=0.0,
         norm_radii=None,
         mat2="air",
-        pos_xy=[0.0, 0.0],
-        vec_local=[0.0, 0.0, 1.0],
+        pos_xy=None,
+        vec_local=None,
         is_square=True,
         device="cpu",
     ):
+        if pos_xy is None:
+            pos_xy = [0.0, 0.0]
+        if vec_local is None:
+            vec_local = [0.0, 0.0, 1.0]
         super().__init__(
             r=r,
             d=d,
@@ -53,7 +57,6 @@ class PolyPhase(Phase):
     def init_param_model(self):
         """Initialize Poly1D parameters."""
         self.param_model = "poly1d"
-        self.to(self.device)
 
     def phi(self, x, y):
         """Reference phase map at design wavelength."""
@@ -164,6 +167,7 @@ class PolyPhase(Phase):
         surf_dict = {
             "type": self.__class__.__name__,
             "r": self.r,
+            "is_square": self.is_square,
             "param_model": self.param_model,
             "order2": round(self.order2.item(), 4),
             "order3": round(self.order3.item(), 4),
@@ -171,7 +175,8 @@ class PolyPhase(Phase):
             "order5": round(self.order5.item(), 4),
             "order6": round(self.order6.item(), 4),
             "order7": round(self.order7.item(), 4),
-            "(d)": round(self.d.item(), 4),
+            "norm_radii": round(self.norm_radii, 4),
+            "d": round(self.d.item(), 4),
             "mat2": self.mat2.get_name(),
         }
         return surf_dict
