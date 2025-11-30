@@ -6,8 +6,10 @@ In commercial software like Zemax, diffractive surfaces are typically simulated 
 
 Common manufacturing methods for phase surfaces include:
 - **Lithography**: Standard semiconductor processing technique.
+    - **Etching**: A subtractive process where material is removed from the substrate to create the diffractive pattern. This often involves multiple steps to create multi-level structures.
+    - **Grayscale**: A technique that uses a mask with varying optical density to create a continuous or multi-level profile in a single exposure and etching step.
 - **Nanoimprint Lithography (NIL)**: A cost-effective replication method.
-- **Single Point Diamond Turning (SPDT)**: With a minimum 100nm step size.
+- **Single Point Diamond Turning (SPDT)**: Only suitable for DOE fabrication for long wavelengths (e.g., >10µm).
 
 The core of this module is the `Phase` base class in `phase.py`, which defines the common interface for all phase surfaces. It handles the ray tracing logic, coordinate transformations, and diffraction simulation.
 

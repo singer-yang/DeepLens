@@ -4,6 +4,8 @@ This folder contains definitions for various diffractive surfaces, also known as
 
 Common manufacturing methods for diffractive surfaces include:
 - **Photolithography**: Standard semiconductor processing technique for creating binary or multi-level surface relief profiles.
+    - **Etching**: A subtractive process where material is removed from the substrate to create the diffractive pattern. This often involves multiple steps to create multi-level structures.
+    - **Grayscale**: A technique that uses a mask with varying optical density to create a continuous or multi-level profile in a single exposure and etching step.
 - **Electron Beam Lithography (EBL)**: Used for high-resolution patterning, especially for creating master molds.
 - **Nanoimprint Lithography (NIL)**: A cost-effective replication method suitable for mass production.
 - **Single Point Diamond Turning (SPDT)**: Capable of creating diffractive structures on curved substrates (though simulation support is pending).
