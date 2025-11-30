@@ -1,4 +1,4 @@
-"""NURBS (Non-Uniform Rational B-Spline) phase surface for diffractive optics."""
+"""NURBS (Non-Uniform Rational B-Spline) phase on a plane surface."""
 
 import torch
 import numpy as np
@@ -8,7 +8,7 @@ from deeplens.optics.phase_surface.phase import Phase
 
 
 class NURBSPhase(Phase):
-    """Phase profile using NURBS (Non-Uniform Rational B-Spline) parameterization.
+    """NURBS phase on a plane surface.
 
     This class implements a diffractive surface where the phase profile is
     represented by a NURBS surface. The NURBS surface is defined by control

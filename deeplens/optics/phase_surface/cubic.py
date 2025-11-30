@@ -1,4 +1,4 @@
-"""Cubic phase parameterization for diffractive surfaces."""
+"""Cubic phase on a plane surface."""
 
 import numpy as np
 import torch
@@ -8,7 +8,7 @@ from deeplens.optics.phase_surface.phase import Phase
 
 
 class CubicPhase(Phase):
-    """Cubic phase profile with polynomial terms up to third order."""
+    """Cubic phase on a plane surface."""
 
     def __init__(
         self,

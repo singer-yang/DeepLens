@@ -1,4 +1,4 @@
-"""Poly1D phase parameterization for diffractive surfaces."""
+"""Polynomial phase on a plane surface."""
 
 import numpy as np
 import torch
@@ -7,8 +7,8 @@ from deeplens.basics import EPSILON
 from deeplens.optics.phase_surface.phase import Phase
 
 
-class Poly1DPhase(Phase):
-    """Poly1D phase profile with both even and odd polynomial terms."""
+class PolyPhase(Phase):
+    """Polynomial phase on a plane surface."""
 
     def __init__(
         self,

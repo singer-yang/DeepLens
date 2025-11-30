@@ -1,4 +1,4 @@
-"""Zernike polynomial phase surface for diffractive optics."""
+"""Zernike phase on a plane surface."""
 
 import math
 
@@ -9,7 +9,7 @@ from deeplens.optics.phase_surface.phase import Phase
 
 
 class ZernikePhase(Phase):
-    """Phase profile using Zernike polynomial parameterization.
+    """Zernike phase on a plane surface.
 
     This class implements a diffractive surface using Zernike polynomials
     to represent the phase profile. It supports up to 37 Zernike terms.

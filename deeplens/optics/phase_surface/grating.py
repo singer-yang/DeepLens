@@ -1,4 +1,4 @@
-"""Grating phase parameterization for diffractive surfaces."""
+"""Grating phase on a plane surface."""
 
 import torch
 
@@ -6,7 +6,7 @@ from deeplens.optics.phase_surface.phase import Phase
 
 
 class GratingPhase(Phase):
-    """Grating phase profile for diffractive gratings."""
+    """Grating phase on a plane surface."""
 
     def __init__(
         self,

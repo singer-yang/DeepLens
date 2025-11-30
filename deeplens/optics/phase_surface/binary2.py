@@ -1,4 +1,4 @@
-"""Binary2 phase parameterization for diffractive surfaces."""
+"""Binary2 phase on a plane surface."""
 
 import torch
 
@@ -7,7 +7,7 @@ from deeplens.optics.phase_surface.phase import Phase
 
 
 class Binary2Phase(Phase):
-    """Binary2 phase profile (Zemax binary2 surface type)."""
+    """Binary2 phase on a plane surface."""
 
     def __init__(
         self,

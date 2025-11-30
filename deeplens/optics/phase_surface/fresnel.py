@@ -1,4 +1,4 @@
-"""Fresnel phase parameterization for diffractive surfaces."""
+"""Fresnel phase on a plane surface."""
 
 import torch
 
@@ -7,7 +7,7 @@ from deeplens.optics.phase_surface.phase import Phase
 
 
 class FresnelPhase(Phase):
-    """Fresnel phase profile for diffractive lenses."""
+    """Fresnel phase on a plane surface."""
 
     def __init__(
         self,
