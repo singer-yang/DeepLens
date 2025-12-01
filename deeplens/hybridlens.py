@@ -27,7 +27,8 @@ from deeplens.basics import (
     WAVE_RGB,
 )
 from deeplens.optics.monte_carlo import forward_integral
-from deeplens.optics.geometric_surface import Phase, Plane
+from deeplens.optics.geometric_surface import Plane
+from deeplens.optics.phase_surface import Phase
 from deeplens.optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
 from deeplens.optics.wave import AngularSpectrumMethod
 from deeplens.optics.utils import diff_float

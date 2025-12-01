@@ -33,7 +33,7 @@ GEO_GRID = 21  # grid number for PSF map
 
 DELTA = 1e-6
 DELTA_PARAXIAL = 0.01
-EPSILON = 1e-9  # replace 0 with EPSILON in some cases
+EPSILON = 1e-12  # replace 0 with EPSILON in some cases
 
 DEFAULT_WAVE = 0.58756180 # [um] default wavelength
 WAVE_RGB = [0.65627250, 0.58756180, 0.48613270] # [um] R, G, B wavelength
