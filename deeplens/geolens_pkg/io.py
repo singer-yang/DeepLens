@@ -16,11 +16,13 @@ Functions:
         - write_lens_seq(): Write lens to Code V .seq file
 """
 
+import math
+
 import torch
 
 from deeplens.optics.geometric_surface.aperture import Aperture
-from deeplens.optics.geometric_surface.spheric import Spheric
 from deeplens.optics.geometric_surface.aspheric import Aspheric
+from deeplens.optics.geometric_surface.spheric import Spheric
 
 
 class GeoLensIO:
@@ -38,15 +40,18 @@ class GeoLensIO:
         surfs_dict = {}
         current_surf = None
         for line in lines:
-            if line.startswith("SURF"):
-                current_surf = int(line.split()[1])
+            # Strip leading/trailing whitespace for consistent parsing
+            stripped_line = line.strip()
+            
+            if stripped_line.startswith("SURF"):
+                current_surf = int(stripped_line.split()[1])
                 surfs_dict[current_surf] = {}
 
-            elif current_surf is not None and line.strip() != "":
-                if len(line.strip().split(maxsplit=1)) == 1:
+            elif current_surf is not None and stripped_line != "":
+                if len(stripped_line.split(maxsplit=1)) == 1:
                     continue
                 else:
-                    key, value = line.strip().split(maxsplit=1)
+                    key, value = stripped_line.split(maxsplit=1)
                     if key == "PARM":
                         new_key = "PARM" + value.split()[0]
                         new_value = value.split()[1]
@@ -54,16 +59,32 @@ class GeoLensIO:
                     else:
                         surfs_dict[current_surf][key] = value
 
-            elif line.startswith("FLOA") or line.startswith("ENPD"):
-                if line.startswith("FLOA"):
+            elif stripped_line.startswith("FLOA") or stripped_line.startswith("ENPD"):
+                if stripped_line.startswith("FLOA"):
                     self.float_enpd = True
                     self.enpd = None
                 else:
                     self.float_enpd = False
-                    self.enpd = float(line.split()[1])
+                    self.enpd = float(stripped_line.split()[1])
+
+            elif stripped_line.startswith("YFLN"):
+                # Parse field of view from YFLN line (field coordinates in degrees)
+                # YFLN format: YFLN 0.0 <0.707*rfov_deg> <0.99*rfov_deg>
+                parts = stripped_line.split()
+                if len(parts) > 1:
+                    field_values = [abs(float(x)) for x in parts[1:] if float(x) != 0.0]
+                    if field_values:
+                        # The largest field value is typically 0.99 * rfov_deg
+                        max_field_deg = max(field_values) / 0.99
+                        self.rfov = (
+                            max_field_deg * math.pi / 180.0
+                        )  # Convert to radians
 
         self.float_foclen = False
         self.float_rfov = False
+        # Set default rfov if not parsed from file
+        if not hasattr(self, "rfov"):
+            self.rfov = None
 
         # Read the extracted data from each SURF
         self.surfaces = []
@@ -73,28 +94,30 @@ class GeoLensIO:
             if surf_idx > 0 and surf_idx < current_surf:
                 # Lens surface parameters
                 if "GLAS" in surf_dict:
-                    if surf_dict['GLAS'].split()[0] == "___BLANK":
-                        mat2_name = (
-                            f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}"
-                        )
+                    if surf_dict["GLAS"].split()[0] == "___BLANK":
+                        mat2_name = f"{surf_dict['GLAS'].split()[3]}/{surf_dict['GLAS'].split()[4]}"
                     else:
-                        mat2_name = surf_dict['GLAS'].split()[0].lower()
+                        mat2_name = surf_dict["GLAS"].split()[0].lower()
                 else:
                     mat2_name = "air"
 
-                surf_r = float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 1.0
-                surf_c = float(surf_dict["CURV"].split()[0]) if "CURV" in surf_dict else 0.0
+                surf_r = (
+                    float(surf_dict["DIAM"].split()[0]) if "DIAM" in surf_dict else 1.0
+                )
+                surf_c = (
+                    float(surf_dict["CURV"].split()[0]) if "CURV" in surf_dict else 0.0
+                )
                 surf_d_next = (
                     float(surf_dict["DISZ"].split()[0]) if "DISZ" in surf_dict else 0.0
                 )
-                surf_conic = surf_dict.get("CONI", 0.0)
-                surf_param2 = surf_dict.get("PARM2", 0.0)
-                surf_param3 = surf_dict.get("PARM3", 0.0)
-                surf_param4 = surf_dict.get("PARM4", 0.0)
-                surf_param5 = surf_dict.get("PARM5", 0.0)
-                surf_param6 = surf_dict.get("PARM6", 0.0)
-                surf_param7 = surf_dict.get("PARM7", 0.0)
-                surf_param8 = surf_dict.get("PARM8", 0.0)
+                surf_conic = float(surf_dict.get("CONI", 0.0))
+                surf_param2 = float(surf_dict.get("PARM2", 0.0))
+                surf_param3 = float(surf_dict.get("PARM3", 0.0))
+                surf_param4 = float(surf_dict.get("PARM4", 0.0))
+                surf_param5 = float(surf_dict.get("PARM5", 0.0))
+                surf_param6 = float(surf_dict.get("PARM6", 0.0))
+                surf_param7 = float(surf_dict.get("PARM7", 0.0))
+                surf_param8 = float(surf_dict.get("PARM8", 0.0))
 
                 # Create surface object
                 if surf_dict["TYPE"] == "STANDARD":
@@ -103,7 +126,7 @@ class GeoLensIO:
                         s = Aperture(r=surf_r, d=d)
                     else:
                         # Spherical surface
-                        s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2)
+                        s = Spheric(c=surf_c, r=surf_r, d=d, mat2=mat2_name)
 
                 elif surf_dict["TYPE"] == "EVENASPH":
                     # Aspherical surface
@@ -121,7 +144,7 @@ class GeoLensIO:
                             surf_param8,
                         ],
                         k=surf_conic,
-                        mat2=mat2,
+                        mat2=mat2_name,
                     )
 
                 else:
@@ -270,7 +293,7 @@ class GeoLensIO:
                 self.float_enpd = False
                 global_diameter = self.enpd / 2.0
                 print(
-                    f"[Line {line_num}] EPD={self.enpd} → default radius={global_diameter}"
+                    f"[Line {line_num}] EPD={self.enpd} -> default radius={global_diameter}"
                 )
                 continue
             # Read field of view angle
@@ -278,7 +301,9 @@ class GeoLensIO:
                 angles = [abs(float(x)) for x in line.split()[1:] if float(x) != 0.0]
                 if angles:
                     self.hfov = max(angles)
-                    print(f"[Line {line_num}] Max field of view={self.hfov}°")
+                    # Also set rfov in radians for consistency with write functions
+                    self.rfov = self.hfov * math.pi / 180.0
+                    print(f"[Line {line_num}] Max field of view={self.hfov} deg")
                 continue
             # Object surface
             if line.startswith("SO"):

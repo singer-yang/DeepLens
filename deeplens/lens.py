@@ -370,7 +370,7 @@ class Lens(DeepObj):
         psfs = []
         for i in range(M):
             # Scale PSF for a better visualization
-            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=SPP_PSF)
+            psf = self.psf_rgb(points=points[i], ks=ks, recenter=True, spp=SPP_PSF)
             psf /= psf.max()
 
             if log_scale:

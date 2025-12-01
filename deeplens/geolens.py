@@ -106,6 +106,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             raise ValueError(f"File format {filename[-4:]} not supported.")
 
+        # Complete sensor size and resolution if not set
+        if not hasattr(self, "sensor_size"):
+            self.sensor_size = (self.r_sensor * float(np.sqrt(2)), self.r_sensor * float(np.sqrt(2)))
+
+        if not hasattr(self, "sensor_res"):
+            self.sensor_res = (2000, 2000)
+            self.set_sensor_res(self.sensor_res)
+
         # After loading lens, compute foclen, fov and fnum
         self.to(self.device)
         self.astype(self.dtype)
