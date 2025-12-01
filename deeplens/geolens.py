@@ -102,7 +102,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         elif filename[-4:] == ".zmx":
             self.read_lens_zmx(filename)
         elif filename[-4:] == ".seq":
-            raise NotImplementedError("File format .seq is not supported yet.")
+            self.read_lens_seq(filename)
         else:
             raise ValueError(f"File format {filename[-4:]} not supported.")
 
