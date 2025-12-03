@@ -28,6 +28,7 @@ if __name__ == "__main__":
     )
     psfnet_lens.lens.analysis(save_name=f"{result_dir}/lens")
     psfnet_lens.lens.write_lens_json(f"{result_dir}/lens.json")
+    # Download the pretrained model from release page: https://github.com/singer-yang/DeepLens/releases/
     psfnet_lens.load_net("./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth")
 
     # Draw example PSF map
