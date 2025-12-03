@@ -1,9 +1,8 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+# Copyright 2025 Ziqing Zhao, Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
 #
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
 
 """3D visualization for geometric lens systems.
 
@@ -20,9 +19,6 @@ import numpy as np
 import torch
 
 from deeplens.basics import DEFAULT_WAVE
-
-# PyVista is intentionally not imported here to keep this module free of GUI deps
-# It will be imported lazily when draw_lens_3d is called
 from deeplens.optics import Ray
 from deeplens.optics.geometric_surface import Aperture
 
@@ -884,13 +880,13 @@ class GeoLensVis3D:
                 print(f"Running in pair {i} with pair length {len(pair)}")
                 # Collect surface polydata
                 surf_polydata_list = [surf_meshes[idx].get_polydata() for idx in pair]
-                
+
                 # Collect bridge polydata if available
                 bridge_polydata_list = []
                 if i < len(bridge_meshes) and len(bridge_meshes[i]) > 0:
                     print(f"Bridge mesh group number: {len(bridge_meshes[i])}")
                     bridge_polydata_list = [b.get_polydata() for b in bridge_meshes[i]]
-                
+
                 # Merge surfaces and bridges together
                 all_polydata = surf_polydata_list + bridge_polydata_list
                 if len(all_polydata) == 1:
