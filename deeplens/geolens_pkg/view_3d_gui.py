@@ -88,6 +88,7 @@ def draw_lens_3d(
     fov_phis: List[float] = [0.0],
     ray_rings: int = 6,
     ray_arms: int = 8,
+    is_wrap: bool = False,
 ):
     """Draw lens 3D layout with rays using pyvista.
 
@@ -119,8 +120,9 @@ def draw_lens_3d(
         if not isinstance(surf, Aperture):
             _draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
 
-    for bridge in bridge_meshes:
-        _draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
+    for bridge_group in bridge_meshes:
+        for bridge in bridge_group:
+            _draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
     
     _draw_mesh(plotter, sensor_mesh, color=sensor_color, opacity=1.0)
 
