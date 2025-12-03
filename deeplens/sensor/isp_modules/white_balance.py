@@ -130,21 +130,24 @@ class AutoWhiteBalance(nn.Module):
             return self.apply_awb_rgb(input_tensor)
 
     def reverse(self, img):
-        """Inverse auto white balance."""
-        r_gain = self.white_balance[0]
-        g_gain = self.white_balance[1]
-        b_gain = self.white_balance[2]
+        """Inverse auto white balance (differentiable).
+        
+        Args:
+            img: Input tensor of shape [3, H, W] or [B, 3, H, W].
+            
+        Returns:
+            rgb_unbalanced: Output tensor with inverse white balance applied.
+        """
+        # Compute inverse gains
+        inv_gains = 1.0 / self.white_balance  # [3]
 
-        # Inverse AWB
-        rgb_unbalanced = torch.zeros_like(img)
-        if len(img.shape) == 3:
-            rgb_unbalanced[0, :, :] = img[0, :, :] / r_gain
-            rgb_unbalanced[1, :, :] = img[1, :, :] / g_gain
-            rgb_unbalanced[2, :, :] = img[2, :, :] / b_gain
+        # Apply inverse gains (differentiable element-wise division)
+        if img.dim() == 3:
+            # Shape: [3, H, W]
+            rgb_unbalanced = img * inv_gains.view(3, 1, 1)
         else:
-            rgb_unbalanced[:, 0, :, :] = img[:, 0, :, :] / r_gain
-            rgb_unbalanced[:, 1, :, :] = img[:, 1, :, :] / g_gain
-            rgb_unbalanced[:, 2, :, :] = img[:, 2, :, :] / b_gain
+            # Shape: [B, 3, H, W]
+            rgb_unbalanced = img * inv_gains.view(1, 3, 1, 1)
 
         return rgb_unbalanced
 

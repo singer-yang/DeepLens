@@ -1,5 +1,10 @@
 """Image Signal Processing (ISP) pipeline converts RAW bayer images to RGB images.
 
+This file contains the following ISP pipelines:
+    1. Simple ISP
+    2. Invertible ISP
+    3. OpenISP
+
 Reference:
     [1] Architectural Analysis of a Baseline ISP Pipeline. https://link.springer.com/chapter/10.1007/978-94-017-9987-4_2.
 """
@@ -20,17 +25,19 @@ from .isp_modules import (
 )
 
 
-# =================================================================
-# This file contains the following ISP pipeline examples:
-# 1. Simple ISP
-# 2. Invertible ISP
-# 3. OpenISP
-# =================================================================
+
 
 class SimpleISP(nn.Module):
     """Simple ISP pipeline with the most basic modules."""
 
-    def __init__(self, bit=10, black_level=64, bayer_pattern="rggb", color_matrix=None, gamma_param=2.2):
+    def __init__(
+        self,
+        bit=10,
+        black_level=64,
+        bayer_pattern="rggb",
+        color_matrix=None,
+        gamma_param=2.2,
+    ):
         super().__init__()
 
         self.bit = bit
@@ -38,7 +45,7 @@ class SimpleISP(nn.Module):
         self.bayer_pattern = bayer_pattern
         self.color_matrix = color_matrix
         self.gamma_param = gamma_param
-        
+
         self.isp = nn.Sequential(
             BlackLevelCompensation(bit=bit, black_level=black_level),
             Demosaic(bayer_pattern=bayer_pattern, method="bilinear"),
@@ -66,7 +73,15 @@ class InvertibleISP(nn.Module):
         [1] Architectural Analysis of a Baseline ISP Pipeline. https://link.springer.com/chapter/10.1007/978-94-017-9987-4_2. (page 23, 50)
     """
 
-    def __init__(self, bit=10, black_level=64, bayer_pattern="rggb", white_balance=(2.0, 1.0, 1.8), color_matrix=None, gamma_param=2.2):
+    def __init__(
+        self,
+        bit=10,
+        black_level=64,
+        bayer_pattern="rggb",
+        white_balance=(2.0, 1.0, 1.8),
+        color_matrix=None,
+        gamma_param=2.2,
+    ):
         super().__init__()
 
         self.bit = bit
@@ -75,7 +90,7 @@ class InvertibleISP(nn.Module):
         self.white_balance = white_balance
         self.color_matrix = color_matrix
         self.gamma_param = gamma_param
-        
+
         self.blc = BlackLevelCompensation(bit=bit, black_level=black_level)
         self.demosaic = Demosaic(bayer_pattern=bayer_pattern, method="3x3")
         self.awb = AutoWhiteBalance(awb_method="manual", white_balance=white_balance)

@@ -1,4 +1,10 @@
-"""Image sensor, containing noise model and ISP."""
+"""Image sensor, containing noise model and ISP.
+
+This file contains the following sensor classes:
+    1. Sensor
+    2. MonoSensor
+    3. EventSensor
+"""
 
 import json
 import math
@@ -170,12 +176,75 @@ class Sensor(nn.Module):
 
 
 
-# class IdealSensor(Sensor):
-#     """Ideal RGB sensor. Ignore sensor response curve and noise."""
+class MonoSensor(Sensor):
+    """Monochrome sensor"""
 
-#     def __init__(self):
-#         super().__init__()
+    def __init__(
+        self,
+        bit=10,
+        black_level=64,
+        res=(4000, 3000),
+        size=(8.0, 6.0),
+        iso_base=100,
+        read_noise_std=0.5,
+        shot_noise_std_alpha=0.4,
+        shot_noise_std_beta=0.0,
+    ):
+        super().__init__(
+            bit=bit,
+            black_level=black_level,
+            res=res,
+            size=size,
+            iso_base=iso_base,
+            read_noise_std=read_noise_std,
+            shot_noise_std_alpha=shot_noise_std_alpha,
+            shot_noise_std_beta=shot_noise_std_beta,
+        )
+        self.isp = nn.Sequential(
+            BlackLevelCompensation(bit, black_level),
+        )
 
-#     def forward(self, img):
-#         """Ignore noise."""
-#         return img
+    def forward(self, img_nbit, iso=100.0):
+        """Converts light illuminance to monochrome image.
+
+        Args:
+            img_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
+            iso: ISO value, default 100.0
+
+        Returns:
+            img_noisy: Processed monochrome image with noise
+        """
+        img_noisy = self.simu_noise(img_nbit, iso)
+        img_noisy = self.isp(img_noisy)
+        return img_noisy
+
+
+class EventSensor(Sensor):
+    """Event sensor"""
+
+    def __init__(self, bit=10, black_level=64):
+        super().__init__(bit, black_level)
+
+    def forward(self, I_t, I_t_1):
+        """Converts light illuminance to event stream.
+
+        Args:
+            I_t: Current frame
+            I_t_1: Previous frame
+
+        Returns:
+            Event stream
+        """
+        # Converts light illuminance to event stream.
+        pass
+
+    def forward_video(self, frames):
+        """Simulate sensor output from a video.
+
+        Args:
+            frames: Tensor of shape (B, T, 3, H, W), range [0, 1]
+
+        Returns:
+            Event stream for the video sequence
+        """
+        pass
