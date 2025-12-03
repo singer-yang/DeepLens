@@ -35,8 +35,8 @@ DELTA = 1e-6
 DELTA_PARAXIAL = 0.01
 EPSILON = 1e-12  # replace 0 with EPSILON in some cases
 
-DEFAULT_WAVE = 0.58756180 # [um] default wavelength
-WAVE_RGB = [0.65627250, 0.58756180, 0.48613270] # [um] R, G, B wavelength
+DEFAULT_WAVE = 0.587 # [um] default wavelength
+WAVE_RGB = [0.656, 0.587, 0.486] # [um] R, G, B wavelength
 
 WAVE_RED = [0.620, 0.660, 0.700] # [um] narrow band red spectrum
 WAVE_GREEN = [0.500, 0.530, 0.560] # [um] narrow band green spectrum
