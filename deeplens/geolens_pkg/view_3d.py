@@ -37,11 +37,12 @@ Functions:
 """
 
 import os
-from typing import List
+from typing import List, Optional
 
 import numpy as np
+from sympy.printing.pretty.pretty_symbology import B
 import torch
-from pyvista import Plotter, PolyData, merge
+# PyVista is intentionally not imported here to keep this module free of GUI deps
 
 from deeplens.optics import Ray
 from deeplens.basics import DEFAULT_WAVE
@@ -51,28 +52,87 @@ from deeplens.optics.geometric_surface import Aperture
 # Mesh class
 # (Surface mesh defined in the corresponding surface class)
 # ==========================================================
+# local dummy class for pyvista
+class PolyData:
+    def __init__(self, vertices, lines, faces):
+        self.n_points = len(vertices)
+        self.points = vertices
+        self.lines = lines
+        self.faces = faces
+        self.is_linemesh = False
+        self.is_facemesh = False
+        self.is_default = False
+        if lines is not None:
+            self.is_linemesh = True
+        if faces is not None:
+            self.is_facemesh = True
+        
+        assert not (self.is_linemesh and self.is_facemesh), "Invalid polydata"
+        
+    def save(self, filename: str):
+        # the local wrapper of the pyvista.PolyData.save method
+        # only support .obj format for now
+        
+        with open(filename, 'w') as f:
+            mesh_head = 'l' if self.is_linemesh else 'f'
+            v_head = 'v'
+            if self.is_linemesh:
+                for v in self.points:
+                    f.write(f'{v_head} {v[0]} {v[1]} {v[2]}\n')
+                for l in self.lines:
+                    f.write(f'{mesh_head} {l[0]+1} {l[1]+1}\n')
+            if self.is_facemesh:
+                for v in self.points:
+                    f.write(f'{v_head} {v[0]} {v[1]} {v[2]}\n')
+                for fm in self.faces:
+                    f.write(f'{mesh_head} {fm[0]+1} {fm[1]+1} {fm[2]+1}\n')
+    
+    # IMPLEMENT A DEFAULT METHOD FOR THE DUMMY CLASS
+    @staticmethod
+    def default():
+        """
+        Returns a default PolyData instance that can be used for type checks
+        and placeholder initialization. The default instance has an `is_default`
+        attribute set to True, which can be used to check for default status.
+        """
+        obj = PolyData(np.zeros((0, 3)), lines=None, faces=None)
+        obj.is_default = True
+        return obj
+
+def merge(meshes: List[PolyData]) -> PolyData:
+    if meshes is None or len(meshes) == 0:
+        return PolyData.default()
+    if len(meshes) == 1:
+        return meshes[0]
+    v_count = meshes[0].n_points
+    v_combined = meshes[0].points.copy()
+    is_linemesh = meshes[0].is_linemesh
+    mesh_combined = meshes[0].lines.copy() if is_linemesh else meshes[0].faces.copy()
+    
+    for m in meshes[1:]:
+        # increment the vertex number by previous v_count
+        if m.is_linemesh:
+            v_combined = np.vstack([v_combined, m.points])
+            new_lines = m.lines.copy()
+            new_lines += v_count
+            mesh_combined = np.vstack([mesh_combined, new_lines])
+        elif m.is_facemesh:
+            v_combined = np.vstack([v_combined, m.points])
+            new_faces = m.faces.copy()
+            new_faces += v_count
+            mesh_combined = np.vstack([mesh_combined, new_faces])
+        v_count += m.n_points
+    return PolyData(v_combined, lines=mesh_combined, faces=None) if is_linemesh else PolyData(v_combined, lines=None, faces=mesh_combined)
 
 class CrossPoly:
     def __init__(self):
         pass
 
     def get_polydata(self) -> PolyData:
-        pass
+        return PolyData.default()
 
     def get_obj_data(self):
         pass
-
-    def draw(self, plotter: Plotter, color: List[float], opacity: float = 1.0):
-        """Draw the mesh to the plotter.
-
-        Args:
-            plotter: Plotter
-            color: List[float]. The color of the mesh.
-            opacity: float. The opacity of the mesh.
-        """
-        poly = self.get_polydata()
-        poly["colors"] = np.vstack([color] * poly.n_points)
-        plotter.add_mesh(poly, scalars="colors", rgb=True, opacity=opacity)
 
 
 class LineMesh(CrossPoly):
@@ -95,15 +155,15 @@ class LineMesh(CrossPoly):
     def get_polydata(self):
         n_line = 0 if self.is_loop else -1
         n_line += self.n_vertices
-        line = [[2, i, (i + 1) % self.n_vertices] for i in range(n_line)]
-
-        return PolyData(self.vertices, lines=line)
-
+        line = np.array([[i, (i + 1) % self.n_vertices] for i in range(n_line)], dtype=np.uint32)
+        return PolyData(self.vertices, lines=line, faces=None)
 
 class Curve(LineMesh):
     """A curve mesh with vertices and lines. Currently used for ray meshes."""
     
-    def __init__(self, vertices: np.ndarray, is_loop: bool = None):
+    def __init__(self, vertices: np.ndarray, is_loop: Optional[bool] = None):
+        if is_loop is None:
+            is_loop = False
         n_vertices = vertices.shape[0]
         super().__init__(n_vertices, is_loop)
         self.vertices = vertices
@@ -152,7 +212,7 @@ class FaceMesh(CrossPoly):
         self.n_vertices = n_vertices
         self.n_faces = n_faces
         self.vertices, self.faces = self._create_empty_data()
-        self.rim: LineMesh = None
+        self.rim: LineMesh = None # type: ignore
         self.create_data()
         self.create_rim()
 
@@ -171,11 +231,7 @@ class FaceMesh(CrossPoly):
         return self.get_polydata()
 
     def get_polydata(self) -> PolyData:
-        face_vertex_n = 3  # 3 vertices per face
-        face = np.hstack(
-            [face_vertex_n * np.ones((self.n_faces, 1), dtype=np.uint32), self.faces]
-        )
-        return PolyData(self.vertices, face)
+        return PolyData(self.vertices, lines=None, faces=self.faces)
 
 
 class RectangleMesh(FaceMesh):
@@ -304,6 +360,39 @@ def bridge(
 
     return face_mesh
 
+def line_translate(l: LineMesh, dx: float, dy: float, dz: float) -> LineMesh:
+    """Translate a line mesh by a given amount. Return a new line mesh.
+    
+    Args:
+        l: LineMesh. The line mesh to translate.
+        dx: float. The amount to translate in x direction.
+        dy: float. The amount to translate in y direction.
+        dz: float. The amount to translate in z direction.
+    
+    Returns:
+        LineMesh. The translated line mesh.
+    """
+    # create a new line mesh
+    new_l = LineMesh(l.n_vertices, l.is_loop)
+    new_l.vertices = l.vertices.copy()
+    new_l.vertices = new_l.vertices + np.array([dx, dy, dz])[None, :]
+    return new_l
+
+def surf_to_face_mesh(surf) -> FaceMesh:
+    """Convert a Surface object to a FaceMesh object.
+    
+    Args:
+        surf: Surface. The surface object.
+    
+    Returns:
+        FaceMesh. The face mesh object.
+    """
+    n_vertices = surf.vertices.shape[0]
+    n_faces = surf.faces.shape[0]
+    face_mesh = FaceMesh(n_vertices=n_vertices, n_faces=n_faces)
+    face_mesh.vertices = surf.vertices
+    face_mesh.faces = surf.faces
+    return face_mesh
 
 # ====================================================
 # Ray visualization
@@ -417,14 +506,14 @@ def sample_parallel_3D(
     y2 = torch.concat((torch.tensor([0]), y2))
 
     z2 = torch.full_like(x2, pupilz)
-    o2 = torch.stack((x2, y2, z2), axis=-1)  # shape [M, 3]
+    o2 = torch.stack((x2, y2, z2), dim=-1)  # shape [M, 3]
 
     view_polar = view_polar / 57.3
     view_azi = view_azi / 57.3
     dx = torch.full_like(x2, np.sin(view_polar) * np.cos(view_azi))
     dy = torch.full_like(x2, np.sin(view_polar) * np.sin(view_azi))
     dz = torch.full_like(x2, np.cos(view_polar))
-    d = torch.stack((dx, dy, dz), axis=-1)
+    d = torch.stack((dx, dy, dz), dim=-1)
 
     # Move ray origins to z = - 0.1 for tracing
     if pupilz > 0:
@@ -472,26 +561,18 @@ def curve_from_trace(lens, ray: Ray, delete_vignetting=True):
 # ====================================================
 
 class GeoLensVis3D:
-    """GeoLens utility class for visualizing the lens geometry and rays in 3D."""
-    
-    @staticmethod
-    def draw_mesh(plotter, mesh: CrossPoly, color: List[float], opacity: float = 1.0):
-        """Draw a mesh to the plotter.
+    """GeoLens utility class for geometry/ray mesh creation and export (no GUI deps)."""
 
-        Args:
-            plotter: Plotter
-            mesh: CrossPoly
-            color: List[float]. The color of the mesh.
-            opacity: float. The opacity of the mesh.
-        """
-        poly = mesh.get_polydata() # PolyData object
-        plotter.add_mesh(poly, color=color, opacity=opacity)
-
+    # # Attribute stubs to satisfy type checkers when mixed into GeoLens
+    # surfaces: List[Any]
+    # d_sensor: Any
+    # r_sensor: float
 
     def create_mesh(
         self,
         mesh_rings: int = 32,
         mesh_arms: int = 128,
+        is_wrap: bool = False,
     ):
         """Create all lens/bridge/sensor/aperture meshes.
 
@@ -499,7 +580,7 @@ class GeoLensVis3D:
             lens (GeoLens): The lens object.
             mesh_rings (int): The number of rings in the mesh.
             mesh_arms (int): The number of arms in the mesh.
-
+            is_wrap (bool): Whether to wrap the lens bridge around the lens as cylinder.
         Returns:
             surf_meshes (List[Surface]): Lens surfaces meshes.
             bridge_meshes (List[FaceMesh]): Lens bridges meshes. (NOT support wrap around for now)
@@ -508,14 +589,14 @@ class GeoLensVis3D:
         surf_meshes = []
         element_group = []
         element_groups = []
-        bridge_meshes = []
+        bridge_meshes = [] # change to nested list for wrap around
         sensor_mesh = None
 
         # Create the surface meshes 
         for i, surf in enumerate(self.surfaces):
             # Create the surface mesh (list of Surface objects)
             surf_meshes.append(surf.create_mesh(n_rings=mesh_rings, n_arms=mesh_arms))
-                    
+            
             # Add the surface to the element group
             element_group.append(i)
             if surf.mat2.name == "air":
@@ -525,22 +606,85 @@ class GeoLensVis3D:
         # Create the bridge meshes (list of FaceMesh objects)
         for i, pair in enumerate(element_groups):
             if len(pair) == 1:
+                bridge_meshes.append([])
                 continue
             elif len(pair) == 2:
                 a_idx, b_idx = pair
                 a = surf_meshes[a_idx]
                 b = surf_meshes[b_idx]
-                bridge_mesh = bridge(a.rim, b.rim)
-                bridge_meshes.append(bridge_mesh)
+                bridge_mesh_group = []
+                if not is_wrap:
+                    bridge_mesh = bridge(a.rim, b.rim)
+                    bridge_mesh_group.append(bridge_mesh)
+                else:
+                    # create wrap by creating a new rim
+                    # from projecting the larger rim onto the smaller rim plane
+                    # assume the elements are always ordered on z-axis
+                    r_a = self.surfaces[a_idx].r
+                    r_b = self.surfaces[b_idx].r
+                    d_rim_a = np.mean(a.rim.vertices[:, 2], keepdims=False) # calc rim mean z
+                    d_rim_b = np.mean(b.rim.vertices[:, 2], keepdims=False)
+                    
+                    if r_a > r_b:
+                        z = line_translate(a.rim, 0, 0, d_rim_b-d_rim_a)
+                        bridge_mesh_wrap = bridge(z, b.rim)
+                        bridge_mesh      = bridge(a.rim, z)
+                        bridge_mesh_group.append(bridge_mesh_wrap)
+                    elif r_a < r_b:
+                        z = line_translate(b.rim, 0, 0, d_rim_a-d_rim_b)
+                        bridge_mesh_wrap = bridge(a.rim, z)
+                        bridge_mesh      = bridge(z, b.rim)
+                        bridge_mesh_group.append(bridge_mesh_wrap)
+                    else:
+                        bridge_mesh = bridge(a.rim, b.rim)
+                    bridge_mesh_group.append(bridge_mesh)
+                bridge_meshes.append(bridge_mesh_group)
+                
             elif len(pair) == 3:
                 a_idx, b_idx, c_idx = pair
                 a = surf_meshes[a_idx]
                 b = surf_meshes[b_idx]
                 c = surf_meshes[c_idx]
-                bridge_mesh = bridge(a.rim, b.rim)
-                bridge_meshes.append(bridge_mesh)
-                bridge_mesh = bridge(b.rim, c.rim)
-                bridge_meshes.append(bridge_mesh)
+                bridge_mesh_group = []
+                if not is_wrap:
+                    bridge_mesh = bridge(a.rim, b.rim)
+                    bridge_mesh_group.append(bridge_mesh)
+                    bridge_mesh = bridge(b.rim, c.rim)
+                    bridge_mesh_group.append(bridge_mesh)
+                else:
+                    # create wrap by creating a new rim
+                    # from projecting the larger rim onto the smaller rim plane
+                    # assume the elements are always ordered on z-axis
+                    r_a = self.surfaces[a_idx].r
+                    r_b = self.surfaces[b_idx].r
+                    r_c = self.surfaces[c_idx].r
+                    d_rim_a = np.mean(a.rim.vertices[:, 2], keepdims=False) # calc rim mean z
+                    d_rim_b = np.mean(b.rim.vertices[:, 2], keepdims=False)
+                    d_rim_c = np.mean(c.rim.vertices[:, 2], keepdims=False)
+                    
+                    rim_list = [a.rim, b.rim, c.rim]
+                    r_list = [r_a, r_b, r_c]
+                    d_rim_list = [d_rim_a, d_rim_b, d_rim_c]
+                    idx_wrap = r_list.index(max(r_list))
+                    r_wrap = r_list[idx_wrap]
+                    d_rim_wrap = d_rim_list[idx_wrap]
+                    
+                    for i in range(3):
+                        if i != idx_wrap and r_list[i] != r_wrap:
+                            # substitute the rim with the wrapped rim
+                            d_diff = d_rim_list[i]-d_rim_wrap
+                            z = line_translate(rim_list[idx_wrap], 0, 0, d_diff)
+                            # add the wrap bridge between older rim and wrapped one
+                            wrap_mesh = bridge(rim_list[i], z)
+                            # update the rim
+                            rim_list[i] = z
+                            bridge_mesh_group.append(wrap_mesh)
+                    bridge_mesh = bridge(rim_list[0], rim_list[1])
+                    bridge_mesh_group.append(bridge_mesh)
+                    bridge_mesh = bridge(rim_list[1], rim_list[2])
+                    bridge_mesh_group.append(bridge_mesh)
+                bridge_meshes.append(bridge_mesh_group)
+                    
             else:
                 raise ValueError(f"Invalid bridge group length: {len(pair)}")
 
@@ -551,13 +695,16 @@ class GeoLensVis3D:
         sensor_mesh = RectangleMesh(
             np.array([0, 0, sensor_d]), np.array([1, 0, 0]), np.array([0, 1, 0]), w, h
         )
+        
+        # turn surf_meshes to list of FaceMesh
+        surf_meshes_cvt = [surf_to_face_mesh(surf) for surf in surf_meshes]
+        return surf_meshes_cvt, bridge_meshes, element_groups, sensor_mesh
 
-        return surf_meshes, bridge_meshes, element_groups, sensor_mesh
 
-
+    # Backward-compat shim: guide users to the standalone GUI function
     def draw_lens_3d(
         self,
-        save_dir: str = None,
+        save_dir: Optional[str] = None,
         mesh_rings: int = 32,
         mesh_arms: int = 128,
         surface_color: List[float] = [0.06, 0.3, 0.6],
@@ -567,69 +714,23 @@ class GeoLensVis3D:
         ray_rings: int = 6,
         ray_arms: int = 8,
     ):
-        """Draw lens 3D layout with rays using pyvista.
-
-        Args:
-            lens (GeoLens): The lens object.
-            save_dir (str): The directory to save the image.
-            mesh_rings (int): The number of rings in the mesh.
-            mesh_arms (int): The number of arms in the mesh.
-            surface_color (List[float]): The color of the surfaces.
-            draw_rays (bool): Whether to show the rays.
-            fovs (List[float]): The FoV angles to be sampled, unit: degree.
-            fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
-            ray_rings (int): The number of pupil rings to be sampled.
-            ray_arms (int): The number of pupil arms to be sampled.
-        """
-        surf_color = np.array(surface_color)
-        sensor_color = np.array([0.5, 0.5, 0.5])
-
-        # Initialize plotter
-        plotter = Plotter(window_size=(3840, 2160), off_screen=True)
-        plotter.camera.up = [0, 1, 0]
-        unit = self.d_sensor.item()
-        plotter.camera.position = [-2 * unit, unit, -unit / 2]
-        plotter.camera.focal_point = [0, 0, unit / 2]
-        
-        # Create meshes
-        surf_meshes, bridge_meshes, _, sensor_mesh = self.create_mesh(
-            mesh_rings, mesh_arms
+        raise ImportError(
+            "draw_lens_3d has moved to deeplens.geolens_pkg.view_3d_gui.draw_lens_3d. "
+            "This keeps PyVista optional. Please import and call the standalone function instead."
         )
-
-        # Draw meshes
-        for surf in surf_meshes:
-            if not isinstance(surf, Aperture):
-                self.draw_mesh(plotter, surf, color=surf_color, opacity=0.5)
-
-        for bridge in bridge_meshes:
-            self.draw_mesh(plotter, bridge, color=surf_color, opacity=0.5)
-        
-        self.draw_mesh(plotter, sensor_mesh, color=sensor_color, opacity=1.0)
-
-        # Draw rays
-        if draw_rays:
-            rays_curve = geolens_ray_poly(self, fovs, fov_phis, n_rings=ray_rings, n_arms=ray_arms)
-            rays_poly_list = [curve_list_to_polydata(r) for r in rays_curve]
-            rays_poly_fov = [merge(r) for r in rays_poly_list]
-            for r in rays_poly_fov:
-                plotter.add_mesh(r)
-
-        # Save images
-        if save_dir is not None:
-            os.makedirs(save_dir, exist_ok=True)
-            plotter.screenshot(os.path.join(save_dir, "lens_layout3d.png"), return_img=False)
 
 
     def save_lens_obj(
         self,
         save_dir: str,
         mesh_rings: int = 64,
-        mesh_arms: int = 512,
+        mesh_arms: int = 128,
         save_rays: bool = False,
         fovs: List[float] = [0.0],
         fov_phis: List[float] = [0.0],
         ray_rings: int = 6,
         ray_arms: int = 8,
+        is_wrap: bool = False,
         save_elements: bool = True,
     ):
         """Save lens geometry and rays as .obj files using pyvista.
@@ -646,19 +747,21 @@ class GeoLensVis3D:
             fov_phis (List[float]): The FoV azimuthal angles to be sampled, unit: degree.
             ray_rings (int): The number of pupil rings to be sampled. (default: 6)
             ray_arms (int): The number of pupil arms to be sampled. (default: 8)
+            is_wrap (bool): Whether to wrap the lens bridge around the lens as cylinder.
             save_elements (bool): Whether to save the elements.
         """
         os.makedirs(save_dir, exist_ok=True)
 
         # Create surfaces & bridges meshes
         surf_meshes, bridge_meshes, element_groups, sensor_mesh = self.create_mesh(
-            mesh_rings, mesh_arms
+            mesh_rings, mesh_arms, is_wrap
         )
-
+        
         # Save individual lens elements
         if save_elements:
             bridge_idx = 0
             for i, pair in enumerate(element_groups):
+                print(f"Running in pair {i} with pair length {len(pair)}")
                 if len(pair) == 1:
                     element = surf_meshes[pair[0]].get_polydata()
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
@@ -666,27 +769,29 @@ class GeoLensVis3D:
                     a_idx, b_idx = pair
                     surf1 = surf_meshes[a_idx].get_polydata()
                     surf2 = surf_meshes[b_idx].get_polydata()
-                    bridge_mesh = bridge_meshes[bridge_idx].get_polydata()
-                    bridge_idx += 1
-                    element = merge([surf1, surf2, bridge_mesh])
+                    element = merge([surf1, surf2])
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                    
+                    print(f"Bridge mesh group number: {len(bridge_meshes[i])}")
+                    element_bridge = merge([b.get_polydata() for b in bridge_meshes[i]])
+                    element_bridge.save(os.path.join(save_dir, f"element_bridge_{i}.obj"))
                 elif len(pair) == 3:
                     a_idx, b_idx, c_idx = pair
                     surf1 = surf_meshes[a_idx].get_polydata()
                     surf2 = surf_meshes[b_idx].get_polydata()
                     surf3 = surf_meshes[c_idx].get_polydata()
-                    bridge1 = bridge_meshes[bridge_idx].get_polydata()
-                    bridge_idx += 1
-                    bridge2 = bridge_meshes[bridge_idx].get_polydata()
-                    bridge_idx += 1
-                    element = merge([surf1, surf2, surf3, bridge1, bridge2])
+                    element = merge([surf1, surf2, surf3])
                     element.save(os.path.join(save_dir, f"element_{i}.obj"))
+                    
+                    print(f"Bridge mesh group number: {len(bridge_meshes[i])}")
+                    element_bridge = merge([b.get_polydata() for b in bridge_meshes[i]])
+                    element_bridge.save(os.path.join(save_dir, f"element_bridge_{i}.obj"))
                 else:
                     raise ValueError(f"Invalid bridge group length: {len(pair)}")
 
         # Merge all surfaces and bridges, and save as single lens.obj file
         surf_polydata = [surf.get_polydata() for surf in surf_meshes if not isinstance(surf, Aperture)]
-        bridge_polydata = [bridge.get_polydata() for bridge in bridge_meshes]
+        bridge_polydata = [b.get_polydata() for group in bridge_meshes for b in group] # flatten the nested list
         lens_polydata = surf_polydata + bridge_polydata
         lens_polydata = merge(lens_polydata)
         lens_polydata.save(os.path.join(save_dir, "lens.obj"))    
