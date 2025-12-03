@@ -50,7 +50,7 @@ Lens-network co-design from scratch using final images (or classification/detect
 [![paper](https://img.shields.io/badge/NatComm-2024-orange)](https://www.nature.com/articles/s41467-024-50835-7)
 
 <div align="center">
-    <img src="assets/end2end.gif" alt="End2End" height="150px"/>
+    <img src="assets/end2end.png" alt="End2End" height="150px"/>
 </div>
 
 #### 3. Implicit Lens Representation
