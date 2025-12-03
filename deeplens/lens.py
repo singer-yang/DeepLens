@@ -1,12 +1,10 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
 #
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
 
-"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and rewrite core functions.
-"""
+"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and rewrite core functions."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,15 +13,11 @@ from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
 from deeplens.basics import (
-    BLUE_RESPONSE,
     DEFAULT_WAVE,
     DEPTH,
     EPSILON,
-    GREEN_RESPONSE,
     PSF_KS,
-    RED_RESPONSE,
     SPP_PSF,
-    WAVE_BOARD_BAND,
     WAVE_RGB,
     DeepObj,
     init_device,
@@ -72,7 +66,7 @@ class Lens(DeepObj):
 
     def set_sensor(self, sensor_size, sensor_res):
         """Set sensor size and resolution.
-        
+
         Args:
             sensor_size (tuple): Sensor size (w, h) in [mm].
             sensor_res (tuple): Sensor resolution (W, H) in [pixels].
@@ -84,6 +78,7 @@ class Lens(DeepObj):
         self.sensor_res = sensor_res
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
         self.r_sensor = float(np.sqrt(sensor_size[0] ** 2 + sensor_size[1] ** 2)) / 2
+        self.calc_fov()
 
     def set_sensor_res(self, sensor_res):
         """Set sensor resolution (and aspect ratio) while keeping sensor radius unchanged.
@@ -95,13 +90,28 @@ class Lens(DeepObj):
         self.sensor_res = sensor_res
 
         # Change sensor size (r_sensor is fixed)
-        diam_res = np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2)
+        diam_res = float(np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2))
         self.sensor_size = (
-            round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 3),
-            round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 3),
+            round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 4),
+            round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 4),
         )
-        self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 3)
+        self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 4)
+        self.calc_fov()
 
+    @torch.no_grad()
+    def calc_fov(self):
+        """Compute FoV (radian) of the lens.
+
+        Reference:
+            [1] https://en.wikipedia.org/wiki/Angle_of_view_(photography)
+        """
+        if not hasattr(self, "foclen"):
+            return
+        
+        self.vfov = 2 * float(np.atan(self.sensor_size[0] / 2 / self.foclen))
+        self.hfov = 2 * float(np.atan(self.sensor_size[1] / 2 / self.foclen))
+        self.dfov = 2 * float(np.atan(self.r_sensor / self.foclen))
+        self.rfov = self.dfov / 2  # radius (half diagonal) FoV
 
     # ===========================================
     # PSF-ralated functions
@@ -137,59 +147,6 @@ class Lens(DeepObj):
             psfs.append(self.psf(points=points, ks=ks, wvln=wvln, **kwargs))
         psf_rgb = torch.stack(psfs, dim=-3)  # shape [3, ks, ks] or [N, 3, ks, ks]
         return psf_rgb
-
-    def psf_spectrum(self, points, ks=51, **kwargs):
-        """Compute RGB PSF considering full spectrum for each color.
-
-        Note:
-            The differentiability of this function is not guaranteed.
-            A placeholder RGB sensor response function is used to calculate the final PSF.
-            But the actual sensor response function will be more reasonable.
-
-        Args:
-            points (tensor): Shape of [N, 3] or [3].
-            ks (int, optional): Kernel size. Defaults to 51.
-
-        Returns:
-            psf: Shape of [3, ks, ks].
-
-        Reference:
-            https://en.wikipedia.org/wiki/Spectral_sensitivity
-        """
-        # Red
-        psf_r = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(points=points, ks=ks, wvln=wvln, **kwargs)
-            psf_r.append(psf * RED_RESPONSE[i])
-        psf_r = torch.stack(psf_r, dim=0).sum(dim=0) / sum(RED_RESPONSE)
-
-        # Green
-        psf_g = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(points=points, ks=ks, wvln=wvln, **kwargs)
-            psf_g.append(psf * GREEN_RESPONSE[i])
-        psf_g = torch.stack(psf_g, dim=0).sum(dim=0) / sum(GREEN_RESPONSE)
-
-        # Blue
-        psf_b = []
-        for i, wvln in enumerate(WAVE_BOARD_BAND):
-            psf = self.psf(points=points, ks=ks, wvln=wvln, **kwargs)
-            psf_b.append(psf * BLUE_RESPONSE[i])
-        psf_b = torch.stack(psf_b, dim=0).sum(dim=0) / sum(BLUE_RESPONSE)
-
-        # RGB
-        psf = torch.stack([psf_r, psf_g, psf_b], dim=0)  # shape [3, ks, ks]
-        return psf
-
-    def draw_psf(self, depth=DEPTH, ks=101, save_name="./psf.png"):
-        """Draw RGB on-axis PSF."""
-        psfs = []
-        for wvln in WAVE_RGB:
-            psf = self.psf(point=[0, 0, depth], ks=ks, wvln=wvln)
-            psfs.append(psf)
-
-        psfs = torch.stack(psfs, dim=0)  # shape [3, ks, ks]
-        save_image(psfs.unsqueeze(0), save_name, normalize=True)
 
     def point_source_grid(
         self, depth, grid=(9, 9), normalized=True, quater=False, center=True
@@ -301,6 +258,7 @@ class Lens(DeepObj):
         depth=DEPTH,
         log_scale=False,
         save_name="./psf_map.png",
+        show=False,
     ):
         """Draw RGB PSF map of the lens."""
         # Calculate RGB PSF map, shape [grid_h, grid_w, 3, ks, ks]
@@ -369,8 +327,12 @@ class Lens(DeepObj):
         # Clean up axes and save
         ax.axis("off")
         plt.tight_layout(pad=0)
-        plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
-        plt.close(fig)
+
+        if show:
+            return fig, ax
+        else:
+            plt.savefig(save_name, dpi=300, bbox_inches="tight", pad_inches=0)
+            plt.close(fig)
 
     def point_source_radial(self, depth, grid=9, center=False):
         """Compute point radial [0, 1] in the object space to compute PSF grid.
@@ -408,7 +370,7 @@ class Lens(DeepObj):
         psfs = []
         for i in range(M):
             # Scale PSF for a better visualization
-            psf = self.psf_rgb(points=points[i], ks=ks, center=True, spp=SPP_PSF)
+            psf = self.psf_rgb(points=points[i], ks=ks, recenter=True, spp=SPP_PSF)
             psf /= psf.max()
 
             if log_scale:
@@ -437,7 +399,7 @@ class Lens(DeepObj):
         Image simulation methods:
             [1] PSF map, convolution by patches.
             [2] PSF patch, convolution by a single PSF.
-            [3] Ray tracing-based rendering, in GeoLens.
+            [3] Ray tracing rendering, in GeoLens.
             [4] ...
 
         Args:
@@ -477,7 +439,9 @@ class Lens(DeepObj):
             )
 
         elif method == "psf_pixel":
-            raise NotImplementedError("Per-pixel PSF convolution has not been implemented.")
+            raise NotImplementedError(
+                "Per-pixel PSF convolution has not been implemented."
+            )
 
         else:
             raise Exception(f"Image simulation method {method} is not supported.")
@@ -508,9 +472,13 @@ class Lens(DeepObj):
             points = torch.tensor(points).unsqueeze(0)
         elif isinstance(psf_center, torch.Tensor):
             depth = torch.full_like(psf_center[..., 0], depth)
-            points = torch.stack([psf_center[..., 0], psf_center[..., 1], depth], dim=-1)
+            points = torch.stack(
+                [psf_center[..., 0], psf_center[..., 1], depth], dim=-1
+            )
         else:
-            raise Exception(f"PSF center must be a list or tuple or tensor, but got {type(psf_center)}.")
+            raise Exception(
+                f"PSF center must be a list or tuple or tensor, but got {type(psf_center)}."
+            )
 
         # Compute PSF and perform PSF convolution
         psf = self.psf_rgb(points=points, ks=psf_ks).squeeze(0)
@@ -583,7 +551,7 @@ class Lens(DeepObj):
 
         elif method == "psf_map":
             # Render full resolution image with PSF map convolution
-            psf_grid = kwargs.get("psf_grid", (10, 10)) # (grid_w, grid_h)
+            psf_grid = kwargs.get("psf_grid", (10, 10))  # (grid_w, grid_h)
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
@@ -595,10 +563,14 @@ class Lens(DeepObj):
             for depth in tqdm(depths_ref):
                 psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
                 psf_maps.append(psf_map)
-            psf_map = torch.stack(psf_maps, dim=2) # shape [grid_h, grid_w, num_depth, 3, ks, ks]
-            
+            psf_map = torch.stack(
+                psf_maps, dim=2
+            )  # shape [grid_h, grid_w, num_depth, 3, ks, ks]
+
             # Image simulation
-            img_render = conv_psf_map_depth_interp(img_obj, depth_map, psf_map, depths_ref)
+            img_render = conv_psf_map_depth_interp(
+                img_obj, depth_map, psf_map, depths_ref
+            )
             return img_render
 
         elif method == "psf_pixel":

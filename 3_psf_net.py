@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """Represent the spatiallly varying PSF of a lens with a neural network. Surrogate model can accelerate the calculation of PSF compared to ray tracing.
 
 Technical Paper:
@@ -31,7 +24,7 @@ if __name__ == "__main__":
         lens_path="./datasets/lenses/camera/ef50mm_f1.8.json",
         model_name="mlpconv",
         kernel_size=128,
-        sensor_res=(3000, 3000),
+        sensor_res=(4000, 4000),
     )
     psfnet_lens.lens.analysis(save_name=f"{result_dir}/lens")
     psfnet_lens.lens.write_lens_json(f"{result_dir}/lens.json")

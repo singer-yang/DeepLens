@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """
 Automated lens design from scratch. This code uses RMS spot size for lens design, which is much faster than image-based lens design.
 
@@ -222,7 +215,7 @@ if __name__ == "__main__":
         fnum=args["fnum"],
         flange=args["flange"],
         thickness=args["thickness"],
-        lens_type=args["lens_type"],
+        surf_list=args["surf_list"],
         save_dir=result_dir,
     )
     lens.set_target_fov_fnum(
@@ -233,7 +226,7 @@ if __name__ == "__main__":
         f"==> Design target: focal length {round(args['foclen'], 2)}, diagonal FoV {args['fov']}deg, F/{args['fnum']}"
     )
 
-    # =====> 2. Curriculum learning with RMS errors
+    # Curriculum learning with RMS errors
     # Curriculum learning is used to find an optimization path when starting from scratch, where the optimization difficulty is high and the gradients are unstable. 3000 iterations is a good starting value, while increasing the number of iterations will improve the optical performance. Also, we can choose to optimize materials in this stage.
     lens.curriculum_design(
         lrs=[float(lr) for lr in args["lrs"]],
@@ -249,8 +242,10 @@ if __name__ == "__main__":
     # Match materials and set fnum
     lens.match_materials()
     lens.set_fnum(args["fnum"])
+    lens.write_lens_json(f"{result_dir}/curriculum_final.json")
 
     # To obtain optimal optical performance, we typically need additional training iterations. This code uses strong lens design constraints with small learning rates, making optimization slow but steadily improving optical performance. For demonstration purposes, here we only train for 3000 steps.
+    lens = GeoLens(filename=f"{result_dir}/curriculum_final.json")
     lens.optimize(
         lrs=[float(lr) * 0.1 for lr in args["lrs"]],
         decay=float(args["decay"]),
@@ -262,7 +257,7 @@ if __name__ == "__main__":
         result_dir=f"{args['result_dir']}/fine-tune",
     )
 
-    # =====> 3. Analyze final result
+    # Analyze final result
     lens.prune_surf(expand_factor=0.05)
     lens.post_computation()
 
@@ -272,5 +267,5 @@ if __name__ == "__main__":
     lens.write_lens_json(f"{result_dir}/final_lens.json")
     lens.analysis(save_name=f"{result_dir}/final_lens")
 
-    # =====> 4. Create video
+    # Create video
     create_video_from_images(f"{result_dir}", f"{result_dir}/autolens.mp4", fps=10)

@@ -4,6 +4,10 @@ Thank you for your interest in contributing to DeepLens!
 
 All contributors are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
 
+## Contributor License Agreement (CLA)
+
+All pull requests to the DeepLens project require contributors to sign a Contributor License Agreement (CLA). This process is automated through [CLA Assistant](https://cla-assistant.io/), which will prompt you to sign the CLA when you submit your first pull request. You can review the [DeepLens-CLA](https://gist.github.com/singer-yang/b2e4214a12a220899ed682d9c24f575b).
+
 ## How to Contribute
 
 We welcome contributions in various forms, including but not limited to:

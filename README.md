@@ -2,6 +2,12 @@
     <img src="assets/logo.png"/>
 </div>
 
+<p align="center">
+    <a href="https://deeplens.readthedocs.io/">Docs</a> •
+    <a href="https://github.com/singer-yang/DeepLens-tutorials">Tutorials</a> •
+    <a href="#community">Community</a>
+</p>
+
 **DeepLens** is a differentiable optical lens simulator. It is developed for (1) differentiable optical design, (2) end-to-end optics-vision co-design, and (3) photorealistic image simulation. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
 
 ## Mission
@@ -78,14 +84,19 @@ cd DeepLens
 
 Create a conda environment:
 ```
-conda env create -f environment.yml -n deeplens_env
+conda create -n deeplens_env python=3.12
+conda activate deeplens_env
+
+# Linux and Mac
+pip install torch torchvision
+# Windows
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+pip install -r requirements.txt
 ```
 or
 ```
-conda create --name deeplens_env python=3.9
-conda activate deeplens_env
-
-pip install -r requirements.txt
+conda env create -f environment.yml -n deeplens_env
 ```
 
 Run the demo code:
@@ -123,10 +134,6 @@ We welcome all contributions. To get started, please read our [Contributing Guid
 <a href="https://github.com/singer-yang/DeepLens/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=singer-yang/DeepLens" />
 </a>
-
-## License
-
-DeepLens is released under the [Creative Commons Attribution-NonCommercial 4.0 International License](./LICENSE). This means the project can be used for non-commercial purposes with attribution. 
 
 ## Citation
 

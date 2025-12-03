@@ -1,5 +1,10 @@
 import torch
+import torch.nn as nn
 
+
+# ================================
+# Autograd Function
+# ================================
 
 class DiffFloat(torch.autograd.Function):
     """Convert double precision tensor to float precision with gradient calculation.
@@ -22,3 +27,4 @@ class DiffFloat(torch.autograd.Function):
 
 def diff_float(input):
     return DiffFloat.apply(input)
+

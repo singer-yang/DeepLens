@@ -56,10 +56,13 @@ Access key lens properties:
 
 .. code-block:: python
 
+    import math
     print(f"Focal length: {lens.foclen:.2f} mm")
     print(f"F-number: {lens.fnum:.2f}")
-    print(f"Entrance pupil diameter: {lens.enpd:.2f} mm")
-    print(f"Field of view: {lens.hfov:.2f} degrees")
+    # Compute entrance pupil diameter from pupil parameters
+    _, entr_r = lens.get_entrance_pupil()
+    print(f"Entrance pupil diameter: {2 * entr_r:.2f} mm")
+    print(f"Horizontal FoV: {math.degrees(lens.hfov):.1f} deg")
     print(f"Number of surfaces: {len(lens.surfaces)}")
 
 Visualization
@@ -69,11 +72,11 @@ Visualize the lens system:
 
 .. code-block:: python
 
-    # 2D cross-section with ray tracing
-    lens.plot_setup2D(M=10, plot_rays=True)
-    
-    # 3D visualization
-    lens.plot_setup3D()
+    # 2D layout with ray tracing
+    lens.draw_layout(filename="layout.png", depth=float("inf"))
+
+    # 3D visualization (saved to directory)
+    lens.draw_lens_3d(save_dir="./vis3d")
 
 Tutorial 2: Ray Tracing
 -----------------------
@@ -85,23 +88,17 @@ Different ways to create rays:
 
 .. code-block:: python
 
-    # Parallel rays (for on-axis analysis)
-    ray = lens.sample_parallel_2D(R=5.0, M=256)
-    
-    # Point source rays (for PSF calculation)
-    ray = lens.sample_point_source(
-        depth=1000.0,  # Distance from lens
-        M=256,         # Number of rays
-        R=lens.entrance_pupilr
-    )
-    
-    # Field-dependent rays
-    ray = lens.sample_from_points(
-        depth=1000.0,
-        M=256,
-        spp=100,
-        field=[0.0, 0.7]  # Normalized field coordinates
-    )
+    # 2D parallel rays (for layout/on-axis analysis)
+    ray = lens.sample_parallel_2D(fov=0.0, num_rays=11, plane="sagittal")
+
+    # 3D parallel rays (for geometric analysis)
+    ray = lens.sample_parallel(fov_x=0.0, fov_y=0.0, num_rays=1024)
+
+    # Point source rays (object at 1 m; object-space depths are negative)
+    ray = lens.sample_point_source(fov_x=0.0, fov_y=0.0, depth=-1000.0, num_rays=2048)
+
+    # Rays from absolute 3D points in object space
+    ray = lens.sample_from_points(points=[[0.0, 0.0, -10000.0]], num_rays=2048)
 
 Ray Tracing
 ^^^^^^^^^^^
@@ -110,12 +107,13 @@ Trace rays through the lens:
 
 .. code-block:: python
 
-    # Forward ray tracing
-    ray_out = lens.trace(ray)
-    
+    # Trace (returns output rays and optional intersection records)
+    ray_out, _ = lens.trace(ray)
+
     # Check which rays reached the sensor
-    valid_rays = ray_out.ra > 0
-    print(f"Valid rays: {valid_rays.sum().item()} / {ray.o.shape[0]}")
+    num_valid = int(ray_out.valid.sum().item())
+    num_total = ray_out.valid.numel()
+    print(f"Valid rays: {num_valid} / {num_total}")
 
 Tutorial 3: Point Spread Function (PSF)
 ----------------------------------------
@@ -125,15 +123,16 @@ Basic PSF Calculation
 
 .. code-block:: python
 
-    # Calculate PSF at infinity focus
-    psf = lens.psf(
-        depth=1e4,
-        spp=2048,
-        method='wave'  # or 'ray' for geometric PSF
-    )
-    
+    import torch
+    import matplotlib.pyplot as plt
+
+    # Single-point PSF at 10 m, centered field (normalized x=y=0)
+    psf = lens.psf(points=torch.tensor([0.0, 0.0, -10000.0]), ks=51, spp=2048)
+
     # Visualize
-    lens.plot_psf(psf)
+    plt.imshow(psf.cpu(), cmap="inferno")
+    plt.axis("off")
+    plt.show()
 
 PSF Across the Field
 ^^^^^^^^^^^^^^^^^^^^
@@ -142,14 +141,9 @@ Calculate PSF map across different field positions:
 
 .. code-block:: python
 
-    # PSF map calculation
-    psf_map = lens.psf_map(
-        depth=1000.0,
-        spp=1024
-    )
-    
-    # Visualize PSF map
-    lens.plot_psf_map(psf_map)
+    # Compute and save PSF map across field
+    psf_map = lens.psf_map(depth=-10000.0, grid=(7, 7), ks=51, spp=1024)
+    lens.draw_psf_map(grid=(7, 7), ks=51, depth=-10000.0, save_name="psf_map.png")
 
 Depth-Varying PSF
 ^^^^^^^^^^^^^^^^^
@@ -160,13 +154,13 @@ Analyze defocus effects:
 
     import matplotlib.pyplot as plt
     
-    depths = [500, 1000, 2000, 5000, 10000]
+    depths = [-5000, -10000, -20000]
     
     fig, axes = plt.subplots(1, len(depths), figsize=(15, 3))
     for i, depth in enumerate(depths):
-        psf = lens.psf(depth=depth, spp=1024)
-        axes[i].imshow(psf[0, 0].cpu())
-        axes[i].set_title(f'{depth} mm')
+        psf = lens.psf(points=torch.tensor([0.0, 0.0, depth]), ks=51, spp=1024)
+        axes[i].imshow(psf.cpu(), cmap="inferno")
+        axes[i].set_title(f'{abs(depth)} mm')
         axes[i].axis('off')
     plt.show()
 
@@ -186,12 +180,11 @@ Basic Image Rendering
     img = Image.open('./datasets/bird.png')
     img_tensor = transforms.ToTensor()(img).unsqueeze(0).cuda()
     
-    # Render through lens
-    img_rendered = lens.render(
-        img_tensor,
-        depth=1000.0,
-        spp=256
-    )
+    # Match sensor resolution to image for full-frame rendering
+    lens.set_sensor_res(sensor_res=(img_tensor.shape[-1], img_tensor.shape[-2]))
+
+    # Render through lens (ray tracing)
+    img_rendered = lens.render(img_tensor, depth=-10000.0, method="ray_tracing", spp=256)
     
     # Save result
     save_image(img_rendered, 'output.png')
@@ -210,11 +203,11 @@ Render scenes with depth variation:
     rgb_tensor = transforms.ToTensor()(img_rgb).unsqueeze(0).cuda()
     depth_map = transforms.ToTensor()(img_depth).unsqueeze(0).cuda()
     
-    # Scale depth appropriately (e.g., to millimeters)
-    depth_map = depth_map * 5000 + 500  # 500mm to 5500mm
-    
-    # Render with depth
-    img_rendered = lens.render_depth(rgb_tensor, depth_map, spp=256)
+    # Scale depth to millimeters and use negative sign for object space
+    depth_map = - (depth_map * 5000 + 500)  # 500mm to 5500mm -> -[500, 5500] mm
+
+    # Render with depth using PSF interpolation
+    img_rendered = lens.render_rgbd(rgb_tensor, depth_map, method="psf_map", psf_grid=(10, 10), psf_ks=51)
     
     save_image(img_rendered, 'depth_rendered.png')
 
@@ -226,48 +219,28 @@ Basic Optimization Setup
 
 .. code-block:: python
 
-    import torch.optim as optim
-    
-    # Set up optimization
-    lens.set_optimizer_params({
-        'radius': True,      # Optimize surface radii
-        'thickness': True,   # Optimize thicknesses
-        'material': False,   # Keep materials fixed
-        'conic': True,       # Optimize conic constants
-        'ai': True          # Optimize aspheric coefficients
-    })
-    
-    # Create optimizer
-    optimizer = optim.Adam(lens.parameters(), lr=0.01)
+    # Get optimizer for lens parameters
+    optimizer = lens.get_optimizer(lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.01)
 
 Optimization Loop
 ^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from deeplens.optics import SpotLoss
-    
-    loss_fn = SpotLoss()
-    
     for iteration in range(1000):
         optimizer.zero_grad()
-        
-        # Sample rays
-        ray = lens.sample_point_source(depth=1e4, M=256)
-        
-        # Trace rays
-        ray_out = lens.trace(ray)
-        
-        # Calculate loss
-        loss = loss_fn(ray_out)
-        
-        # Add constraints
-        loss += lens.loss_constraint()
-        
+
+        # RMS spot error across field (geometric objective)
+        loss = lens.loss_rms(num_grid=9, depth=-10000.0, num_rays=2048)
+
+        # Regularization for physical feasibility (spacing, angles, thickness)
+        loss_reg, _ = lens.loss_reg()
+        loss = loss + 0.05 * loss_reg
+
         # Backpropagation
         loss.backward()
         optimizer.step()
-        
+
         if iteration % 100 == 0:
             print(f"Iteration {iteration}, Loss: {loss.item():.6f}")
 
@@ -281,22 +254,21 @@ Fast PSF prediction using neural networks:
 
 .. code-block:: python
 
+    import torch
     from deeplens import PSFNetLens
-    
-    # Load pre-trained model
+
+    # Initialize and load pretrained PSF network
     lens = PSFNetLens(
-        ckpt_path='./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth'
+        lens_path='./datasets/lenses/camera/ef50mm_f1.8.json',
+        sensor_res=(3000, 3000)
     )
-    
-    # Fast PSF calculation
-    psf = lens.psf(
-        depth=1000.0,
-        field=[0.0, 0.5],
-        wvln=0.589
-    )
-    
-    # Much faster than geometric ray tracing!
-    img_rendered = lens.render(img_tensor, depth=1000.0)
+    lens.load_net('./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth')
+
+    # Fast PSF calculation (RGB PSF)
+    psf_rgb = lens.psf_rgb(points=torch.tensor([[0.0, 0.0, -10000.0]]), ks=64)
+
+    # Rendering via PSF map using the surrogate
+    img_rendered = lens.render(img_tensor, depth=-10000.0, method='psf_map')
 
 Training a Surrogate Model
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -315,20 +287,13 @@ Creating a Camera
 
 .. code-block:: python
 
-    from deeplens import Camera, GeoLens
-    from deeplens.sensor import RGBSensor
-    
-    # Create lens
-    lens = GeoLens(filename='./datasets/lenses/camera/ef50mm_f1.8.json')
-    
-    # Create sensor
-    sensor = RGBSensor(
-        resolution=(1920, 1080),
-        pixel_size=4.0e-3  # 4 micrometers
+    from deeplens import Camera
+
+    camera = Camera(
+        lens_file='./datasets/lenses/camera/ef50mm_f1.8.json',
+        sensor_file='./datasets/sensors/canon_r6.json',
+        device='cuda'
     )
-    
-    # Create camera
-    camera = Camera(lens=lens, sensor=sensor)
 
 Image Signal Processing
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -337,18 +302,14 @@ Apply ISP pipeline:
 
 .. code-block:: python
 
-    from deeplens.sensor import ISP
-    
+    from deeplens.sensor.isp import InvertibleISP
+
     # Create ISP
-    isp = ISP(
-        demosaic='bilinear',
-        white_balance=True,
-        gamma_correction=True
-    )
-    
-    # Process raw sensor data
-    raw_data = camera.capture_raw(scene, depth)
-    processed_img = isp(raw_data)
+    isp = InvertibleISP(bit=10, black_level=64, bayer_pattern='rggb')
+
+    # Process RAW Bayer data to RGB
+    # raw_bayer = ...  # shape (B, 1, H, W)
+    # rgb = isp(raw_bayer)
 
 Configuration Files
 -------------------

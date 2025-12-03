@@ -1,6 +1,3 @@
-DeepLens Documentation
-======================
-
 .. image:: ../assets/logo.png
    :align: center
    :alt: DeepLens Logo
@@ -12,6 +9,9 @@ DeepLens Documentation
 3. Photorealistic image simulation
 
 DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
+
+.. note::
+   This documentation is still under development. Some details may contain mistakes or be incomplete. We appreciate your patience and welcome any feedback or corrections.
 
 Mission
 -------
@@ -43,6 +43,7 @@ Contents
    :maxdepth: 2
    :caption: User Guide
 
+   user_guide/architecture
    user_guide/lens_systems
    user_guide/optical_elements
    user_guide/sensors
@@ -53,6 +54,7 @@ Contents
    :caption: API Reference
 
    api/lens
+   api/geolens
    api/optics
    api/sensor
    api/network

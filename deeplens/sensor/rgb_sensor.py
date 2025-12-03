@@ -1,10 +1,3 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
-#
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
-
 """RGB sensor with ISP. It is used to convert between RAW bayer image and RGB image."""
 
 import json
@@ -273,7 +266,8 @@ class RGBSensor(Sensor):
         bayer[:, 0, 1 : 2 * H : 2, 1 : 2 * W : 2] = rggb[:, 3, :, :]
 
         # Data range [0, 1] -> [0, 2**bit-1]
-        bayer = torch.round(bayer * (2**bit - 1 - black_level) + black_level)
+        # bayer = torch.round(bayer * (2**bit - 1 - black_level) + black_level)
+        bayer = bayer * (2**bit - 1 - black_level) + black_level
 
         if single_image:
             bayer = bayer.squeeze(0)

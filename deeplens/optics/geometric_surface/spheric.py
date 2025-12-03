@@ -1,3 +1,9 @@
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
+#
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
+
 """Spheric surface."""
 
 import numpy as np
@@ -34,8 +40,11 @@ class Spheric(Surface):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        if "roc" in surf_dict and surf_dict["roc"] != 0:
-            c = 1 / surf_dict["roc"]
+        if "roc" in surf_dict:
+            if surf_dict["roc"] != 0:
+                c = 1 / surf_dict["roc"]
+            else:
+                c = 0.0
         else:
             c = surf_dict["c"]
 

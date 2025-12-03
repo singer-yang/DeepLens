@@ -6,15 +6,40 @@ Prerequisites
 
 DeepLens requires:
 
-* Python 3.9 or later
+* Python 3.10 or later
 * PyTorch with CUDA support (recommended for GPU acceleration)
 * Conda (optional, but recommended for environment management)
 
 Installation Methods
 --------------------
 
-Method 1: Using Conda (Recommended)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Quick Installation (Tested on Linux, macOS, and Windows)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Clone the repository::
+
+    git clone https://github.com/singer-yang/DeepLens
+    cd DeepLens
+
+Create a conda environment::
+
+    conda create -n deeplens_env python=3.10
+    conda activate deeplens_env
+
+Install PyTorch and dependencies:
+
+**For Linux and macOS**::
+
+    pip install torch torchvision
+    pip install -r requirements.txt
+
+**For Windows**::
+
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    pip install -r requirements.txt
+
+Alternative: Using Conda Environment File
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Clone the repository::
 
@@ -25,20 +50,6 @@ Create a conda environment using the provided environment file::
 
     conda env create -f environment.yml -n deeplens_env
     conda activate deeplens_env
-
-Method 2: Using pip
-^^^^^^^^^^^^^^^^^^^
-
-Clone the repository::
-
-    git clone https://github.com/singer-yang/DeepLens
-    cd DeepLens
-
-Create a virtual environment and install dependencies::
-
-    conda create --name deeplens_env python=3.9
-    conda activate deeplens_env
-    pip install -r requirements.txt
 
 Verify Installation
 -------------------

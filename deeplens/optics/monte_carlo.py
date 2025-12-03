@@ -1,9 +1,8 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
 #
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
 
 """Forward and backward Monte-Carlo integral functions."""
 
@@ -26,7 +25,12 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
     Returns:
         field: intensity or complex amplitude, shape [N, ks, ks]
     """
-    assert len(ray.o.shape) == 3, "Only support [N, spp, 3] shaped rays for now."
+    if len(ray.o.shape) == 2:
+        single_point = True
+        ray = ray.unsqueeze(0)
+    else:
+        single_point = False
+
     points = -ray.o[..., :2]  # shape [N, spp, 2]. flip points.
     valid = ray.valid  # shape [N, spp]
 
@@ -98,6 +102,10 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
 
         field = torch.stack(field, dim=0)  # shape [N, ks, ks]
 
+    if single_point:
+        field = field.squeeze(0)
+        ray = ray.squeeze(0)
+    
     return field
 
 

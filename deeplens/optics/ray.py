@@ -1,9 +1,8 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
 #
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
 
 """Optical ray class."""
 
@@ -17,8 +16,15 @@ from deeplens.basics import DEFAULT_WAVE, EPSILON, DeepObj
 
 class Ray(DeepObj):
     def __init__(self, o, d, wvln=DEFAULT_WAVE, coherent=False, device="cpu"):
-        """Optical ray class."""
+        """Initialize a ray object.
 
+        Args:
+            o (torch.Tensor): Ray origin, shape (*batch_size, num_rays, 3).
+            d (torch.Tensor): Ray direction, shape (*batch_size, num_rays, 3).
+            wvln (float or torch.Tensor): Ray wavelength, unit: [um]. If a tensor, shape must be (*batch_size, 1).
+            coherent (bool): Whether to use coherent ray tracing.
+            device (str): Device to store the ray.
+        """
         # Basic ray parameters
         self.o = o if torch.is_tensor(o) else torch.tensor(o)
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
@@ -52,7 +58,7 @@ class Ray(DeepObj):
         self.o = torch.where(valid_mask, new_o, self.o)
 
         if self.coherent:
-            if t.abs().max() > 100.0 and t.dtype != torch.float64:
+            if t.dtype != torch.float64:
                 raise Warning("Should use float64 in coherent ray tracing.")
             else:
                 new_opl = self.opl + n * t.unsqueeze(-1)
@@ -69,13 +75,13 @@ class Ray(DeepObj):
         return (self.o * self.valid.unsqueeze(-1)).sum(-2) / self.valid.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
-    
+
     def rms_error(self, center_ref=None):
         """Calculate the RMS error of the ray.
 
         Args:
             center_ref (torch.Tensor): Reference center of the ray, shape (..., 3). If None, use the centroid of the ray as reference.
-        
+
         Returns:
             torch.Tensor: average RMS error of the ray
         """
@@ -85,12 +91,12 @@ class Ray(DeepObj):
                 center_ref = self.centroid()
 
         center_ref = center_ref.unsqueeze(-2)
-        
+
         # Calculate RMS error for each region
-        rms_error = ((self.o[..., :2] - center_ref[..., :2])**2).sum(-1)
+        rms_error = ((self.o[..., :2] - center_ref[..., :2]) ** 2).sum(-1)
         rms_error = (rms_error * self.valid).sum(-1) / (self.valid.sum(-1) + EPSILON)
         rms_error = rms_error.sqrt()
-        
+
         # Average RMS error
         return rms_error.mean()
 
@@ -118,4 +124,20 @@ class Ray(DeepObj):
         self.opl = self.opl.squeeze(dim)
         self.obliq = self.obliq.squeeze(dim)
         self.is_forward = self.is_forward.squeeze(dim)
+        return self
+
+    def unsqueeze(self, dim=None):
+        """Unsqueeze the ray.
+
+        Args:
+            dim (int, optional): dimension to unsqueeze. Defaults to None.
+        """
+        self.o = self.o.unsqueeze(dim)
+        self.d = self.d.unsqueeze(dim)
+        self.wvln = self.wvln.unsqueeze(dim)
+        self.valid = self.valid.unsqueeze(dim)
+        self.en = self.en.unsqueeze(dim)
+        self.opl = self.opl.unsqueeze(dim)
+        self.obliq = self.obliq.unsqueeze(dim)
+        self.is_forward = self.is_forward.unsqueeze(dim)
         return self

@@ -26,7 +26,6 @@ Step 1: Setup
     import torch.optim as optim
     from deeplens import GeoLens
     from deeplens.network import UNet
-    from deeplens.sensor import RGBSensor, ISP
     from torch.utils.data import DataLoader
     
     # Create lens
@@ -35,23 +34,14 @@ Step 1: Setup
         device='cuda'
     )
     
-    # Enable lens optimization
-    lens.set_optimizer_params({
-        'radius': True,
-        'thickness': True,
-        'ai': True  # Aspheric coefficients
-    })
+    # Initialize constraints for optimization
+    lens.init_constraints()
     
     # Create reconstruction network
     network = UNet(
         in_channels=3,
-        out_channels=3,
-        base_channels=64
+        out_channels=3
     ).cuda()
-    
-    # Sensor and ISP
-    sensor = RGBSensor(resolution=(512, 512))
-    isp = ISP()
 
 Step 2: Data Loading
 ^^^^^^^^^^^^^^^^^^^^^
@@ -84,34 +74,38 @@ Step 3: Joint Optimization
 .. code-block:: python
 
     # Separate optimizers for lens and network
-    optimizer_lens = optim.Adam(lens.parameters(), lr=1e-3)
+    # Use lens.get_optimizer_params() to get properly configured lens parameters
+    lens_params = lens.get_optimizer_params(
+        lrs=[1e-4, 1e-4, 1e-2, 1e-4],  # [d, c, k, a]
+        decay=0.01
+    )
+    optimizer_lens = optim.Adam(lens_params)
     optimizer_net = optim.Adam(network.parameters(), lr=1e-4)
     
     # Loss functions
-    from deeplens.network import MSELoss, SSIMLoss
-    mse_loss = MSELoss()
+    from deeplens.network import SSIMLoss
     ssim_loss = SSIMLoss()
+    mse_loss = torch.nn.MSELoss()  # Use PyTorch's MSELoss
     
     # Training loop
+    from deeplens.basics import DEPTH, SPP_RENDER
     num_epochs = 100
-    depth = 1000.0  # Object distance
+    depth = DEPTH  # -20000.0 mm default
     
     for epoch in range(num_epochs):
         for batch_idx, (images, _) in enumerate(dataloader):
             images = images.cuda()
             
             # ===== Forward Pass =====
-            # 1. Render through lens
+            # 1. Render through lens using ray tracing
             images_degraded = lens.render(
                 images,
                 depth=depth,
-                spp=256
+                method='ray_tracing',  # Options: 'ray_tracing', 'psf_map', 'psf_patch'
+                spp=SPP_RENDER         # Samples per pixel (32 default)
             )
             
-            # 2. Sensor capture
-            # (Optional: simulate sensor effects)
-            
-            # 3. Reconstruct with network
+            # 2. Reconstruct with network
             images_restored = network(images_degraded)
             
             # ===== Loss Calculation =====
@@ -119,11 +113,11 @@ Step 3: Joint Optimization
             loss_img = mse_loss(images_restored, images)
             loss_img += 0.5 * (1.0 - ssim_loss(images_restored, images))
             
-            # Lens constraints
-            loss_constraint = lens.loss_constraint()
+            # Lens regularization constraints
+            loss_reg, loss_dict = lens.loss_reg()
             
             # Total loss
-            loss = loss_img + 0.1 * loss_constraint
+            loss = loss_img + 0.05 * loss_reg
             
             # ===== Backward Pass =====
             optimizer_lens.zero_grad()
@@ -137,15 +131,15 @@ Step 3: Joint Optimization
                 print(f"Epoch {epoch}, Batch {batch_idx}")
                 print(f"  Loss: {loss.item():.6f}")
                 print(f"  Image Loss: {loss_img.item():.6f}")
-                print(f"  Constraint: {loss_constraint.item():.6f}")
+                print(f"  Reg Loss: {loss_reg.item():.6f}")
         
         # Save checkpoint
         if epoch % 10 == 0:
             torch.save({
                 'epoch': epoch,
-                'lens_state': lens.state_dict(),
                 'network_state': network.state_dict(),
             }, f'checkpoint_epoch{epoch}.pth')
+            lens.write_lens_json(f'lens_epoch{epoch}.json')
 
 Step 4: Evaluation
 ^^^^^^^^^^^^^^^^^^
@@ -153,8 +147,8 @@ Step 4: Evaluation
 .. code-block:: python
 
     from deeplens.utils import batch_psnr, batch_ssim
+    from deeplens.basics import SPP_RENDER
     
-    lens.eval()
     network.eval()
     
     # Test dataset
@@ -171,8 +165,13 @@ Step 4: Evaluation
         for images, _ in test_loader:
             images = images.cuda()
             
-            # Forward
-            images_degraded = lens.render(images, depth=depth, spp=512)
+            # Forward (use higher spp for evaluation)
+            images_degraded = lens.render(
+                images, 
+                depth=depth, 
+                method='ray_tracing',
+                spp=64  # More samples for better quality
+            )
             images_restored = network(images_degraded)
             
             # Metrics
@@ -183,8 +182,8 @@ Step 4: Evaluation
             ssim_values.append(ssim)
     
     print(f"\\nTest Results:")
-    print(f"  Average PSNR: {torch.mean(torch.stack(psnr_values)):.2f} dB")
-    print(f"  Average SSIM: {torch.mean(torch.stack(ssim_values)):.4f}")
+    print(f"  Average PSNR: {sum(psnr_values)/len(psnr_values):.2f} dB")
+    print(f"  Average SSIM: {sum(ssim_values)/len(ssim_values):.4f}")
 
 Running the Example
 -------------------
@@ -243,13 +242,15 @@ Optimize lens for image classification accuracy:
 .. code-block:: python
 
     import torchvision.models as models
+    from deeplens.basics import DEPTH, SPP_RENDER
     
     # Pre-trained classifier
-    classifier = models.resnet18(pretrained=True).cuda()
+    classifier = models.resnet18(weights='IMAGENET1K_V1').cuda()
     classifier.eval()  # Freeze classifier
     
     # Optimize only lens
-    optimizer = optim.Adam(lens.parameters(), lr=1e-3)
+    lens_params = lens.get_optimizer_params(lrs=[1e-4, 1e-4, 0, 0])
+    optimizer = optim.Adam(lens_params)
     criterion = torch.nn.CrossEntropyLoss()
     
     for epoch in range(100):
@@ -257,11 +258,20 @@ Optimize lens for image classification accuracy:
             images, labels = images.cuda(), labels.cuda()
             
             # Render through lens
-            images_rendered = lens.render(images, depth=depth)
+            images_rendered = lens.render(
+                images, 
+                depth=DEPTH,
+                method='ray_tracing',
+                spp=SPP_RENDER
+            )
             
             # Classify
             outputs = classifier(images_rendered)
             loss = criterion(outputs, labels)
+            
+            # Add lens regularization
+            loss_reg, _ = lens.loss_reg()
+            loss = loss + 0.01 * loss_reg
             
             # Optimize lens
             optimizer.zero_grad()
@@ -312,10 +322,12 @@ Alternate between lens and network optimization:
 
 .. code-block:: python
 
+    from deeplens.basics import DEPTH, SPP_RENDER
+    
     for epoch in range(100):
         # Phase 1: Optimize network (freeze lens)
         for _ in range(5):
-            images_degraded = lens.render(images, depth=depth)
+            images_degraded = lens.render(images, depth=DEPTH, method='ray_tracing', spp=SPP_RENDER)
             images_restored = network(images_degraded)
             loss = mse_loss(images_restored, images)
             
@@ -325,9 +337,13 @@ Alternate between lens and network optimization:
         
         # Phase 2: Optimize lens (freeze network)
         for _ in range(1):
-            images_degraded = lens.render(images, depth=depth)
+            images_degraded = lens.render(images, depth=DEPTH, method='ray_tracing', spp=SPP_RENDER)
             images_restored = network(images_degraded)
             loss = mse_loss(images_restored, images)
+            
+            # Add lens regularization
+            loss_reg, _ = lens.loss_reg()
+            loss = loss + 0.05 * loss_reg
             
             optimizer_lens.zero_grad()
             loss.backward()
@@ -340,10 +356,13 @@ Train across multiple object distances:
 
 .. code-block:: python
 
-    depths = [500, 1000, 2000, 5000]
+    from deeplens.basics import SPP_RENDER
     
+    depths = [-500.0, -1000.0, -2000.0, -5000.0]  # Negative values (object in front of lens)
+    
+    loss = 0.0
     for depth in depths:
-        images_degraded = lens.render(images, depth=depth)
+        images_degraded = lens.render(images, depth=depth, method='ray_tracing', spp=SPP_RENDER)
         images_restored = network(images_degraded)
         loss += mse_loss(images_restored, images)
 

@@ -9,63 +9,51 @@ Sensor Classes
 RGBSensor
 ^^^^^^^^^
 
-.. py:class:: deeplens.sensor.RGBSensor(resolution=(1920, 1080), pixel_size=4.0e-3, bit_depth=12, qe=0.6, dark_current=0.01, read_noise=2.0, full_well=10000, enable_shot_noise=True, enable_dark_noise=True, enable_read_noise=True, device='cuda')
+.. py:class:: deeplens.sensor.RGBSensor(sensor_file)
 
-   RGB sensor with Bayer color filter array.
+   RGB sensor with Bayer color filter array driven by a configuration file.
 
-   :param resolution: Sensor resolution (W, H) in pixels
-   :param pixel_size: Pixel size in mm
-   :param bit_depth: ADC bit depth
-   :param qe: Quantum efficiency (0-1)
-   :param dark_current: Dark current in e-/s
-   :param read_noise: Read noise in e-
-   :param full_well: Full well capacity in e-
-   :param enable_shot_noise: Enable Poisson noise
-   :param enable_dark_noise: Enable dark current noise
-   :param enable_read_noise: Enable read noise
-   :param device: Device
+   :param sensor_file: Path to a JSON file describing sensor parameters
 
-   **Attributes:**
+   The constructor reads key properties from ``sensor_file`` (bit depth, black level,
+   Bayer pattern, noise statistics, optional white balance/color matrix/gamma, and
+   optional spectral responses). Internally it builds an :class:`deeplens.sensor.isp.InvertibleISP`.
 
-   .. py:attribute:: resolution
+   **Key attributes:**
 
-      Sensor resolution (width, height) in pixels
+   - ``size``: Physical sensor size (W, H) in mm
+   - ``res``: Sensor resolution (W, H) in pixels
+   - ``bit``: ADC bit depth
+   - ``black_level``: Black level offset in DN
+   - ``bayer_pattern``: Bayer pattern string (e.g., ``"rggb"``)
+   - ``iso_base``, ``read_noise_std``, ``shot_noise_std_alpha``, ``shot_noise_std_beta``
+   - ``isp``: :class:`deeplens.sensor.isp.InvertibleISP`
 
-   .. py:attribute:: pixel_size
+   **Selected methods:**
 
-      Physical pixel size in mm
+   .. py:method:: forward(img_nbit, iso)
 
-   .. py:attribute:: sensor_size
+      Simulate sensor noise and run ISP.
 
-      Physical sensor size (W, H) in mm
+      :param img_nbit: RAW RGB or Bayer-space tensor [B, 3, H, W] in n-bit DN
+      :param iso: ISO value(s) [B]
+      :return: RGB image [B, 3, H, W] in [0, 1]
 
-   .. py:attribute:: diagonal
+   .. py:method:: unprocess(image, in_type='rgb')
 
-      Sensor diagonal in mm
+      Convert RGB to unbalanced RAW RGB (inverse gamma/CCM/AWB).
 
-   **Methods:**
+   .. py:method:: linrgb2bayer(img_linrgb)
 
-   .. py:method:: capture(irradiance, exposure_time=0.01, iso=100)
+      Convert linear RGB [0, 1] to n-bit Bayer [~black_level, 2**bit - 1].
 
-      Capture image from irradiance.
+   .. py:method:: process2rgb(image, in_type='rggb')
 
-      :param irradiance: Irradiance [W/m²] tensor [H, W, 3]
-      :param exposure_time: Exposure time in seconds
-      :param iso: ISO sensitivity
-      :return: Raw sensor data [H, W] with Bayer pattern
+      Process Bayer or RGGB to RGB using the internal ISP.
 
-   .. py:method:: set_bayer_pattern(pattern='RGGB')
+   .. py:method:: bayer2rggb(bayer_nbit) / rggb2bayer(rggb)
 
-      Set Bayer pattern.
-
-      :param pattern: 'RGGB', 'BGGR', 'GRBG', or 'GBRG'
-
-   .. py:method:: get_sensitivity(iso=100)
-
-      Get sensor sensitivity.
-
-      :param iso: ISO value
-      :return: Sensitivity in DN/(W/m²·s)
+      Pack/unpack between Bayer [B,1,H,W] and RGGB [B,4,H/2,W/2].
 
 MonoSensor
 ^^^^^^^^^^
@@ -402,35 +390,30 @@ Basic Sensor Usage
 
     from deeplens.sensor import RGBSensor
     
-    # Create sensor
-    sensor = RGBSensor(
-        resolution=(1920, 1080),
-        pixel_size=4.0e-3,
-        device='cuda'
-    )
+    # Create sensor from configuration file
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
     
-    # Capture image
-    irradiance = get_irradiance()  # From lens system
-    raw = sensor.capture(irradiance, exposure_time=0.01, iso=100)
+    # Process raw image with noise and ISP
+    # img_nbit: raw RGB tensor [B, 3, H, W] in n-bit DN range
+    img_rgb = sensor.forward(img_nbit, iso=100)
 
 Complete ISP Pipeline
 ^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    from deeplens.sensor import RGBSensor, ISP
+    from deeplens.sensor import RGBSensor
     
-    # Create sensor and ISP
-    sensor = RGBSensor(resolution=(1920, 1080))
-    isp = ISP(
-        demosaic_method='malvar',
-        white_balance=True,
-        gamma_correction=True
-    )
+    # Create sensor with built-in ISP from config file
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
     
-    # Capture and process
-    raw = sensor.capture(irradiance, exposure_time=0.01)
-    rgb = isp(raw)
+    # The sensor includes an InvertibleISP pipeline
+    # Forward: raw -> noise -> ISP -> RGB
+    img_rgb = sensor.forward(img_nbit, iso=100)
+    
+    # Reverse: RGB -> unprocess -> linear RGB -> raw
+    img_raw = sensor.unprocess(img_rgb, in_type='rgb')
+    bayer = sensor.linrgb2bayer(img_raw)
 
 Custom ISP Pipeline
 ^^^^^^^^^^^^^^^^^^^
@@ -485,22 +468,17 @@ Noise Simulation
 
 .. code-block:: python
 
-    # Enable all noise sources
-    sensor = RGBSensor(
-        resolution=(1920, 1080),
-        enable_shot_noise=True,
-        enable_dark_noise=True,
-        enable_read_noise=True
-    )
+    from deeplens.sensor import RGBSensor
     
-    # Capture with noise
-    raw_noisy = sensor.capture(irradiance, exposure_time=0.01)
+    # Create sensor from config file
+    # Noise parameters are specified in the config JSON:
+    # - iso_base, read_noise_std, shot_noise_std_alpha, shot_noise_std_beta
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
     
-    # Capture without noise
-    sensor.enable_shot_noise = False
-    sensor.enable_dark_noise = False
-    sensor.enable_read_noise = False
-    raw_clean = sensor.capture(irradiance, exposure_time=0.01)
+    # Forward pass applies noise based on ISO setting
+    # Higher ISO = more noise amplification
+    img_noisy_low_iso = sensor.forward(img_nbit, iso=100)
+    img_noisy_high_iso = sensor.forward(img_nbit, iso=3200)
 
 White Balance Estimation
 ^^^^^^^^^^^^^^^^^^^^^^^^^

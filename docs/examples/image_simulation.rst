@@ -26,6 +26,7 @@ Single Depth
     import torchvision.transforms as T
     from torchvision.utils import save_image
     from deeplens import GeoLens
+    from deeplens.basics import DEPTH, SPP_RENDER
     
     # Load lens
     lens = GeoLens(
@@ -33,16 +34,20 @@ Single Depth
         device='cuda'
     )
     
-    # Load image
+    # Load image (must match sensor resolution for ray_tracing method)
     img = Image.open('./datasets/bird.png')
     img_tensor = T.ToTensor()(img).unsqueeze(0).cuda()
     
+    # Resize to match sensor resolution
+    img_tensor = T.functional.resize(img_tensor, lens.sensor_res[::-1])
+    
     # Render through lens
+    # Methods: 'ray_tracing' (accurate), 'psf_map' (efficient), 'psf_patch' (single PSF)
     img_rendered = lens.render(
         img_tensor,
-        depth=1000.0,  # 1 meter
-        spp=512,       # Samples per pixel
-        method='fft'   # FFT-based convolution
+        depth=DEPTH,           # Object depth (-20000.0 mm default)
+        method='ray_tracing',  # Ray tracing rendering
+        spp=SPP_RENDER         # Samples per pixel (32 default)
     )
     
     # Save result
@@ -55,16 +60,24 @@ Render objects at different distances:
 
 .. code-block:: python
 
-    depths = [500, 1000, 2000, 5000, 10000]
+    from deeplens.basics import SPP_RENDER
+    
+    # Depths are negative (object in front of lens)
+    depths = [-500, -1000, -2000, -5000, -10000]
     
     import matplotlib.pyplot as plt
     
     fig, axes = plt.subplots(1, len(depths), figsize=(20, 4))
     
     for i, depth in enumerate(depths):
-        img_rendered = lens.render(img_tensor, depth=depth, spp=512)
-        axes[i].imshow(img_rendered[0].permute(1, 2, 0).cpu())
-        axes[i].set_title(f'{depth} mm')
+        img_rendered = lens.render(
+            img_tensor, 
+            depth=depth, 
+            method='ray_tracing',
+            spp=SPP_RENDER
+        )
+        axes[i].imshow(img_rendered[0].permute(1, 2, 0).cpu().clamp(0, 1))
+        axes[i].set_title(f'{abs(depth)} mm')
         axes[i].axis('off')
     
     plt.tight_layout()
@@ -73,72 +86,52 @@ Render objects at different distances:
 Depth Map Rendering
 -------------------
 
-Render scenes with varying depth (extended depth of field):
+For scenes with varying depth, use PSF map convolution:
 
 .. code-block:: python
 
     from PIL import Image
     import torch
     import torchvision.transforms as T
+    from deeplens.basics import PSF_KS, SPP_PSF
     
-    # Load RGB and depth map
+    # Load RGB image
     img_rgb = Image.open('./datasets/edof/rgb.png')
-    img_depth = Image.open('./datasets/edof/depth.png')
-    
     rgb_tensor = T.ToTensor()(img_rgb).unsqueeze(0).cuda()
-    depth_tensor = T.ToTensor()(img_depth).unsqueeze(0).cuda()
     
-    # Scale depth to physical units (mm)
-    # Assume depth map is normalized [0, 1] → [500mm, 5000mm]
-    depth_mm = depth_tensor * 4500 + 500
+    # Resize to sensor resolution
+    rgb_tensor = T.functional.resize(rgb_tensor, lens.sensor_res[::-1])
     
-    # Render with spatially-varying depth
-    img_rendered = lens.render_depth(
+    # Use PSF map for spatially-varying blur
+    # PSF map renders with field-dependent PSFs across the image
+    img_rendered = lens.render(
         rgb_tensor,
-        depth_mm,
-        spp=512
+        depth=-2000.0,       # Object depth
+        method='psf_map',    # Use PSF map convolution
+        psf_grid=(10, 10),   # Grid of PSFs across the field
+        psf_ks=PSF_KS        # PSF kernel size (128 default)
     )
     
-    save_image(img_rendered, 'depth_rendered.png')
+    save_image(img_rendered, 'psf_map_rendered.png')
 
-Implementation
-^^^^^^^^^^^^^^
-
-The depth-aware rendering:
+PSF Map vs Ray Tracing
+^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-    def render_depth(self, img, depth_map, spp=256, tile_size=64):
-        """Render image with spatially-varying depth.
-        
-        Args:
-            img: RGB image [B, 3, H, W]
-            depth_map: Depth map [B, 1, H, W] in mm
-            spp: Samples per pixel
-            tile_size: Tile size for memory efficiency
-        """
-        B, C, H, W = img.shape
-        output = torch.zeros_like(img)
-        
-        # Get unique depth values (quantize for efficiency)
-        depths_unique = depth_map.unique()
-        
-        # Render each depth
-        psf_cache = {}
-        for depth in depths_unique:
-            if depth.item() not in psf_cache:
-                psf = self.psf(depth=depth.item(), spp=spp)
-                psf_cache[depth.item()] = psf
-        
-        # Composite based on depth
-        for depth in depths_unique:
-            mask = (depth_map == depth).float()
-            if mask.sum() > 0:
-                psf = psf_cache[depth.item()]
-                img_blurred = self.convolve_with_psf(img, psf)
-                output += img_blurred * mask
-        
-        return output
+    # Two main rendering methods:
+    
+    # 1. ray_tracing: Accurate but slower
+    #    - Traces rays from sensor through lens to object
+    #    - Handles all aberrations and vignetting
+    #    - Best for evaluation
+    img_rt = lens.render(img, depth=-2000.0, method='ray_tracing', spp=64)
+    
+    # 2. psf_map: Efficient for training
+    #    - Computes PSF at grid points and convolves
+    #    - Field-dependent blur approximation
+    #    - Differentiable and memory-efficient
+    img_psf = lens.render(img, depth=-2000.0, method='psf_map', psf_grid=(7, 7))
 
 High-Quality Rendering
 ----------------------
@@ -146,90 +139,97 @@ High-Quality Rendering
 Wave Optics
 ^^^^^^^^^^^
 
-For accurate diffraction simulation:
+For accurate diffraction simulation, use coherent PSF:
 
 .. code-block:: python
 
-    # Use wave optics PSF
-    img_rendered = lens.render(
-        img_tensor,
-        depth=1000,
-        spp=2048,
-        method='fft',
-        psf_method='wave'  # Wave optics (default)
+    import torch
+    from deeplens.basics import PSF_KS, SPP_COHERENT
+    
+    # For wave optics PSF, use psf_coherent() method
+    # Requires double precision for accurate phase computation
+    torch.set_default_dtype(torch.float64)
+    lens.astype(torch.float64)
+    
+    # Compute coherent (wave optics) PSF
+    point = torch.tensor([0.0, 0.0, -10000.0])
+    psf_wave = lens.psf_coherent(
+        point=point,
+        ks=PSF_KS,
+        wvln=0.550,
+        spp=SPP_COHERENT  # ~16.7M rays for accurate phase
     )
 
-This accounts for:
+Wave optics accounts for:
 
 * Diffraction at aperture
 * Interference effects
-* Wavelength-dependent PSF
+* Wavelength-dependent PSF structure
 
 Multi-Wavelength
 ^^^^^^^^^^^^^^^^
 
-Separate rendering for each wavelength:
+The render() method automatically handles RGB wavelengths:
 
 .. code-block:: python
 
-    wavelengths = [0.486, 0.550, 0.656]  # Blue, green, red
-    channels = []
+    from deeplens.basics import WAVE_RGB, SPP_RENDER
     
-    for i, wvln in enumerate(wavelengths):
-        # Render single channel
-        channel = lens.render(
-            img_tensor[:, i:i+1],  # Single channel
-            depth=1000,
-            spp=1024,
-            wavelength=wvln
-        )
-        channels.append(channel)
+    # render() uses WAVE_RGB = [0.656, 0.588, 0.486] um for R, G, B channels
+    # Each channel is rendered with its corresponding wavelength
+    img_rendered = lens.render(
+        img_tensor,  # RGB image [B, 3, H, W]
+        depth=-2000.0,
+        method='ray_tracing',
+        spp=SPP_RENDER
+    )
     
-    # Combine RGB channels
-    img_rendered = torch.cat(channels, dim=1)
-    save_image(img_rendered, 'chromatic.png')
+    # For custom wavelength PSFs, compute directly:
+    import torch
+    from deeplens.basics import PSF_KS, SPP_PSF
+    
+    wavelengths = WAVE_RGB  # [0.656, 0.588, 0.486]
+    point = torch.tensor([0.0, 0.0, -2000.0])
+    
+    psfs = []
+    for wvln in wavelengths:
+        psf = lens.psf(points=point, ks=PSF_KS, wvln=wvln, spp=SPP_PSF)
+        psfs.append(psf)
+    
+    # Stack to get RGB PSF [3, ks, ks]
+    psf_rgb = torch.stack(psfs, dim=0)
 
 Field-Dependent PSF
 ^^^^^^^^^^^^^^^^^^^
 
-Use spatially-varying PSF across the image:
+Use PSF map for spatially-varying blur:
 
 .. code-block:: python
 
-    def render_field_dependent(img, depth, num_tiles=5):
-        """Render with field-dependent PSF."""
-        B, C, H, W = img.shape
-        output = torch.zeros_like(img)
-        
-        # Divide image into tiles
-        tile_h = H // num_tiles
-        tile_w = W // num_tiles
-        
-        for i in range(num_tiles):
-            for j in range(num_tiles):
-                # Calculate field position for this tile
-                field_y = (i - num_tiles/2) / (num_tiles/2)
-                field_x = (j - num_tiles/2) / (num_tiles/2)
-                
-                # Get PSF for this field
-                psf = lens.psf(
-                    depth=depth,
-                    field=[field_x, field_y],
-                    spp=1024
-                )
-                
-                # Extract tile
-                y1, y2 = i * tile_h, (i+1) * tile_h
-                x1, x2 = j * tile_w, (j+1) * tile_w
-                tile = img[:, :, y1:y2, x1:x2]
-                
-                # Render tile
-                tile_rendered = convolve_with_psf(tile, psf)
-                output[:, :, y1:y2, x1:x2] = tile_rendered
-        
-        return output
+    from deeplens.basics import PSF_KS, SPP_PSF, DEPTH
+    import torch
     
-    img_rendered = render_field_dependent(img_tensor, depth=1000)
+    # Method 1: Use render() with psf_map method (recommended)
+    img_rendered = lens.render(
+        img_tensor,
+        depth=DEPTH,
+        method='psf_map',
+        psf_grid=(7, 7),    # 7x7 grid of PSFs
+        psf_ks=PSF_KS       # PSF kernel size
+    )
+    
+    # Method 2: Compute PSF map directly for visualization
+    psf_map = lens.psf_map(
+        depth=DEPTH,
+        grid=(7, 7),        # Grid size (grid_w, grid_h)
+        ks=PSF_KS,
+        spp=SPP_PSF,
+        recenter=True       # Recenter PSF using chief ray
+    )
+    # psf_map shape: [grid_h, grid_w, 1, ks, ks]
+    
+    # Visualize PSF map
+    lens.draw_psf_map(save_name='./psf_map.png', depth=DEPTH, show=False)
 
 Complete Camera Simulation
 ---------------------------
@@ -239,35 +239,37 @@ Including Sensor and ISP
 
 .. code-block:: python
 
-    from deeplens import Camera
-    from deeplens.sensor import RGBSensor, ISP
+    from deeplens.sensor import RGBSensor
     
-    # Create camera system
-    camera = Camera(
-        lens=lens,
-        sensor=RGBSensor(
-            resolution=(1920, 1080),
-            pixel_size=4.0e-3,
-            enable_shot_noise=True,
-            enable_read_noise=True
-        ),
-        isp=ISP(
-            demosaic_method='malvar',
-            white_balance=True,
-            gamma_correction=True
-        ),
-        device='cuda'
+    # RGBSensor loads configuration from JSON file
+    # Config includes: resolution, bit depth, noise parameters, ISP settings
+    sensor = RGBSensor(sensor_file='./datasets/sensors/imx586.json')
+    
+    # The sensor includes:
+    # - Noise simulation (shot noise, read noise)
+    # - ISP pipeline (demosaicing, white balance, color correction, gamma)
+    
+    # Render image through lens first
+    from deeplens.basics import DEPTH, SPP_RENDER
+    
+    img_rendered = lens.render(
+        img_tensor, 
+        depth=DEPTH, 
+        method='ray_tracing',
+        spp=SPP_RENDER
     )
     
-    # Capture image
-    img_captured = camera.capture(
-        scene=img_tensor,
-        depth=1000,
-        exposure_time=0.01,  # 10ms
-        iso=100
-    )
+    # Convert to n-bit raw space (simulate sensor response)
+    # img_rendered is in [0, 1] linear space
+    bit = sensor.bit
+    black_level = sensor.black_level
+    img_nbit = img_rendered * (2**bit - 1 - black_level) + black_level
     
-    save_image(img_captured, 'camera_captured.png')
+    # Apply sensor noise and ISP
+    iso = 100
+    img_rgb = sensor.forward(img_nbit, iso=iso)
+    
+    save_image(img_rgb, 'camera_captured.png')
 
 Bokeh Effects
 -------------
@@ -277,41 +279,44 @@ Circular Bokeh
 
 .. code-block:: python
 
-    # Defocus background while focusing on foreground
-    focus_distance = 1000  # Focus at 1m
+    from deeplens.basics import SPP_RENDER
     
-    # Object in focus
-    img_focus = lens.render(img_tensor, depth=focus_distance, spp=512)
+    # Defocus effects depend on object distance
+    # Objects far from focus distance have larger blur
     
-    # Background out of focus
-    img_background = lens.render(img_tensor, depth=5000, spp=512)
+    # Refocus lens to specific distance
+    lens.refocus(foc_dist=-1000.0)  # Focus at 1m
     
-    # Composite
-    from deeplens.utils import plot_comparison
-    plot_comparison(
-        [img_focus, img_background],
-        ['In Focus (1m)', 'Out of Focus (5m)']
-    )
+    # Render at different depths
+    img_focus = lens.render(img_tensor, depth=-1000.0, method='ray_tracing', spp=SPP_RENDER)
+    img_defocus = lens.render(img_tensor, depth=-5000.0, method='ray_tracing', spp=SPP_RENDER)
+    
+    # Compare
+    from torchvision.utils import save_image
+    save_image(torch.cat([img_focus, img_defocus], dim=0), 'bokeh_comparison.png', nrow=2)
 
 Shaped Aperture Bokeh
 ^^^^^^^^^^^^^^^^^^^^^
 
-Create custom bokeh shapes:
+Bokeh shape depends on aperture:
 
 .. code-block:: python
 
-    from deeplens.optics import Aperture
+    from deeplens.optics.geometric_surface import Aperture
     
-    # Replace aperture with custom shape
     # Find aperture in lens
     for i, surf in enumerate(lens.surfaces):
         if isinstance(surf, Aperture):
-            # Modify aperture shape
-            surf.is_square = True  # Square bokeh
-            # Or create custom shape
+            # Aperture radius controls bokeh size
+            # Smaller aperture (higher f-number) = sharper but dimmer
+            print(f"Aperture at surface {i}, radius: {surf.r}")
     
-    # Render with custom bokeh
-    img_rendered = lens.render(img_tensor, depth=5000, spp=1024)
+    # Change f-number to control bokeh size
+    lens.set_fnum(fnum=2.8)  # Larger aperture = more bokeh
+    
+    # Render with new aperture
+    from deeplens.basics import SPP_RENDER
+    img_rendered = lens.render(img_tensor, depth=-5000.0, method='ray_tracing', spp=SPP_RENDER)
 
 Computational Photography
 --------------------------
@@ -319,27 +324,33 @@ Computational Photography
 Extended Depth of Field (EDoF)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Using cubic phase mask:
+Using lens with cubic phase element:
 
 .. code-block:: python
 
-    from deeplens.optics import Cubic
+    from deeplens import GeoLens
+    from deeplens.basics import SPP_RENDER
     
-    # Add cubic phase element
-    lens.surfaces.insert(
-        aperture_index + 1,
-        Cubic(r=float('inf'), d=0.001, alpha=10.0)
+    # Load lens with cubic phase element for EDoF
+    # Cubic phase creates depth-invariant PSF
+    lens_edof = GeoLens(
+        filename='./datasets/lenses/camera/edof_cubic.json',
+        device='cuda'
     )
     
-    # Render at multiple depths
-    depths = [500, 1000, 2000, 5000]
-    img_edof = torch.zeros_like(img_tensor)
+    # Render at multiple depths - PSF is similar across depths
+    depths = [-500.0, -1000.0, -2000.0, -5000.0]
     
     for depth in depths:
-        img_d = lens.render(img_tensor, depth=depth, spp=512)
-        img_edof += img_d / len(depths)
+        img_d = lens_edof.render(
+            img_tensor, 
+            depth=depth, 
+            method='ray_tracing',
+            spp=SPP_RENDER
+        )
+        # All depths produce similar blur that can be deconvolved
     
-    save_image(img_edof, 'edof.png')
+    # Use network to restore sharp image from any depth
 
 Focus Stacking
 ^^^^^^^^^^^^^^
@@ -462,12 +473,18 @@ Compare with Ground Truth
 .. code-block:: python
 
     from deeplens.utils import batch_psnr, batch_ssim
+    from deeplens.basics import DEPTH, SPP_RENDER
     
     # Reference (sharp) image
     img_ref = img_tensor
     
     # Simulated image
-    img_sim = lens.render(img_tensor, depth=1000, spp=512)
+    img_sim = lens.render(
+        img_tensor, 
+        depth=DEPTH, 
+        method='ray_tracing',
+        spp=SPP_RENDER
+    )
     
     # Metrics
     psnr = batch_psnr(img_sim, img_ref)
@@ -494,13 +511,13 @@ Validation Against Real Camera
 Tips and Best Practices
 ------------------------
 
-1. **SPP Selection**: 256-512 for preview, 1024-4096 for final render
-2. **Method**: Use 'fft' for speed, 'conv' for very large PSFs
-3. **Memory**: Use tiled rendering for large images (>2K resolution)
-4. **Depth Range**: Render at representative depths for your application
-5. **Field Variation**: Use field-dependent PSF for wide-angle lenses
-6. **Wavelength**: Separate RGB rendering for chromatic aberrations
-7. **Validation**: Always validate against reference images or real captures
+1. **SPP Selection**: 32 (SPP_RENDER) for training, 64+ for evaluation
+2. **Method**: Use 'ray_tracing' for accuracy, 'psf_map' for efficiency
+3. **Memory**: Image resolution must match sensor_res for ray_tracing
+4. **Depth**: Negative values (object in front of lens), typically -500 to -20000 mm
+5. **Field Variation**: Use 'psf_map' method with psf_grid for wide-angle lenses
+6. **Wavelength**: render() automatically uses RGB wavelengths for 3-channel images
+7. **Validation**: Use analysis_rendering() for comprehensive evaluation with metrics
 
 See Also
 --------

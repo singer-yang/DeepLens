@@ -1,9 +1,8 @@
-# Copyright (c) 2025 DeepLens Authors. All rights reserved.
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
 #
-# This code and data is released under the Creative Commons Attribution-NonCommercial 4.0 International license (CC BY-NC.) In a nutshell:
-#     The license is only for non-commercial use (commercial licenses can be obtained from authors).
-#     The material is provided as-is, with no warranties whatsoever.
-#     If you publish any code, data, or scientific work based on this, please cite our work.
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
 
 """Complex wave field class for diffraction simulation.
 
@@ -217,28 +216,31 @@ class ComplexWave(DeepObj):
         """
         # Determine propagation method and perform propagation
         wvln_mm = self.wvln * 1e-3  # [um] to [mm]
+        asm_zmax = Nyquist_ASM_zmax(wvln=self.wvln, ps=self.ps, side_length=self.phy_size[0])
+        fresnel_zmin = Fresnel_zmin(wvln=self.wvln, ps=self.ps, side_length=self.phy_size[0])
+        
+        # Wave propagation methods
         if prop_dist < DELTA:
             # Zero distance: do nothing
             pass
-
+        
         elif prop_dist < wvln_mm:
             # Sub-wavelength distance: full wave method (e.g., FDTD)
             raise Exception(
-                "The propagation distance is too short. We have to use full wave method (e.g., FDTD), which is not implemented yet."
+                "The propagation distance in sub-wavelength range is not implemented yet. Have to use full wave method (e.g., FDTD)."
             )
-
-        else:
+        
+        elif prop_dist < asm_zmax:
             # Angular Spectrum Method (ASM)
-            prop_dist_min = Nyquist_zmin(
-                wvln=self.wvln, ps=self.ps, max_side_dist=self.phy_size[0]
-            )
-            assert np.abs(prop_dist) < prop_dist_min, (
-                f"Minimum required propagation distance is {prop_dist_min} mm, but propagation is still performed."
-            )
-            self.u = AngularSpectrumMethod(
-                self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n
-            )
-
+            self.u = AngularSpectrumMethod(self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n)
+        
+        elif prop_dist > fresnel_zmin:
+            # Fresnel diffraction
+            self.u = FresnelDiffraction(self.u, z=prop_dist, wvln=self.wvln, ps=self.ps, n=n)
+        
+        else:
+            raise Exception(f"Propagation method not implemented for distance {prop_dist} mm.")
+        
         # Update z grid
         self.z += prop_dist
         return self
@@ -259,18 +261,9 @@ class ComplexWave(DeepObj):
 
     def gen_xy_grid(self):
         """Generate the x and y grid."""
-        ps = self.ps
         x, y = torch.meshgrid(
-            torch.linspace(
-                -0.5 * self.phy_size[1] + 0.5 * ps,
-                0.5 * self.phy_size[1] - 0.5 * ps,
-                self.res[0],
-            ),
-            torch.linspace(
-                0.5 * self.phy_size[0] - 0.5 * ps,
-                -0.5 * self.phy_size[0] + 0.5 * ps,
-                self.res[1],
-            ),
+            torch.linspace(-0.5 * self.phy_size[1], 0.5 * self.phy_size[1], self.res[0],),
+            torch.linspace(0.5 * self.phy_size[0], -0.5 * self.phy_size[0], self.res[1],),
             indexing="xy",
         )
         return x, y
@@ -454,7 +447,7 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
         [2] https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
     """
     assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
-    wvln_mm = wvln / n * 1e-3  # [um] to [mm]
+    wvln_mm = wvln * 1e-3 / n # [um] to [mm]
     k = 2 * torch.pi / wvln_mm  # [mm]-1
 
     # Shape
@@ -474,23 +467,21 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
         Wimg, Himg = Worg, Horg
 
     # Propagation with angular spectrum method
-    fx, fy = torch.meshgrid(
-        torch.linspace(-0.5 / ps, 0.5 / ps, Wimg, device=u.device),
-        torch.linspace(0.5 / ps, -0.5 / ps, Himg, device=u.device),
-        indexing="xy",
-    )
+    fx_1d = torch.fft.fftfreq(Wimg, d=ps, device=u.device)
+    fy_1d = torch.fft.fftfreq(Himg, d=ps, device=u.device)
+    fx, fy = torch.meshgrid(fx_1d, fy_1d, indexing="xy")
     square_root = torch.sqrt(1 - wvln_mm**2 * (fx**2 + fy**2))
+    
+    # H is defined on the unshifted frequency grid to match fft2(u)
     H = torch.exp(1j * k * z * square_root)
-    H = ifftshift(H)
 
     # https://pytorch.org/docs/stable/generated/torch.fft.fftshift.html#torch.fft.fftshift
     u = ifft2(fft2(u) * H)
 
     # Remove padding
     if padding:
-        u = u[..., Wpad:-Wpad, Hpad:-Hpad]
+        u = u[..., Hpad:-Hpad, Wpad:-Wpad]
 
-    del fx, fy
     return u
 
 
@@ -713,8 +704,8 @@ def RayleighSommerfeldIntegral(
     # Nyquist sampling criterion
     max_side_dist = max(abs(x1.max() - x2.min()), abs(x2.max() - x1.min()))
     ps = (x1.max() - x1.min()) / x1.shape[-1]
-    zmin = Nyquist_zmin(
-        wvln=wvln, ps=ps.item(), max_side_dist=max_side_dist.item(), n=n
+    zmin = Fresnel_zmin(
+        wvln=wvln, ps=ps.item(), side_length=max_side_dist.item(), n=n
     )
     assert zmin < z, (
         f"Propagation distance is too short, minimum distance is {zmin} mm."
@@ -777,23 +768,28 @@ def RayleighSommerfeldIntegral(
 # ==============================
 # Helper functions
 # ==============================
-
-
-def Nyquist_zmin(wvln, ps, max_side_dist, n=1.0):
-    """Nyquist sampling condition for Rayleigh Sommerfeld diffraction.
-
-    Reference:
-        [1] Is the Rayleigh-Sommerfeld diffraction always an exact reference for high speed diffraction algorithms? Optics Express 2017.
-
+def Nyquist_ASM_zmax(wvln, ps, side_length, n=1.0):
+    """Maximum propagation distance for Angular Spectrum Method by Nyquist sampling criterion.
+    
     Args:
         wvln: wavelength in [um]
         ps: pixel size in [mm]
-        max_side_dist: maximum side distance between input and output field in [mm]
+        side_length: side length of the field in [mm]
         n: refractive index
-
-    Returns:
-        zmin: minimum propagation distance in [mm] required by Nyquist sampling criterion
     """
     wvln_mm = wvln * 1e-3
-    zmin = np.sqrt((4 * ps**2 * n**2 / wvln_mm**2 - 1)) * max_side_dist
-    return round(zmin, 3)
+    zmax = side_length * ps * n / wvln_mm
+    return zmax
+
+def Fresnel_zmin(wvln, ps, side_length, n=1.0):
+    """Minimum propagation distance for Fresnel diffraction by Nyquist sampling criterion.
+    
+    Args:
+        wvln: wavelength in [um]
+        ps: pixel size in [mm]
+        side_length: side length of the field in [mm]
+        n: refractive index
+    """
+    wvln_mm = wvln * 1e-3
+    zmin = float(np.sqrt(side_length**2) / (wvln_mm / n))
+    return zmin
