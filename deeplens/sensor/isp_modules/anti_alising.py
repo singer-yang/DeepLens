@@ -6,61 +6,79 @@ import torch.nn.functional as F
 
 
 class AntiAliasingFilter(nn.Module):
-    """Anti-Aliasing Filter (AAF)."""
+    """Anti-Aliasing Filter (AAF). 
+    
+    Anti-aliasing filter is applied to raw Bayer data to reduce moiré patterns
+    and aliasing artifacts before demosaicing.
 
-    def __init__(self, method="bilateral"):
+    Reference:
+        [1] https://github.com/QiuJueqin/fast-openISP/blob/master/modules/aaf.py
+    """
+
+    def __init__(self, method="weighted_average", kernel_size=3):
         """Initialize the Anti-Aliasing Filter.
 
         Args:
-            method (str): Denoising method to use. Options: "bilateral", "none", or None.
-                          If "none" or None, no filtering is applied.
+            method (str): Filtering method. Options: "weighted_average", "gaussian", "none", or None.
+            kernel_size (int): Size of the filter kernel (must be odd).
         """
         super(AntiAliasingFilter, self).__init__()
         self.method = method
+        self.kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
 
-    def forward(self, bayer_nbit):
+        # Pre-compute kernels
+        if method == "weighted_average":
+            # Weighted average kernel: center pixel gets higher weight
+            kernel = torch.ones(1, 1, self.kernel_size, self.kernel_size)
+            center = self.kernel_size // 2
+            kernel[0, 0, center, center] = 8.0
+            kernel = kernel / kernel.sum()
+            self.register_buffer("kernel", kernel)
+        elif method == "gaussian":
+            # Gaussian kernel
+            sigma = self.kernel_size / 6.0
+            x = torch.arange(self.kernel_size) - self.kernel_size // 2
+            x = x.float()
+            kernel_1d = torch.exp(-0.5 * (x / sigma) ** 2)
+            kernel_2d = torch.outer(kernel_1d, kernel_1d)
+            kernel_2d = kernel_2d / kernel_2d.sum()
+            self.register_buffer(
+                "kernel", kernel_2d.view(1, 1, self.kernel_size, self.kernel_size)
+            )
+
+    def forward(self, bayer):
         """Apply anti-aliasing filter to remove moiré pattern.
 
         Args:
-            bayer_nbit: Input tensor of shape [B, 1, H, W], data range [0, 1]
+            bayer: Input tensor of shape [B, 1, H, W], data range [0, 1].
 
         Returns:
-            Filtered bayer tensor of same shape as input
-
-        Reference:
-            [1] https://github.com/QiuJueqin/fast-openISP/blob/master/modules/aaf.py
+            Filtered bayer tensor of same shape as input.
         """
-        raise NotImplementedError("Anti-aliasing filter is not tested yet.")
         if self.method is None or self.method == "none":
-            return bayer_nbit
+            return bayer
 
-        elif self.method == "bilateral":
-            # Convert to int32 for calculations
-            bayer = bayer_nbit.to(torch.int32)
-
-            # Pad the input with reflection padding
-            padded = F.pad(bayer, (2, 2, 2, 2), mode="reflect")
-
-            # Get all 9 shifted versions for 3x3 window
-            shifts = []
-            for i in range(3):
-                for j in range(3):
-                    shifts.append(
-                        padded[:, :, i : i + bayer.shape[2], j : j + bayer.shape[3]]
-                    )
-
-            # Initialize result tensor
-            result = torch.zeros_like(shifts[0], dtype=torch.int32)
-
-            # Apply weights: center pixel (index 4) gets weight 8, others get weight 1
-            for i, shifted in enumerate(shifts):
-                weight = 8 if i == 4 else 1
-                result += weight * shifted
-
-            # Right shift by 4 (divide by 16)
-            result = result >> 4
-
-            return result.to(torch.uint16)
+        if self.method in ["weighted_average", "gaussian"]:
+            padding = self.kernel_size // 2
+            # Apply convolution filter
+            filtered = F.conv2d(bayer, self.kernel.to(bayer.dtype), padding=padding)
+            return filtered
 
         else:
-            raise ValueError(f"Unknown denoise method: {self.method}")
+            raise ValueError(f"Unknown anti-aliasing method: {self.method}")
+
+    def reverse(self, bayer):
+        """Reverse anti-aliasing filter (approximation).
+
+        Note: Anti-aliasing is a lossy operation, so perfect reversal is not possible.
+        This returns the input unchanged as an approximation.
+
+        Args:
+            bayer: Input tensor of shape [B, 1, H, W], data range [0, 1].
+
+        Returns:
+            Input tensor unchanged.
+        """
+        # Anti-aliasing filtering is lossy; we cannot perfectly reverse it
+        # Return input unchanged as best approximation
+        return bayer

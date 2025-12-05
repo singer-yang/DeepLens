@@ -5,7 +5,10 @@ import torch.nn as nn
 
 
 class BlackLevelCompensation(nn.Module):
-    """Black level compensation (BLC)."""
+    """Black level compensation (BLC).
+    
+    Black level compensation is a technique to subtract the black level from the image.
+    """
 
     def __init__(self, bit=10, black_level=64):
         """Initialize black level compensation.
@@ -35,16 +38,19 @@ class BlackLevelCompensation(nn.Module):
 
         return bayer_float
 
-    def reverse(self, bayer):
+    def reverse(self, bayer, quantize=False):
         """Inverse black level compensation.
 
         Args:
             bayer: Input tensor of shape [B, 1, H, W], data range [0, 1].
+            quantize: If True, round to integer values (non-differentiable).
 
         Returns:
             bayer_nbit: Output tensor of shape [B, 1, H, W], data range [0, 2^bit-1].
         """
         max_value = 2**self.bit - 1
         bayer_nbit = bayer * (max_value - self.black_level) + self.black_level
-        bayer_nbit = torch.round(bayer_nbit)
+        if quantize:
+            # Note: torch.round() is not differentiable
+            bayer_nbit = torch.round(bayer_nbit)
         return bayer_nbit
