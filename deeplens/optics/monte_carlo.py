@@ -192,7 +192,8 @@ def assign_points_to_pixels(
             if phase is None:
                 raise ValueError("Phase must be provided for coherent mode")
 
-            grid = torch.zeros(ks, ks, dtype=torch.complex128).to(device)
+            c_dtype = torch.complex64 if points.dtype == torch.float32 else torch.complex128
+            grid = torch.zeros(ks, ks, dtype=c_dtype).to(device)
             grid.index_put_(
                 tuple(pixel_indices_tl.t()),
                 (1 - w_b) * (1 - w_r) * mask * amp * torch.exp(1j * phase),
@@ -246,7 +247,8 @@ def assign_points_to_pixels(
             if phase is None:
                 raise ValueError("Phase must be provided for coherent mode")
 
-            grid = torch.zeros(ks, ks, dtype=torch.complex128).to(device)
+            c_dtype = torch.complex64 if points.dtype == torch.float32 else torch.complex128
+            grid = torch.zeros(ks, ks, dtype=c_dtype).to(device)
             grid.index_put_(
                 tuple(pixel_indices_tl.t()),
                 mask * amp * torch.exp(1j * phase),

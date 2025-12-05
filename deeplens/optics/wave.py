@@ -414,7 +414,7 @@ class ComplexWave(DeepObj):
             self.phy_size[1] * self.res[1] / Worg,
         ]
         self.x, self.y = self.gen_xy_grid()
-        self.z = F.pad(self.z, (Hpad, Hpad, Wpad, Wpad), mode="replicate")
+        self.z = torch.full_like(self.x, self.z[0, 0].item())
 
     def flip(self):
         """Flip the field horizontally and vertically."""

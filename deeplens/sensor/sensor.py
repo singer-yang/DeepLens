@@ -143,7 +143,7 @@ class Sensor(nn.Module):
 
         # Calculate noise standard deviation
         shotnoise_std = torch.clamp(
-            self.shotnoise_std_alpha * torch.sqrt(img_raw - black_level)
+            self.shotnoise_std_alpha * torch.sqrt(torch.clamp(img_raw - black_level, min=0.0))
             + self.shotnoise_std_beta,
             0.0,
         )

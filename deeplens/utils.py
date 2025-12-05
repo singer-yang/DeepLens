@@ -136,8 +136,17 @@ def img2batch(img):
             img = (
                 torch.tensor(img).unsqueeze(0).permute(0, 3, 1, 2)
             )  # (H, W, C) -> (1, C, H, W)
+        elif torch.is_tensor(img):
+            if img.shape[0] in [1, 3]:
+                # Assume (C, H, W) -> (1, C, H, W)
+                img = img.unsqueeze(0)
+            elif img.shape[-1] in [1, 3]:
+                # Assume (H, W, C) -> (1, C, H, W)
+                img = img.permute(2, 0, 1).unsqueeze(0)
+            else:
+                 raise ValueError("Image channel should be 1 or 3.")
         else:
-            raise ValueError("Image should be numpy array.")
+            raise ValueError("Image should be numpy array or torch tensor.")
 
     # Tensor dtype
     if img.dtype == torch.uint8:
@@ -187,7 +196,7 @@ def batch_psnr(pred, target, max_val=1.0, eps=1e-8):
     # Calculate PSNR
     psnr = 20 * torch.log10(max_val / torch.sqrt(mse + eps))
 
-    return psnr.item()
+    return psnr
 
 
 def batch_SSIM(img, img_clean):

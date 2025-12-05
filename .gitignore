@@ -10,6 +10,7 @@ deeplens/do_code/
 !lenses/*.png
 !lenses/**/*.png
 !images/*.png
+!assets/*.png
 debug.py
 *.log
 temp/*
@@ -22,3 +23,5 @@ datasets/BSDS300/
 docs/_build/
 
 # add my own files
+test/test_outputs
+visualization/
