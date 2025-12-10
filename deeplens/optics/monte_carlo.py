@@ -13,7 +13,11 @@ from deeplens.basics import EPSILON
 
 
 def forward_integral(ray, ps, ks, pointc=None):
-    """Forward Monte-Carlo integral. Usecase example: PSF and Wavefront computation. This function donot do normalization.
+    """Forward Monte-Carlo integral. Usecase example: PSF and Wavefront computation.
+
+    NOTE: Loop over N points is necessary because index_put_ with accumulate=True
+    cannot independently accumulate to separate batch slices. Since N is typically
+    small (1-10 field points) while spp is large, this is acceptable.
 
     Args:
         ray: ray object. Shape of [N, spp, 3].
@@ -30,15 +34,15 @@ def forward_integral(ray, ps, ks, pointc=None):
     else:
         single_point = False
 
-    points = ray.o[..., :2] # shape [N, spp, 2]
+    points = ray.o[..., :2]  # shape [N, spp, 2]
     valid = ray.valid  # shape [N, spp]
 
     # Points shift relative to center
     if pointc is None:
         # Use ray spot center as PSF/Wavefront center if not specified
-        pointc = (points * valid.unsqueeze(-1)).sum(-2) / valid.unsqueeze(-1).sum(-2).add(
-            EPSILON
-        )
+        pointc = (points * valid.unsqueeze(-1)).sum(-2) / valid.unsqueeze(-1).sum(
+            -2
+        ).add(EPSILON)
     points_shift = points - pointc.unsqueeze(-2).repeat(1, points.shape[-2], 1)
 
     # Remove invalid points
@@ -53,53 +57,32 @@ def forward_integral(ray, ps, ks, pointc=None):
     )  # shape [N, spp]
     points_shift = points_shift * valid.unsqueeze(-1)
 
-    # Monte Carlo integral
-    coherent = ray.coherent
-    if coherent:
-        # Coherent ray tracing. Complex amplitude integration
-        field = []
-        for i in range(points.shape[0]):
-            # Iterate over N points
-            points_shift0 = points_shift[i]  # [spp, 2]
-            valid0 = valid[i]  # [spp]
-            opl = ray.opl[i].squeeze(-1)  # [spp]
-            wvln_mm = ray.wvln[i].squeeze(-1) * 1e-3  # [spp]
-            amp = torch.sqrt(ray.d[i, :, 2].abs()) # [spp], sqrt(cos(dz))
-            phase = torch.fmod((opl - opl.min()) / wvln_mm, 1) * (2 * torch.pi)  # [spp]
-            value = amp * torch.exp(1j * phase)
-
-            field_u = assign_points_to_pixels(
-                points=points_shift0,
-                mask=valid0,
-                ks=ks,
-                x_range=field_range,
-                y_range=field_range,
-                value=value,
-            )
-            field.append(field_u)
-
-        field = torch.stack(field, dim=0)  # shape [N, ks, ks]
+    # Calculate value for Monte Carlo integral
+    if ray.coherent:
+        amp = torch.sqrt(ray.d[..., 2].abs())  # [N, spp], sqrt(cos(dz))
+        opl = ray.opl.squeeze(-1)  # [N, spp]
+        opl_min = opl.min(dim=-1, keepdim=True).values  # [N, 1]
+        wvln_mm = ray.wvln.squeeze(-1) * 1e-3  # [N, spp]
+        phase = torch.fmod((opl - opl_min) / wvln_mm, 1) * (2 * torch.pi)  # [N, spp]
+        value = amp * torch.exp(1j * phase)  # [N, spp], complex amplitude
     else:
-        # Incoherent ray tracing. Intensity integration
-        field = []
-        for i in range(points.shape[0]):
-            # Iterate over N points
-            points_shift0 = points_shift[i]  # [spp, 2]
-            valid0 = valid[i]  # [spp]
-            value = torch.ones_like(valid0) # [spp]
+        value = torch.ones_like(valid)  # [N, spp], intensity
 
-            field0 = assign_points_to_pixels(
-                points=points_shift0,
-                mask=valid0,
-                ks=ks,
-                x_range=field_range,
-                y_range=field_range,
-                value=value,
-            )
-            field.append(field0)
+    # Monte Carlo integral (loop over N points)
+    field = []
+    for i in range(points.shape[0]):
+        field_i = assign_points_to_pixels(
+            points=points_shift[i],  # [spp, 2]
+            mask=valid[i],  # [spp]
+            ks=ks,
+            x_range=field_range,
+            y_range=field_range,
+            value=value[i],  # [spp]
+        )
+        field.append(field_i)
+    field = torch.stack(field, dim=0)  # shape [N, ks, ks]
 
-        field = torch.stack(field, dim=0)  # shape [N, ks, ks]
-
+    # Single point source
     if single_point:
         field = field.squeeze(0)
         ray = ray.squeeze(0)
@@ -128,7 +111,7 @@ def assign_points_to_pixels(
         y_range: y range
         value: shape [spp], values we want to assign to each pixel (intensity or complex amplitude)
         interpolate: whether to interpolate
-        
+
 
     Returns:
         field: intensity or complex amplitude, shape [ks, ks]
@@ -218,7 +201,7 @@ def backward_integral(
     ray, img, ps, H, W, interpolate=True, pad=True, energy_correction=1
 ):
     """Backward Monte Carlo integration, for ray tracing based rendering.
-    
+
     Args:
         ray: Ray object. Shape of ray.o is [spp, 1, 3].
         img: [B, C, H, W]
