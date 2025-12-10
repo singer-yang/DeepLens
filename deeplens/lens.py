@@ -133,6 +133,9 @@ class Lens(DeepObj):
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
+
+        Reference:
+            [1] Cittert-Zernike Theorem.
         """
         raise NotImplementedError
 
