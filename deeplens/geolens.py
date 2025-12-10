@@ -65,8 +65,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     def __init__(
         self,
         filename=None,
-        sensor_res=(2000, 2000), # (W, H)
-        sensor_size=(8.0, 8.0), # [mm], (W, H)
+        sensor_res=None, # (W, H)
+        sensor_size=None, # [mm], (W, H)
         device=None,
         dtype=torch.float32,
     ):
@@ -78,9 +78,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """
         super().__init__(device=device, dtype=dtype)
 
-        # Lens sensor size and resolution (will be overwritten if read from file)
-        # self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
-
         # Load lens file
         if filename is not None:
             self.read_lens(filename)
@@ -88,6 +85,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             self.surfaces = []
             self.materials = []
             self.to(self.device)
+
+        # Lens sensor size and resolution (will be overwritten if read from file)
+        if sensor_res is not None and sensor_size is not None:
+            self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
+        elif sensor_res is not None:
+            self.set_sensor_res(sensor_res)
 
     def read_lens(self, filename):
         """Read a GeoLens from a file.
@@ -933,7 +936,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return psf_center
 
-    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=False):
+    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=None, recenter=False, mode="geometric"):
         """Single wavelength geometric (incoherent) PSF calculation.
 
         Args:
@@ -942,6 +945,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             wvln (float, optional): Wavelength.
             spp (int, optional): Sample per pixel.
             recenter (bool, optional): Recenter PSF using chief ray.
+            mode (str, optional): PSF calculation mode. Options: "geometric", "huygens".
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
@@ -953,6 +957,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         sensor_w, sensor_h = self.sensor_size
         pixel_size = self.pixel_size
         device = self.device
+        if spp is None:
+            spp = SPP_PSF if mode == "geometric" else SPP_COHERENT
         
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
@@ -973,15 +979,25 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
                 
         # Trace rays to sensor plane
+        if mode == "geometric":
+            ray.coherent = False
+        elif mode == "huygens":
+            ray.coherent = True
+        else:
+            raise ValueError(f"Unsupported PSF calculation mode: {mode}.")
+        
         ray = self.trace2sensor(ray)
 
-        # Calculate PSF, shape [N, 2]
+        # Calculate PSF center, shape [N, 2]
         if recenter:
             pointc = self.psf_center(point_obj, method="chief_ray")
         else:
             pointc = self.psf_center(point_obj, method="pinhole")
         
-        psf = forward_integral(ray, ps=pixel_size, ks=ks, pointc=pointc)
+        # Monte Carlo integration
+        psf = forward_integral(ray.flip_xy(), ps=pixel_size, ks=ks, pointc=pointc)
+        if mode == "huygens":
+            psf = psf.abs()**2
 
         # Normalize to sum to 1
         psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
@@ -1075,11 +1091,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Calculate a full-resolution complex field for exit-pupil diffraction
         pointc_ref = torch.zeros_like(point[:, :2]).to(device)  # [N, 2]
         wavefront = forward_integral(
-            ray,
+            ray.flip_xy(),
             ps=self.pixel_size,
             ks=self.sensor_res[1],
             pointc=pointc_ref,
-            coherent=True,
         )
         wavefront = wavefront.squeeze(0)  # [H, H]
 

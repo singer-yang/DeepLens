@@ -201,11 +201,10 @@ class HybridLens(Lens):
 
         # Calculate full-resolution complex field for exit-pupil diffraction
         wavefront = forward_integral(
-            ray,
+            ray.flip_xy(),
             ps=doe.ps,
             ks=doe.res[0],
             pointc=torch.zeros_like(point[:, :2]),
-            coherent=True,
         ).squeeze(0)  # shape [H, W]
 
         # Compute PSF center based on chief ray

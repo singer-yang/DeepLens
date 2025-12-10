@@ -100,6 +100,15 @@ class Ray(DeepObj):
         # Average RMS error
         return rms_error.mean()
 
+    def flip_xy(self):
+        """Flip the x and y coordinates of the ray.
+        
+        This function is used when calculating point spread function and wavefront distribution.
+        """
+        self.o[..., :2] = -self.o[..., :2]
+        self.d[..., :2] = -self.d[..., :2]
+        return self
+
     def clone(self, device=None):
         """Clone the ray.
 

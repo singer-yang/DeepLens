@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from deeplens.basics import EPSILON
 
 
-def forward_integral(ray, ps, ks, pointc=None, coherent=False):
+def forward_integral(ray, ps, ks, pointc=None):
     """Forward Monte-Carlo integral. Usecase example: PSF and Wavefront computation. This function donot do normalization.
 
     Args:
@@ -20,7 +20,6 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
         ps: pixel size in [mm]
         ks: kernel size
         pointc: reference center point, shape [N, 2]
-        coherent: whether or not coherent ray tracing
 
     Returns:
         field: intensity or complex amplitude, shape [N, ks, ks]
@@ -31,7 +30,7 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
     else:
         single_point = False
 
-    points = -ray.o[..., :2]  # shape [N, spp, 2]. flip points.
+    points = ray.o[..., :2] # shape [N, spp, 2]
     valid = ray.valid  # shape [N, spp]
 
     # Points shift relative to center
@@ -55,38 +54,19 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
     points_shift = points_shift * valid.unsqueeze(-1)
 
     # Monte Carlo integral
-    if not coherent:
-        # Incoherent ray tracing, integral over intensity
+    coherent = ray.coherent
+    if coherent:
+        # Coherent ray tracing. Complex amplitude integration
         field = []
         for i in range(points.shape[0]):
             # Iterate over N points
             points_shift0 = points_shift[i]  # [spp, 2]
             valid0 = valid[i]  # [spp]
-            amp = ray.d[i, :, 2] ** 2  # [spp]
-
-            field0 = assign_points_to_pixels(
-                points=points_shift0,
-                mask=valid0,
-                ks=ks,
-                x_range=field_range,
-                y_range=field_range,
-                amp=amp,
-            )
-            field.append(field0)
-
-        field = torch.stack(field, dim=0)  # shape [N, ks, ks]
-
-    else:
-        # Coherent ray tracing, integral over complex amplitude
-        field = []
-        for i in range(points.shape[0]):
-            # Iterate over N points
-            points_shift0 = points_shift[i]  # [spp, 2]
-            valid0 = valid[i]  # [spp]
-            amp = ray.d[i, :, 2]  # [spp]
             opl = ray.opl[i].squeeze(-1)  # [spp]
             wvln_mm = ray.wvln[i].squeeze(-1) * 1e-3  # [spp]
+            amp = torch.sqrt(ray.d[i, :, 2].abs()) # [spp], sqrt(cos(dz))
             phase = torch.fmod((opl - opl.min()) / wvln_mm, 1) * (2 * torch.pi)  # [spp]
+            value = amp * torch.exp(1j * phase)
 
             field_u = assign_points_to_pixels(
                 points=points_shift0,
@@ -94,18 +74,36 @@ def forward_integral(ray, ps, ks, pointc=None, coherent=False):
                 ks=ks,
                 x_range=field_range,
                 y_range=field_range,
-                coherent=True,
-                amp=amp,
-                phase=phase,
+                value=value,
             )
             field.append(field_u)
+
+        field = torch.stack(field, dim=0)  # shape [N, ks, ks]
+    else:
+        # Incoherent ray tracing. Intensity integration
+        field = []
+        for i in range(points.shape[0]):
+            # Iterate over N points
+            points_shift0 = points_shift[i]  # [spp, 2]
+            valid0 = valid[i]  # [spp]
+            value = torch.ones_like(valid0) # [spp]
+
+            field0 = assign_points_to_pixels(
+                points=points_shift0,
+                mask=valid0,
+                ks=ks,
+                x_range=field_range,
+                y_range=field_range,
+                value=value,
+            )
+            field.append(field0)
 
         field = torch.stack(field, dim=0)  # shape [N, ks, ks]
 
     if single_point:
         field = field.squeeze(0)
         ray = ray.squeeze(0)
-    
+
     return field
 
 
@@ -115,10 +113,8 @@ def assign_points_to_pixels(
     ks,
     x_range,
     y_range,
+    value,
     interpolate=True,
-    coherent=False,
-    amp=None,
-    phase=None,
 ):
     """Assign points to pixels, supports both incoherent and coherent ray tracing. Use advanced indexing to increment the count for each corresponding pixel.
 
@@ -130,10 +126,9 @@ def assign_points_to_pixels(
         ks: kernel size
         x_range: x range
         y_range: y range
+        value: shape [spp], values we want to assign to each pixel (intensity or complex amplitude)
         interpolate: whether to interpolate
-        coherent: whether to consider coherence
-        phase: shape [spp], values we want to assign to each pixel
-        amp: shape [spp], values we want to assign to each pixel (for incoherent ray tracing, typically 1)
+        
 
     Returns:
         field: intensity or complex amplitude, shape [ks, ks]
@@ -152,10 +147,6 @@ def assign_points_to_pixels(
     valid_points = (points_normalized >= 0) & (points_normalized <= 1)
     valid_points = valid_points.all(dim=1)
     mask = mask * valid_points
-
-    # If amp is not provided, set it to 1 (as default for incoherent ray tracing)
-    if amp is None:
-        amp = torch.ones_like(mask)
 
     if interpolate:
         # Compute weight (range [0, 1])
@@ -188,53 +179,27 @@ def assign_points_to_pixels(
         pixel_indices_br = torch.clamp(pixel_indices_br, 0, ks - 1)
 
         # Use advanced indexing to increment the count for each corresponding pixel
-        if coherent:
-            if phase is None:
-                raise ValueError("Phase must be provided for coherent mode")
-
-            c_dtype = torch.complex64 if points.dtype == torch.float32 else torch.complex128
-            grid = torch.zeros(ks, ks, dtype=c_dtype).to(device)
-            grid.index_put_(
-                tuple(pixel_indices_tl.t()),
-                (1 - w_b) * (1 - w_r) * mask * amp * torch.exp(1j * phase),
-                accumulate=True,
-            )
-            grid.index_put_(
-                tuple(pixel_indices_tr.t()),
-                (1 - w_b) * w_r * mask * amp * torch.exp(1j * phase),
-                accumulate=True,
-            )
-            grid.index_put_(
-                tuple(pixel_indices_bl.t()),
-                w_b * (1 - w_r) * mask * amp * torch.exp(1j * phase),
-                accumulate=True,
-            )
-            grid.index_put_(
-                tuple(pixel_indices_br.t()),
-                w_b * w_r * mask * amp * torch.exp(1j * phase),
-                accumulate=True,
-            )
-
-        else:
-            grid = torch.zeros(ks, ks).to(device)
-            grid.index_put_(
-                tuple(pixel_indices_tl.t()),
-                (1 - w_b) * (1 - w_r) * mask * amp,
-                accumulate=True,
-            )
-            grid.index_put_(
-                tuple(pixel_indices_tr.t()),
-                (1 - w_b) * w_r * mask * amp,
-                accumulate=True,
-            )
-            grid.index_put_(
-                tuple(pixel_indices_bl.t()),
-                w_b * (1 - w_r) * mask * amp,
-                accumulate=True,
-            )
-            grid.index_put_(
-                tuple(pixel_indices_br.t()), w_b * w_r * mask * amp, accumulate=True
-            )
+        grid = torch.zeros(ks, ks, dtype=value.dtype).to(device)
+        grid.index_put_(
+            tuple(pixel_indices_tl.t()),
+            (1 - w_b) * (1 - w_r) * mask * value,
+            accumulate=True,
+        )
+        grid.index_put_(
+            tuple(pixel_indices_tr.t()),
+            (1 - w_b) * w_r * mask * value,
+            accumulate=True,
+        )
+        grid.index_put_(
+            tuple(pixel_indices_bl.t()),
+            w_b * (1 - w_r) * mask * value,
+            accumulate=True,
+        )
+        grid.index_put_(
+            tuple(pixel_indices_br.t()),
+            w_b * w_r * mask * value,
+            accumulate=True,
+        )
 
     else:
         pixel_indices_float = points_normalized * (ks - 1)
@@ -243,20 +208,8 @@ def assign_points_to_pixels(
         # Clamp indices to valid range
         pixel_indices_tl = torch.clamp(pixel_indices_tl, 0, ks - 1)
 
-        if coherent:
-            if phase is None:
-                raise ValueError("Phase must be provided for coherent mode")
-
-            c_dtype = torch.complex64 if points.dtype == torch.float32 else torch.complex128
-            grid = torch.zeros(ks, ks, dtype=c_dtype).to(device)
-            grid.index_put_(
-                tuple(pixel_indices_tl.t()),
-                mask * amp * torch.exp(1j * phase),
-                accumulate=True,
-            )
-        else:
-            grid = torch.zeros(ks, ks).to(device)
-            grid.index_put_(tuple(pixel_indices_tl.t()), mask * amp, accumulate=True)
+        grid = torch.zeros(ks, ks, dtype=value.dtype).to(device)
+        grid.index_put_(tuple(pixel_indices_tl.t()), mask * value, accumulate=True)
 
     return grid
 
@@ -264,16 +217,8 @@ def assign_points_to_pixels(
 def backward_integral(
     ray, img, ps, H, W, interpolate=True, pad=True, energy_correction=1
 ):
-    """Backward integral, for ray tracing based rendering.
-
-    NOTE: this function is currently not used and needs to be checked.
-
-    Ignore:
-        1. sub-pixel phase shiftment
-        2. ray ampuity energy decay
-
-        If we want to use this correction terms, use energy_corrention variable.
-
+    """Backward Monte Carlo integration, for ray tracing based rendering.
+    
     Args:
         ray: Ray object. Shape of ray.o is [spp, 1, 3].
         img: [B, C, H, W]
@@ -330,7 +275,7 @@ def backward_integral(
             out_img = img[..., idx_i, idx_j]
 
         # Monte-Carlo integration
-        output = (torch.sum(out_img * ray.valid * energy_correction, -3) + 1e-9) / (
-            torch.sum(ray.valid, -3) + 1e-6
+        output = torch.sum(out_img * ray.valid * energy_correction, -3) / (
+            torch.sum(ray.valid, -3) + EPSILON
         )
         return output
