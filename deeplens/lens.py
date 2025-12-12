@@ -120,7 +120,11 @@ class Lens(DeepObj):
     # 3. PSF radial
     # ===========================================
     def psf(self, points, wvln=0.589, ks=51, **kwargs):
-        """Compute monochrome point PSF. This function should be differentiable.
+        """Compute monochrome point PSF.
+
+        NOTE: 
+            [1] This function should be designed to be differentiable.
+            [2] For each point source, we should consider diffraction in the calculation, even for incoherent imaging.
 
         Args:
             points (tensor): Shape of [N, 3] or [3].
@@ -129,6 +133,9 @@ class Lens(DeepObj):
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
+
+        Reference:
+            [1] Cittert-Zernike Theorem.
         """
         raise NotImplementedError
 
@@ -392,9 +399,9 @@ class Lens(DeepObj):
     def render(self, img_obj, depth=DEPTH, method="psf_patch", **kwargs):
         """Differentiable image simulation, considering only 2D scene.
 
-        Note:
-            This function handles only the differentiable components of image simulation, specifically the optical aberrations.
-            The non-differentiable components (e.g., noise simulation) are handled separately in other functions.
+        NOTE: 
+            [1] This function performs only the optical component of image simulation and is designed to be fully differentiable. Other components (e.g., noise simulation) are handled by other functions (see Camera class).
+            [2] For incoherent imaging, we should calculate the intensity PSF (squared magnitude of the complex amplitude) and convolve it with the object-space image. For coherent imaging, we should convolve the complex PSF with the complex object image and then calculate the intensity by squaring the magnitude.
 
         Image simulation methods:
             [1] PSF map, convolution by patches.
@@ -413,6 +420,7 @@ class Lens(DeepObj):
 
         Reference:
             [1] "Optical Aberration Correction in Postprocessing using Imaging Simulation", TOG 2021.
+            [2] "Efficient depth- and spatially-varying image simulation for defocus deblur", ICCVW 2025.
         """
         # Check sensor resolution
         B, C, Himg, Wimg = img_obj.shape
