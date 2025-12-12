@@ -91,7 +91,7 @@ def grid_sample_xy(
     
     Args:
         input (torch.Tensor): Input tensor, shape [B, C, H, W]
-        grid_xy (torch.Tensor): Grid xy coordinates, shape [B, H, W, 2]. Data range from [-1, 1] * [-1, 1]. Top-left is (-1, 1), bottom-right is (1, -1).
+        grid_xy (torch.Tensor): Grid xy coordinates, shape [B, H, W, 2]. Top-left is (-1, 1), bottom-right is (1, -1).
         mode (str): Interpolation mode, "bilinear" or "nearest"
         padding_mode (str): Padding mode, "zeros" or "border"
         align_corners (bool): Whether to align corners
@@ -101,7 +101,7 @@ def grid_sample_xy(
     """
     grid_x = grid_xy[..., 0]
     grid_y = grid_xy[..., 1]
-    grid = torch.stack([-grid_y, grid_x], dim=-1)
+    grid = torch.stack([grid_x, -grid_y], dim=-1)
     return F.grid_sample(
         input,
         grid,

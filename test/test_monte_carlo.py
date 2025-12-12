@@ -69,7 +69,7 @@ class TestForwardIntegral:
         
         ks = 31
         ps = 0.01
-        pointc = torch.tensor([[-0.5, 0.0]], device=device_auto)
+        pointc = torch.tensor([[0.5, 0.0]], device=device_auto)
         
         field = forward_integral(ray, ps=ps, ks=ks, pointc=pointc)
         
@@ -117,9 +117,10 @@ class TestAssignPointsToPixels:
         x_range = (-0.55, 0.55)
         y_range = (-0.55, 0.55)
         
+        value = torch.ones(2, device=device_auto)
         field = assign_points_to_pixels(
             points, mask, ks, x_range, y_range,
-            interpolate=False, coherent=False,
+            value=value, interpolate=False,
         )
         
         assert field.shape == (ks, ks)
@@ -138,9 +139,10 @@ class TestAssignPointsToPixels:
         x_range = (-0.55, 0.55)
         y_range = (-0.55, 0.55)
         
+        value = torch.ones(3, device=device_auto)
         field = assign_points_to_pixels(
             points, mask, ks, x_range, y_range,
-            interpolate=False, coherent=False,
+            value=value, interpolate=False,
         )
         
         # Only 2 valid points should contribute
@@ -156,17 +158,18 @@ class TestAssignPointsToPixels:
         x_range = (-0.1, 0.1)
         y_range = (-0.1, 0.1)
         
+        value = torch.ones(1, device=device_auto)
         field = assign_points_to_pixels(
             points, mask, ks, x_range, y_range,
-            interpolate=True, coherent=False,
+            value=value, interpolate=True,
         )
         
         # With interpolation, multiple pixels should have non-zero values
         nonzero_count = (field > 0).sum().item()
         assert nonzero_count >= 1
 
-    def test_assign_points_coherent(self, device_auto):
-        """Coherent mode should handle complex amplitudes."""
+    def test_assign_points_complex_value(self, device_auto):
+        """Should handle complex amplitude values."""
         points = torch.tensor([[0.0, 0.0]], device=device_auto)
         mask = torch.ones(1, device=device_auto)
         
@@ -174,17 +177,15 @@ class TestAssignPointsToPixels:
         x_range = (-0.1, 0.1)
         y_range = (-0.1, 0.1)
         
-        # Complex amplitude and phase
-        amp = torch.ones(1, 1, device=device_auto)
-        phase = torch.zeros(1, 1, device=device_auto)
+        # Complex amplitude value
+        value = torch.ones(1, device=device_auto, dtype=torch.complex64)
         
         field = assign_points_to_pixels(
             points, mask, ks, x_range, y_range,
-            interpolate=False, coherent=True,
-            amp=amp, phase=phase,
+            value=value, interpolate=False,
         )
         
-        # Coherent output is complex
+        # Output should be complex when input value is complex
         assert field.dtype == torch.complex64 or field.dtype == torch.complex128
 
 
@@ -207,7 +208,7 @@ class TestForwardIntegralCoherent:
         
         ks = 21
         ps = 0.01
-        field = forward_integral(ray, ps=ps, ks=ks, coherent=True)
+        field = forward_integral(ray, ps=ps, ks=ks)
         
         # Coherent field should be complex
         assert field.is_complex()

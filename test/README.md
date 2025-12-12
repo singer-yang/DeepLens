@@ -1,5 +1,5 @@
 # Run all tests
-cd /home/yangx0i/deeplens_proj/debug/DeepLens
+cd ./DeepLens
 pytest test/ -v
 
 # Run specific test file

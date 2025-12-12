@@ -105,8 +105,8 @@ class Ray(DeepObj):
         
         This function is used when calculating point spread function and wavefront distribution.
         """
-        self.o[..., :2] = -self.o[..., :2]
-        self.d[..., :2] = -self.d[..., :2]
+        self.o = torch.cat([-self.o[..., :2], self.o[..., 2:]], dim=-1)
+        self.d = torch.cat([-self.d[..., :2], self.d[..., 2:]], dim=-1)
         return self
 
     def clone(self, device=None):

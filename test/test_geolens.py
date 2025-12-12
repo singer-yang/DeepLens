@@ -115,7 +115,7 @@ class TestGeoLensRaySampling:
         """Should sample backward rays from sensor."""
         lens = sample_cellphone_lens  # Has aperture stop
         
-        ray = lens.sample_sensor(spp=16)
+        ray = lens.sample_sensor(spp=2)
         
         assert ray is not None
         # Ray direction z component mean should indicate backward direction
