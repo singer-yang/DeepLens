@@ -77,7 +77,7 @@ class TestRayInit:
         
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        assert torch.all(ray.valid == 1.0)
+        assert torch.all(ray.is_valid == 1.0)
 
     def test_ray_init_opl_zero(self, device_auto):
         """Ray should initialize with zero optical path length."""
@@ -133,7 +133,7 @@ class TestRayPropTo:
         d[:, 2] = 1.0
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        ray.valid[1] = 0.0  # Invalidate second ray
+        ray.is_valid[1] = 0.0  # Invalidate second ray
         original_o = ray.o.clone()
         
         ray.prop_to(z=10.0)
@@ -186,7 +186,7 @@ class TestRayCentroid:
         d[:, 2] = 1.0
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        ray.valid[1] = 0.0  # Invalidate second ray
+        ray.is_valid[1] = 0.0  # Invalidate second ray
         
         centroid = ray.centroid()
         
