@@ -89,16 +89,6 @@ class TestRayInit:
         
         assert torch.all(ray.opl == 0.0)
 
-    def test_ray_is_forward(self, device_auto):
-        """Ray should track forward/backward direction."""
-        o = torch.zeros(2, 3, device=device_auto)
-        d = torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]], device=device_auto)
-        
-        ray = Ray(o, d, wvln=0.55, device=device_auto)
-        
-        assert ray.is_forward[0, 0] == True
-        assert ray.is_forward[1, 0] == False
-
 
 class TestRayPropTo:
     """Test ray propagation."""

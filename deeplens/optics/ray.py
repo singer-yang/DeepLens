@@ -36,7 +36,6 @@ class Ray(DeepObj):
         self.valid = torch.ones(self.shape)
         self.en = torch.ones((*self.shape, 1))
         self.obliq = torch.ones((*self.shape, 1))
-        self.is_forward = self.d[..., 2].unsqueeze(-1) > 0
 
         # Coherent ray tracing
         self.coherent = coherent  # bool
