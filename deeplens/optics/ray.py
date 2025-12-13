@@ -30,7 +30,7 @@ class Ray(DeepObj):
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         self.shape = self.o.shape[:-1]
         assert wvln > 0.1 and wvln < 1, "Ray wavelength unit should be [um]"
-        self.wvln = torch.full((*self.shape, 1), wvln)
+        self.wvln = torch.tensor(wvln)
 
         # Auxiliary ray parameters
         self.valid = torch.ones(self.shape)
@@ -127,7 +127,7 @@ class Ray(DeepObj):
         """
         self.o = self.o.squeeze(dim)
         self.d = self.d.squeeze(dim)
-        self.wvln = self.wvln.squeeze(dim)
+        # wvln is a single element tensor, no squeeze needed
         self.valid = self.valid.squeeze(dim)
         self.en = self.en.squeeze(dim)
         self.opl = self.opl.squeeze(dim)
@@ -143,7 +143,7 @@ class Ray(DeepObj):
         """
         self.o = self.o.unsqueeze(dim)
         self.d = self.d.unsqueeze(dim)
-        self.wvln = self.wvln.unsqueeze(dim)
+        # wvln is a single element tensor, no unsqueeze needed
         self.valid = self.valid.unsqueeze(dim)
         self.en = self.en.unsqueeze(dim)
         self.opl = self.opl.unsqueeze(dim)

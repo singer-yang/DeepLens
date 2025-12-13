@@ -21,7 +21,7 @@ class TestRayInit:
         
         assert ray.o.shape == (1, 3)
         assert ray.d.shape == (1, 3)
-        assert ray.wvln.shape == (1, 1)
+        assert ray.wvln.shape == ()  # 0D scalar tensor
 
     def test_ray_init_batch(self, device_auto):
         """Ray should support batch initialization."""
@@ -63,7 +63,7 @@ class TestRayInit:
         
         # Valid wavelength (0.55 um = 550 nm)
         ray = Ray(o, d, wvln=0.55, device=device_auto)
-        assert ray.wvln[0, 0] == 0.55
+        assert torch.isclose(ray.wvln, torch.tensor(0.55, device=device_auto)).item()
         
         # Wavelength out of range should raise
         with pytest.raises(AssertionError):

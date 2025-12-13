@@ -171,7 +171,7 @@ class Phase(DeepObj):
         # Perpendicular incident rays are diffracted following (1) grating equation and (2) local grating approximation
         dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
 
-        wvln_mm = ray.wvln.squeeze(-1) * 1e-3
+        wvln_mm = ray.wvln * 1e-3
         order = self.diffraction_order
         if forward:
             new_d_x = ray.d[..., 0] + wvln_mm / (2 * torch.pi) * dphidx * order

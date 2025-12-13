@@ -62,7 +62,7 @@ def forward_integral(ray, ps, ks, pointc=None):
         amp = torch.sqrt(ray.d[..., 2].abs())  # [N, spp], sqrt(cos(dz))
         opl = ray.opl.squeeze(-1)  # [N, spp]
         opl_min = opl.min(dim=-1, keepdim=True).values  # [N, 1]
-        wvln_mm = ray.wvln.squeeze(-1) * 1e-3  # [N, spp]
+        wvln_mm = ray.wvln * 1e-3  # [1], broadcasts with [N, spp]
         phase = torch.fmod((opl - opl_min) / wvln_mm, 1) * (2 * torch.pi)  # [N, spp]
         value = amp * torch.exp(1j * phase)  # [N, spp], complex amplitude
     else:
