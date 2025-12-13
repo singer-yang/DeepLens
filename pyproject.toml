@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeplens-core"
-version = "1.2.0"
+version = "1.2.3"
 description = "DeepLens: differentiable optical lens simulator for end-to-end cameras."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -44,6 +44,9 @@ dev = [
 Homepage = "https://github.com/singer-yang/DeepLens"
 Repository = "https://github.com/singer-yang/DeepLens"
 Documentation = "https://deeplens.readthedocs.io/en/latest/"
+
+[tool.setuptools.package-data]
+deeplens = ["optics/material/*.AGF", "optics/material/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]
