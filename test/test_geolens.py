@@ -133,7 +133,7 @@ class TestGeoLensTracing:
         ray_out, _ = lens.trace(ray)
         
         assert ray_out is not None
-        assert ray_out.valid.sum() > 0
+        assert ray_out.is_valid.sum() > 0
 
     def test_geolens_trace_with_record(self, sample_singlet_lens):
         """Should record ray path during tracing."""
@@ -150,10 +150,10 @@ class TestGeoLensTracing:
         lens = sample_singlet_lens
         
         ray = lens.sample_parallel(fov_x=[0.0], fov_y=[0.0], num_rays=512)
-        valid_before = ray.valid.sum().item()
+        valid_before = ray.is_valid.sum().item()
         
         ray_out, _ = lens.trace(ray)
-        valid_after = ray_out.valid.sum().item()
+        valid_after = ray_out.is_valid.sum().item()
         
         assert valid_after <= valid_before
         assert valid_after > 0  # Some rays should survive

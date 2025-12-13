@@ -35,7 +35,7 @@ def forward_integral(ray, ps, ks, pointc=None):
         single_point = False
 
     points = ray.o[..., :2]  # shape [N, spp, 2]
-    valid = ray.valid  # shape [N, spp]
+    valid = ray.is_valid  # shape [N, spp]
 
     # Points shift relative to center
     if pointc is None:
@@ -258,7 +258,7 @@ def backward_integral(
             out_img = img[..., idx_i, idx_j]
 
         # Monte-Carlo integration
-        output = torch.sum(out_img * ray.valid * energy_correction, -3) / (
-            torch.sum(ray.valid, -3) + EPSILON
+        output = torch.sum(out_img * ray.is_valid * energy_correction, -3) / (
+            torch.sum(ray.is_valid, -3) + EPSILON
         )
         return output

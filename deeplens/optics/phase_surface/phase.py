@@ -130,17 +130,17 @@ class Phase(DeepObj):
             valid = (
                 (torch.abs(new_o[..., 0]) < self.w / 2)
                 & (torch.abs(new_o[..., 1]) < self.h / 2)
-                & (ray.valid > 0)
+                & (ray.is_valid > 0)
             )
         else:
             valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-                ray.valid > 0
+                ray.is_valid > 0
             )
 
         # Update rays
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
+        ray.is_valid = ray.is_valid * valid
 
         if ray.coherent:
             ray.opl = torch.where(
@@ -158,8 +158,8 @@ class Phase(DeepObj):
             [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
             [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
         """
-        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
-        valid = ray.valid > 0
+        forward = (ray.d * ray.is_valid.unsqueeze(-1))[..., 2].sum() > 0
+        valid = ray.is_valid > 0
 
         # Diffraction 1: DOE phase modulation
         if ray.coherent:
@@ -204,7 +204,7 @@ class Phase(DeepObj):
         k = 1 - eta**2 * (1 - dot_product**2)
 
         # Total internal reflection
-        valid = (k >= 0).squeeze(-1) & (ray.valid > 0)
+        valid = (k >= 0).squeeze(-1) & (ray.is_valid > 0)
         k = k * valid.unsqueeze(-1)
 
         # Update ray direction
@@ -212,7 +212,7 @@ class Phase(DeepObj):
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray valid mask
-        ray.valid = ray.valid * valid
+        ray.is_valid = ray.is_valid * valid
 
         return ray
 

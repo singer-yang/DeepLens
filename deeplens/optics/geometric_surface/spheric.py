@@ -146,7 +146,7 @@ class Spheric(Surface):
             t = (0.0 - ray.o[..., 2]) / ray.d[..., 2]
             new_o = ray.o + t.unsqueeze(-1) * ray.d
             valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-                ray.valid > 0
+                ray.is_valid > 0
             )
         else:
             R = 1.0 / c
@@ -183,11 +183,11 @@ class Spheric(Surface):
             r_squared = new_o[..., 0] ** 2 + new_o[..., 1] ** 2
             within_aperture = r_squared <= (self.r**2 + EPSILON)
 
-            valid = valid_intersect & within_aperture & (ray.valid > 0)
+            valid = valid_intersect & within_aperture & (ray.is_valid > 0)
 
         # Update ray position
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
+        ray.is_valid = ray.is_valid * valid
 
         if ray.coherent:
             if t.abs().max() > 100 and torch.get_default_dtype() == torch.float32:
