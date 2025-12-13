@@ -52,17 +52,17 @@ class Plane(Surface):
             valid = (
                 (torch.abs(new_o[..., 0]) < self.w / 2)
                 & (torch.abs(new_o[..., 1]) < self.h / 2)
-                & (ray.valid > 0)
+                & (ray.is_valid > 0)
             )
         else:
             valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
-                ray.valid > 0
+                ray.is_valid > 0
             )
 
         # Update rays
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
+        ray.is_valid = ray.is_valid * valid
 
         if ray.coherent:
             ray.opl = torch.where(

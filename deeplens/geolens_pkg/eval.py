@@ -109,7 +109,7 @@ class GeoLensEval:
             # Trace rays to sensor plane, shape [num_fov, num_rays, 3]
             ray = self.trace2sensor(ray)
             ray_o = ray.o.clone().cpu().numpy()
-            ray_valid = ray.valid.clone().cpu().numpy()
+            ray_valid = ray.is_valid.clone().cpu().numpy()
 
             color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
 
@@ -173,7 +173,7 @@ class GeoLensEval:
 
             # Convert to numpy, shape [num_grid, num_grid, num_rays, 3]
             ray_o = -ray.o.clone().cpu().numpy()
-            ray_valid = ray.valid.clone().cpu().numpy()
+            ray_valid = ray.is_valid.clone().cpu().numpy()
 
             color = RGB_COLORS[wvln_idx % len(RGB_COLORS)]
 
@@ -224,7 +224,7 @@ class GeoLensEval:
 
             ray = self.trace2sensor(ray)
             ray_xy = ray.o[..., :2]
-            ray_valid = ray.valid
+            ray_valid = ray.is_valid
 
             # Calculate green centroid as reference, shape [num_grid, num_grid, 2]
             if i == 0:
@@ -269,7 +269,7 @@ class GeoLensEval:
         )
         ray = self.trace2sensor(ray)
         ray_xy = ray.o[..., :2]  # Shape [num_grid, num_grid, spp, 2]
-        ray_valid = ray.valid  # Shape [num_grid, num_grid, spp]
+        ray_valid = ray.is_valid  # Shape [num_grid, num_grid, spp]
 
         # Calculate centroid for each field point for this wavelength
         ray_xy_center = (ray_xy * ray_valid.unsqueeze(-1)).sum(-2) / ray_valid.sum(
@@ -674,7 +674,7 @@ class GeoLensEval:
             da = ray.d[..., axis_idx : axis_idx + 1]
             pos_axis = (oa + da * t).squeeze(-1)  # [N, Z]
 
-            w = ray.valid.unsqueeze(-1).float()  # [N, 1] -> [N, Z] by broadcast
+            w = ray.is_valid.unsqueeze(-1).float()  # [N, 1] -> [N, Z] by broadcast
             pos_axis = pos_axis * w
             w_sum = w.sum(0)  # [Z]
             centroid = pos_axis.sum(0) / (w_sum + EPSILON)  # [Z]
@@ -752,7 +752,7 @@ class GeoLensEval:
         ray = self.trace2sensor(ray)
 
         # Calculate vignetting map
-        vignetting = ray.valid.sum(-1) / (ray.valid.shape[-1])
+        vignetting = ray.is_valid.sum(-1) / (ray.is_valid.shape[-1])
         return vignetting
 
     def draw_vignetting(self, filename=None, depth=DEPTH, resolution=512, show=False):

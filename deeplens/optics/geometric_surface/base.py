@@ -102,7 +102,7 @@ class Surface(DeepObj):
         # Update ray
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         ray.o = torch.where(valid.unsqueeze(-1), new_o, ray.o)
-        ray.valid = ray.valid * valid
+        ray.is_valid = ray.is_valid * valid
 
         if ray.coherent:
             if t.abs().max() > 100 and torch.get_default_dtype() == torch.float32:
@@ -151,7 +151,7 @@ class Surface(DeepObj):
 
                 new_o = ray.o + ray.d * t.unsqueeze(-1)
                 new_x, new_y = new_o[..., 0], new_o[..., 1]
-                valid = self.is_within_data_range(new_x, new_y) & (ray.valid > 0)
+                valid = self.is_within_data_range(new_x, new_y) & (ray.is_valid > 0)
 
                 ft = self.sag(new_x, new_y, valid) - new_o[..., 2]
                 dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
@@ -164,7 +164,7 @@ class Surface(DeepObj):
         # 2. One more (differentiable) Newton step to gain gradients
         new_o = ray.o + ray.d * t.unsqueeze(-1)
         new_x, new_y = new_o[..., 0], new_o[..., 1]
-        valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
+        valid = self.is_valid(new_x, new_y) & (ray.is_valid > 0)
 
         ft = self.sag(new_x, new_y, valid) - new_o[..., 2]
         dxdt, dydt, dzdt = ray.d[..., 0], ray.d[..., 1], ray.d[..., 2]
@@ -178,7 +178,7 @@ class Surface(DeepObj):
         with torch.no_grad():
             # Solution within the surface boundary. Ray is allowed to go back
             new_x, new_y = new_o[..., 0], new_o[..., 1]
-            valid = self.is_valid(new_x, new_y) & (ray.valid > 0)
+            valid = self.is_valid(new_x, new_y) & (ray.is_valid > 0)
 
             # Solution accurate enough
             ft = self.sag(new_x, new_y, valid) - new_o[..., 2]
@@ -210,7 +210,7 @@ class Surface(DeepObj):
         k = 1 - eta**2 * (1 - dot_product**2) 
 
         # Total internal reflection
-        valid = (k >= 0).squeeze(-1) & (ray.valid > 0)
+        valid = (k >= 0).squeeze(-1) & (ray.is_valid > 0)
         k = k * valid.unsqueeze(-1)
 
         # Update ray direction and obliquity
@@ -223,7 +223,7 @@ class Surface(DeepObj):
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
 
         # Update ray valid mask
-        ray.valid = ray.valid * valid
+        ray.is_valid = ray.is_valid * valid
 
         return ray
 
@@ -251,7 +251,7 @@ class Surface(DeepObj):
         new_d = F.normalize(new_d, p=2, dim=-1)
 
         # Update valid rays
-        valid_mask = ray.valid > 0
+        valid_mask = ray.is_valid > 0
         ray.d = torch.where(valid_mask.unsqueeze(-1), new_d, ray.d)
 
         return ray

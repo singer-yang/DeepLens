@@ -235,8 +235,8 @@ class TestApertureSurface:
         ray_in = aper.ray_reaction(ray_in)
         ray_out = aper.ray_reaction(ray_out)
         
-        assert ray_in.valid[0].item() == 1.0
-        assert ray_out.valid[0].item() == 0.0
+        assert ray_in.is_valid[0].item() == 1.0
+        assert ray_out.is_valid[0].item() == 0.0
 
     def test_aperture_surf_dict(self, device_auto):
         """Aperture should export to dictionary."""

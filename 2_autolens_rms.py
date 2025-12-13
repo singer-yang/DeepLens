@@ -157,7 +157,7 @@ def curriculum_design(
 
             # Ray error to center and valid mask
             ray_xy = ray.o[..., :2]
-            ray_valid = ray.valid
+            ray_valid = ray.is_valid
             ray_err = ray_xy - center_ref
 
             # Weight mask (non-differentiable), shape of [num_grid, num_grid]

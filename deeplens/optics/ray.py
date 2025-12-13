@@ -30,13 +30,12 @@ class Ray(DeepObj):
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         self.shape = self.o.shape[:-1]
         assert wvln > 0.1 and wvln < 1, "Ray wavelength unit should be [um]"
-        self.wvln = torch.full((*self.shape, 1), wvln)
+        self.wvln = torch.tensor(wvln)
 
         # Auxiliary ray parameters
-        self.valid = torch.ones(self.shape)
+        self.is_valid = torch.ones(self.shape)
         self.en = torch.ones((*self.shape, 1))
         self.obliq = torch.ones((*self.shape, 1))
-        self.is_forward = self.d[..., 2].unsqueeze(-1) > 0
 
         # Coherent ray tracing
         self.coherent = coherent  # bool
@@ -54,7 +53,7 @@ class Ray(DeepObj):
         """
         t = (z - self.o[..., 2]) / self.d[..., 2]
         new_o = self.o + self.d * t.unsqueeze(-1)
-        valid_mask = (self.valid > 0).unsqueeze(-1)
+        valid_mask = (self.is_valid > 0).unsqueeze(-1)
         self.o = torch.where(valid_mask, new_o, self.o)
 
         if self.coherent:
@@ -72,7 +71,7 @@ class Ray(DeepObj):
         Returns:
             torch.Tensor: Centroid of the ray, shape (..., 3)
         """
-        return (self.o * self.valid.unsqueeze(-1)).sum(-2) / self.valid.sum(-1).add(
+        return (self.o * self.is_valid.unsqueeze(-1)).sum(-2) / self.is_valid.sum(-1).add(
             EPSILON
         ).unsqueeze(-1)
 
@@ -94,7 +93,7 @@ class Ray(DeepObj):
 
         # Calculate RMS error for each region
         rms_error = ((self.o[..., :2] - center_ref[..., :2]) ** 2).sum(-1)
-        rms_error = (rms_error * self.valid).sum(-1) / (self.valid.sum(-1) + EPSILON)
+        rms_error = (rms_error * self.is_valid).sum(-1) / (self.is_valid.sum(-1) + EPSILON)
         rms_error = rms_error.sqrt()
 
         # Average RMS error
@@ -127,12 +126,11 @@ class Ray(DeepObj):
         """
         self.o = self.o.squeeze(dim)
         self.d = self.d.squeeze(dim)
-        self.wvln = self.wvln.squeeze(dim)
-        self.valid = self.valid.squeeze(dim)
+        # wvln is a single element tensor, no squeeze needed
+        self.is_valid = self.is_valid.squeeze(dim)
         self.en = self.en.squeeze(dim)
         self.opl = self.opl.squeeze(dim)
         self.obliq = self.obliq.squeeze(dim)
-        self.is_forward = self.is_forward.squeeze(dim)
         return self
 
     def unsqueeze(self, dim=None):
@@ -143,10 +141,9 @@ class Ray(DeepObj):
         """
         self.o = self.o.unsqueeze(dim)
         self.d = self.d.unsqueeze(dim)
-        self.wvln = self.wvln.unsqueeze(dim)
-        self.valid = self.valid.unsqueeze(dim)
+        # wvln is a single element tensor, no unsqueeze needed
+        self.is_valid = self.is_valid.unsqueeze(dim)
         self.en = self.en.unsqueeze(dim)
         self.opl = self.opl.unsqueeze(dim)
         self.obliq = self.obliq.unsqueeze(dim)
-        self.is_forward = self.is_forward.unsqueeze(dim)
         return self
