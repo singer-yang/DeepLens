@@ -330,6 +330,34 @@ class TestGeoLensRendering:
         
         assert img_render.min() >= 0
 
+    def test_geolens_analysis_rendering(self, sample_cellphone_lens, sample_image_small, test_output_dir):
+        """Should run analysis_rendering and return rendered image."""
+        import os
+        lens = sample_cellphone_lens
+        # Convert [B, C, H, W] to [H, W, C] format expected by analysis_rendering
+        img = sample_image_small.squeeze(0).permute(1, 2, 0)
+        save_path = os.path.join(test_output_dir, "analysis_render_test")
+        
+        # Run analysis_rendering
+        img_render = lens.analysis_rendering(
+            img_org=img, 
+            depth=DEPTH, 
+            spp=64,
+            save_name=save_path,
+            method="ray_tracing",
+            show=False
+        )
+        
+        # Check output shape [B, C, H, W]
+        assert img_render is not None
+        assert len(img_render.shape) == 4
+        assert img_render.shape[1] == 3  # RGB channels
+        # Check values are in valid range
+        assert img_render.min() >= 0
+        assert img_render.max() <= 1
+        # Check that output file was saved
+        assert os.path.exists(f"{save_path}.png")
+
 
 class TestGeoLensProperties:
     """Test lens property calculations."""
