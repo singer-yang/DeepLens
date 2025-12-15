@@ -16,7 +16,7 @@ from torchvision.utils import save_image
 from tqdm import tqdm
 
 from deeplens.hybridlens import HybridLens
-from deeplens.optics.utils import PSFLoss
+from deeplens.optics.loss import PSFLoss
 from deeplens.utils import set_logger, set_seed
 
 

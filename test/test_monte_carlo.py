@@ -51,7 +51,7 @@ class TestForwardIntegral:
         field = forward_integral(ray, ps=ps, ks=ks)
         
         # Sum should be approximately n_rays (number of valid rays)
-        valid_count = ray.valid.sum().item()
+        valid_count = ray.is_valid.sum().item()
         assert field.sum().item() == pytest.approx(valid_count, rel=0.2)
 
     def test_forward_integral_with_center(self, device_auto):

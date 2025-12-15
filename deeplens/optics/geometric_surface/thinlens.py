@@ -59,7 +59,7 @@ class ThinLens(Plane):
         (1) Lens maker's equation
         (2) Spherical lens function
         """
-        forward = (ray.d * ray.valid.unsqueeze(-1))[..., 2].sum() > 0
+        forward = (ray.d * ray.is_valid.unsqueeze(-1))[..., 2].sum() > 0
 
         # Calculate convergence point
         if forward:
@@ -87,7 +87,7 @@ class ThinLens(Plane):
 
         # Optical path length change
         if ray.coherent:
-            valid = ray.valid > 0
+            valid = ray.is_valid > 0
             if forward:
                 new_opl = (
                     ray.opl

@@ -359,11 +359,11 @@ class HybridLens(Lens):
             # Draw wave propagation
             # Calculate ray center for wave propagation visualization
             ray_center_doe = (
-                ((ray.o * ray.valid.unsqueeze(-1)).sum(dim=0) / ray.valid.sum()).cpu().numpy()
+                ((ray.o * ray.is_valid.unsqueeze(-1)).sum(dim=0) / ray.is_valid.sum()).cpu().numpy()
             )  # shape [3]
             ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
             ray_center_sensor = (
-                ((ray.o * ray.valid.unsqueeze(-1)).sum(dim=0) / ray.valid.sum()).cpu().numpy()
+                ((ray.o * ray.is_valid.unsqueeze(-1)).sum(dim=0) / ray.is_valid.sum()).cpu().numpy()
             )  # shape [3]
 
             arc_radi = ray_center_sensor[2] - ray_center_doe[2]

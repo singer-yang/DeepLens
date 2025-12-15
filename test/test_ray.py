@@ -21,7 +21,7 @@ class TestRayInit:
         
         assert ray.o.shape == (1, 3)
         assert ray.d.shape == (1, 3)
-        assert ray.wvln.shape == (1, 1)
+        assert ray.wvln.shape == ()  # 0D scalar tensor
 
     def test_ray_init_batch(self, device_auto):
         """Ray should support batch initialization."""
@@ -63,7 +63,7 @@ class TestRayInit:
         
         # Valid wavelength (0.55 um = 550 nm)
         ray = Ray(o, d, wvln=0.55, device=device_auto)
-        assert ray.wvln[0, 0] == 0.55
+        assert torch.isclose(ray.wvln, torch.tensor(0.55, device=device_auto)).item()
         
         # Wavelength out of range should raise
         with pytest.raises(AssertionError):
@@ -77,7 +77,7 @@ class TestRayInit:
         
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        assert torch.all(ray.valid == 1.0)
+        assert torch.all(ray.is_valid == 1.0)
 
     def test_ray_init_opl_zero(self, device_auto):
         """Ray should initialize with zero optical path length."""
@@ -88,16 +88,6 @@ class TestRayInit:
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
         assert torch.all(ray.opl == 0.0)
-
-    def test_ray_is_forward(self, device_auto):
-        """Ray should track forward/backward direction."""
-        o = torch.zeros(2, 3, device=device_auto)
-        d = torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]], device=device_auto)
-        
-        ray = Ray(o, d, wvln=0.55, device=device_auto)
-        
-        assert ray.is_forward[0, 0] == True
-        assert ray.is_forward[1, 0] == False
 
 
 class TestRayPropTo:
@@ -143,7 +133,7 @@ class TestRayPropTo:
         d[:, 2] = 1.0
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        ray.valid[1] = 0.0  # Invalidate second ray
+        ray.is_valid[1] = 0.0  # Invalidate second ray
         original_o = ray.o.clone()
         
         ray.prop_to(z=10.0)
@@ -196,7 +186,7 @@ class TestRayCentroid:
         d[:, 2] = 1.0
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        ray.valid[1] = 0.0  # Invalidate second ray
+        ray.is_valid[1] = 0.0  # Invalidate second ray
         
         centroid = ray.centroid()
         
