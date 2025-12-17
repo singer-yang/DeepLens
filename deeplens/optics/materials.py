@@ -278,7 +278,7 @@ class Material(DeepObj):
         def ivs(a):
             return 1.0 / a**2
 
-        lambdas = [656.3, 589.3, 486.1]
+        lambdas = [656.3, 587.6, 486.1]
         B = (n - 1) / V / (ivs(lambdas[2]) - ivs(lambdas[0]))
         A = n - B * ivs(lambdas[1])
         return A, B
