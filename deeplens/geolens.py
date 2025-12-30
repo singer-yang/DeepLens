@@ -917,7 +917,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     #   2. Exit-pupil PSF: coherent ray tracing to exit pupil, then free-space propagation with ASM
     #   3. Huygens PSF: coherent ray tracing to exit pupil, then Huygens-Fresnel integration
     # ====================================================================================
-    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=False):
+    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=True):
         """Single wavelength geometric (incoherent) PSF calculation.
 
         Args:
@@ -978,6 +978,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     def psf_huygens(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
         """Single wavelength Huygens PSF calculation. 
+        
+        This function is not differentiable due to its heavy computational cost.
         
         Steps:
             1, Trace coherent rays to exit-pupil plane.
@@ -1114,7 +1116,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return self.psf_pupil_prop(point, ks=ks, wvln=wvln, spp=spp)
 
     def psf_pupil_prop(self, point, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
-        """Single point monochromatic PSF using exit-pupil diffraction model. This function is similar to ZEMAX FFT_PSF but implement free-space propagation with Angular Spectrum Method (ASM) rathar than FFT transform.
+        """Single point monochromatic PSF using exit-pupil diffraction model. 
+        
+        This function is differentiable due to the efficient implementation.
 
         Steps:
             1, Calculate complex wavefield/wavefront at exit-pupil plane by coherent ray tracing.
@@ -1130,8 +1134,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         Returns:
             psf_out (torch.Tensor): PSF patch. Normalized to sum to 1. Shape [ks, ks]
 
+        Reference:
+            [1] "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model", SIGGRAPH Asia 2024.
+
         Note:
-            [1] Free-space propagation using ASM is more accurate than doing FFT, because FFT (as used in ZEMAX) assumes far-field condition (e.g., chief ray perpendicular to image plane).
+            [1] This function is similar to ZEMAX FFT_PSF but implement free-space propagation with Angular Spectrum Method (ASM) rathar than FFT transform. Free-space propagation using ASM is more accurate than doing FFT, because FFT (as used in ZEMAX) assumes far-field condition (e.g., chief ray perpendicular to image plane).
         """
         # Pupil field by coherent ray tracing
         wavefront, psfc = self.pupil_field(point=point, wvln=wvln, spp=spp, recenter=recenter)
