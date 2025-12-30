@@ -29,7 +29,7 @@ from deeplens.basics import (
 from deeplens.optics.monte_carlo import forward_integral
 from deeplens.optics.geometric_surface import Plane
 from deeplens.optics.phase_surface import Phase
-from deeplens.optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
+from deeplens.optics.diffractive_surface import Binary2, Grating, Pixel2D, Fresnel, Zernike
 from deeplens.optics.wave import AngularSpectrumMethod
 from deeplens.optics.utils import diff_float
 
@@ -74,14 +74,17 @@ class HybridLens(Lens):
             data = json.load(f)
 
             doe_dict = data["DOE"]
-            if doe_dict["param_model"] == "binary2":
+            doe_param_model = doe_dict["type"].lower()
+            if doe_param_model == "binary2":
                 doe = Binary2.init_from_dict(doe_dict)
-            elif doe_dict["param_model"] == "pixel2d":
+            elif doe_param_model == "pixel2d":
                 doe = Pixel2D.init_from_dict(doe_dict)
-            elif doe_dict["param_model"] == "fresnel":
+            elif doe_param_model == "fresnel":
                 doe = Fresnel.init_from_dict(doe_dict)
-            elif doe_dict["param_model"] == "zernike":
+            elif doe_param_model == "zernike":
                 doe = Zernike.init_from_dict(doe_dict)
+            elif doe_param_model == "grating":
+                doe = Grating.init_from_dict(doe_dict)
             else:
                 raise ValueError(
                     f"Unsupported DOE parameter model: {doe_dict['param_model']}"
