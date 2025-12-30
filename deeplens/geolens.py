@@ -581,6 +581,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             return ray
 
+    def trace2exit_pupil(self, ray):
+        """Forward trace rays through the lens to exit pupil plane.
+
+        Args:
+            ray (Ray object): Ray object.
+        """
+        ray = self.trace2sensor(ray)
+        pupil_z, _ = self.get_exit_pupil()
+        ray = ray.prop_to(pupil_z)
+        return ray
+
     def forward_tracing(self, ray, surf_range, record):
         """Forward trace rays through the lens to last surface.
 
@@ -900,42 +911,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return img_render
 
     # ====================================================================================
-    # PSF (incoherent ray tracing)
+    # PSF 
+    # We support three types of PSF:
+    #   1. Geometric PSF: incoherent intensity ray tracing
+    #   2. Exit-pupil PSF: coherent ray tracing to exit pupil, then free-space propagation with ASM
+    #   3. Huygens PSF: coherent ray tracing to exit pupil, then Huygens-Fresnel integration
     # ====================================================================================
-    @torch.no_grad()
-    def psf_center(self, points, method="chief_ray"):
-        """Compute reference PSF center (flipped to match the original point) for given point source.
-
-        Args:
-            points: [..., 3] un-normalized point is in object plane. [-Inf, Inf] * [-Inf, Inf] * [-Inf, 0]
-
-        Returns:
-            psf_center: [..., 2] un-normalized psf center in sensor plane.
-        """
-        if method == "chief_ray":
-            # Shrink the pupil and calculate green light centroid ray as the chief ray
-            ray = self.sample_from_points(points, scale_pupil=0.5, num_rays=SPP_CALC)
-            ray = self.trace2sensor(ray)
-            if not (ray.is_valid == 1).any():
-                raise RuntimeError("When tracing chief ray for PSF center calculation, no ray arrives at the sensor.")
-            psf_center = ray.centroid()
-            psf_center = -psf_center[..., :2]  # shape [..., 2]
-
-        elif method == "pinhole":
-            # Pinhole camera perspective projection, distortion not considered
-            if points[..., 2].min().abs() < 100:
-                print("Point source is too close, pinhole model may be inaccurate for PSF center calculation.")
-            tan_point_fov_x = -points[..., 0] / points[..., 2]
-            tan_point_fov_y = -points[..., 1] / points[..., 2]
-            psf_center_x = self.foclen * tan_point_fov_x
-            psf_center_y = self.foclen * tan_point_fov_y
-            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1).to(self.device)
-
-        else:
-            raise ValueError(f"Unsupported method for PSF center calculation: {method}.")
-
-        return psf_center
-
     def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=False):
         """Single wavelength geometric (incoherent) PSF calculation.
 
@@ -987,7 +968,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Monte Carlo integration
         psf = forward_integral(ray.flip_xy(), ps=pixel_size, ks=ks, pointc=pointc)
 
-        # Normalize to sum to 1
+        # Intensity normalization
         psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
 
         if single_point:
@@ -995,8 +976,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return psf
 
-    def psf_huygens(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=False):
-        """Single wavelength Huygens (coherent) PSF calculation.
+    def psf_huygens(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
+        """Single wavelength Huygens PSF calculation. 
+        
+        Steps:
+            1, Trace coherent rays to exit-pupil plane.
+            2, Treat every ray as a secondary point source emitting a spherical wave.
 
         Args:
             points (Tensor): Normalized point source position. Shape of [N, 3], x, y in range [-1, 1], z in range [-Inf, 0].
@@ -1009,8 +994,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             psf: Shape of [ks, ks] or [N, ks, ks].
 
         References:
-            [1] https://optics.ansys.com/hc/en-us/articles/42661723066515-What-is-a-Point-Spread-Function
-            [2] https://optics.ansys.com/hc/en-us/articles/42661795535251-What-is-the-difference-between-the-FFT-and-Huygens-PSF
+            [1] "Optical Aberrations Correction in Postprocessing Using Imaging Simulation", TOG 2021
+
+        Note:
+            This is different from ZEMAX Huygens PSF, which traces rays to image plane and do plane wave integration.
         """
         assert torch.get_default_dtype() == torch.float64, (
             "Default dtype must be set to float64 for accurate phase calculation."
@@ -1019,6 +1006,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         sensor_w, sensor_h = self.sensor_size
         pixel_size = self.pixel_size
         device = self.device
+        wvln_mm = wvln * 1e-3  # Convert wavelength to mm
         
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
@@ -1030,38 +1018,238 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             single_point = False
 
-        # Sample rays. Ray position in the object space by perspective projection
+        # Sample rays from object point
         depth = points[:, 2]
         scale = self.calc_scale(depth)
         point_obj_x = points[..., 0] * scale * sensor_w / 2
         point_obj_y = points[..., 1] * scale * sensor_h / 2
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
         ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
-                
-        # Trace rays to sensor plane (coherent)
-        ray.coherent = True
-        ray = self.trace2sensor(ray)
-
-        # Calculate PSF center, shape [N, 2]
-        if recenter:
-            pointc = self.psf_center(point_obj, method="chief_ray")
-        else:
-            pointc = self.psf_center(point_obj, method="pinhole")
         
-        # Monte Carlo integration (coherent field)
-        psf_complex = forward_integral(ray.flip_xy(), ps=pixel_size, ks=ks, pointc=pointc)
+        # Trace rays coherently through the lens to exit pupil
+        ray.coherent = True
+        ray = self.trace2exit_pupil(ray)
+                
+        # Calculate PSF center (not flipped here)
+        if recenter:
+            pointc = - self.psf_center(point_obj, method="chief_ray")
+        else:
+            pointc = - self.psf_center(point_obj, method="pinhole")
+        
+        # Build PSF pixel coordinates (sensor plane at z = d_sensor)
+        sensor_z = self.d_sensor.item()
+        psf_half_size = (ks / 2) * pixel_size  # Physical half-size of PSF region
+        x_coords = torch.linspace(-psf_half_size + pixel_size/2, psf_half_size - pixel_size/2, ks, device=device)
+        y_coords = torch.linspace(psf_half_size - pixel_size/2, -psf_half_size + pixel_size/2, ks, device=device)
+        psf_x, psf_y = torch.meshgrid(
+            pointc[0, 0] + x_coords,
+            pointc[0, 1] + y_coords,
+            indexing="xy"
+        )  # [ks, ks] each
+        
+        # Get valid rays only
+        valid_mask = ray.is_valid > 0
+        valid_pos = ray.o[valid_mask]  # [num_valid, 3]
+        valid_dir = ray.d[valid_mask]  # [num_valid, 3]
+        valid_opl = ray.opl[valid_mask]  # [num_valid]
+        num_valid = valid_pos.shape[0]
+        
+        # Huygens integration: sum spherical waves from each secondary source
+        psf_complex = torch.zeros(ks, ks, dtype=torch.complex128, device=device)
+        opl_min = valid_opl.min()
+        
+        # Compute distance from each secondary source to each pixel
+        batch_size = min(num_valid, 10_000)  # Process rays in batches
+        for batch_start in range(0, num_valid, batch_size):
+            batch_end = min(batch_start + batch_size, num_valid)
+            
+            # Batch ray data
+            batch_pos = valid_pos[batch_start:batch_end]  # [batch, 3]
+            batch_dir = valid_dir[batch_start:batch_end]  # [batch, 3]
+            batch_opl = valid_opl[batch_start:batch_end].squeeze(-1)  # [batch]
+            
+            # Distance from each secondary source to each pixel
+            # batch_pos: [batch, 3], psf_x: [ks, ks]
+            dx = psf_x.unsqueeze(-1) - batch_pos[:, 0]  # [ks, ks, batch]
+            dy = psf_y.unsqueeze(-1) - batch_pos[:, 1]  # [ks, ks, batch]
+            dz = sensor_z - batch_pos[:, 2]  # [batch]
+            
+            # Distance r from secondary source to pixel
+            r = torch.sqrt(dx**2 + dy**2 + dz**2)  # [ks, ks, batch]
+            
+            # Obliquity factor: cos(theta) where theta is angle from normal
+            # Using ray direction at exit pupil (dz component)
+            obliq = torch.abs(batch_dir[:, 2])  # [batch]
+            amp = torch.sqrt(obliq)  # Amplitude factor
+            
+            # Total optical path = OPL through lens + distance to pixel
+            total_opl = batch_opl + r  # [ks, ks, batch]
+            
+            # Phase relative to reference
+            phase = torch.fmod((total_opl - opl_min) / wvln_mm, 1.0) * (2 * torch.pi)  # [ks, ks, batch]
+            
+            # Complex amplitude: A * exp(i * phase) / r (spherical wave decay)
+            # We use 1/r for spherical wave amplitude decay
+            complex_amp = (amp / r) * torch.exp(1j * phase)  # [ks, ks, batch]
+            
+            # Sum contributions from this batch
+            psf_complex += complex_amp.sum(dim=-1)  # [ks, ks]
         
         # Convert complex field to intensity
         psf = psf_complex.abs()**2
 
-        # Intensity normalize to sum to 1
-        psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
+        # Intensity normalization
+        psf = psf / (torch.sum(psf) + EPSILON)
+
+        # Flip PSF
+        psf = torch.flip(psf, [-2, -1])
 
         if single_point:
             psf = psf.squeeze(0)
 
         psf = diff_float(psf)
         return psf
+
+    def psf_coherent(self, point, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
+        return self.psf_pupil_prop(point, ks=ks, wvln=wvln, spp=spp)
+
+    def psf_pupil_prop(self, point, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
+        """Single point monochromatic PSF using exit-pupil diffraction model. This function is similar to ZEMAX FFT_PSF but implement free-space propagation with Angular Spectrum Method (ASM) rathar than FFT transform.
+
+        Steps:
+            1, Calculate complex wavefield/wavefront at exit-pupil plane by coherent ray tracing.
+            2, Free-space propagation to sensor plane and calculate intensity PSF.
+
+        Args:
+            point (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).
+            ks (int, optional): size of the PSF patch. Defaults to 101.
+            wvln (float, optional): wvln. Defaults to 0.589.
+            spp (int, optional): number of rays to sample. Defaults to 1000000.
+            recenter (bool, optional): Recenter PSF using chief ray. Defaults to True.
+
+        Returns:
+            psf_out (torch.Tensor): PSF patch. Normalized to sum to 1. Shape [ks, ks]
+
+        Note:
+            [1] Free-space propagation using ASM is more accurate than doing FFT, because FFT (as used in ZEMAX) assumes far-field condition (e.g., chief ray perpendicular to image plane).
+        """
+        # Pupil field by coherent ray tracing
+        wavefront, psfc = self.pupil_field(point=point, wvln=wvln, spp=spp, recenter=recenter)
+
+        # Propagate to sensor plane and get intensity
+        pupilz, pupilr = self.get_exit_pupil()
+        h, w = wavefront.shape
+        # Manually pad wave field
+        wavefront = F.pad(
+            wavefront.unsqueeze(0).unsqueeze(0),
+            [h // 2, h // 2, w // 2, w // 2],
+            mode="constant",
+            value=0,
+        )
+        # Free-space propagation using Angular Spectrum Method (ASM)
+        sensor_field = AngularSpectrumMethod(
+            wavefront,
+            z=self.d_sensor - pupilz,
+            wvln=wvln,
+            ps=self.pixel_size,
+            padding=False,
+        )
+        # Get intensity
+        psf_inten = sensor_field.abs() ** 2
+
+        # Calculate PSF center
+        h, w = psf_inten.shape[-2:]
+        # consider both interplation and padding
+        psfc_idx_i = ((2 - psfc[1]) * h / 4).round().long()
+        psfc_idx_j = ((2 + psfc[0]) * w / 4).round().long()
+
+        # Crop valid PSF region and normalize
+        if ks is not None:
+            psf_inten_pad = (
+                F.pad(
+                    psf_inten,
+                    [ks // 2, ks // 2, ks // 2, ks // 2],
+                    mode="constant",
+                    value=0,
+                )
+                .squeeze(0)
+                .squeeze(0)
+            )
+            psf = psf_inten_pad[
+                psfc_idx_i : psfc_idx_i + ks, psfc_idx_j : psfc_idx_j + ks
+            ]
+        else:
+            psf = psf_inten
+
+        # Intensity normalization, shape of [ks, ks] or [h, w]
+        psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
+        psf = diff_float(psf)
+        return psf
+
+    def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
+        """Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing. The wavefront has the same size as the image sensor. This function is differentiable.
+
+        Args:
+            point (tensor): Point source position. Shape of [N, 3], [-1, 1] * [-1, 1] * [-Inf, 0].
+            wvln (float): Ray wavelength in [um].
+            spp (int): Ray sample number per point.
+        """
+        assert spp >= 1_000_000, (
+            f"Ray sampling {spp} is too small for coherent ray tracing, which may lead to inaccurate simulation."
+        )
+        assert torch.get_default_dtype() == torch.float64, (
+            "Default dtype must be set to float64 for accurate phase calculation."
+        )
+
+        sensor_w, sensor_h = self.sensor_size
+        device = self.device
+
+        if isinstance(point, list):
+            point = torch.tensor(point, device=device).unsqueeze(0)  # [1, 3]
+        elif torch.is_tensor(point) and len(point.shape) == 1:
+            point = point.unsqueeze(0).to(torch.float64).to(device)  # [1, 3]
+        else:
+            raise ValueError("Unsupported point type.")
+
+        assert point.shape[0] == 1, "Only one point is supported for pupil field calculation."
+
+        # Ray origin in the object space
+        scale = self.calc_scale(point[:, 2].item())
+        point_obj = point.clone()
+        point_obj[:, 0] = point[:, 0] * scale * sensor_w / 2  # x coordinate
+        point_obj[:, 1] = point[:, 1] * scale * sensor_h / 2  # y coordinate
+
+        # Ray center determined by chief ray
+        # Shape of [N, 2], un-normalized physical coordinates
+        if recenter:
+            pointc = self.psf_center(point_obj, method="chief_ray")
+        else:
+            pointc = self.psf_center(point_obj, method="pinhole")
+
+        # Ray-tracing to exit_pupil
+        ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
+        ray.coherent = True
+        ray = self.trace2exit_pupil(ray)
+
+        # Calculate complex field (same physical size and resolution as the sensor)
+        # Complex field is flipped here for further PSF calculation
+        pointc_ref = torch.zeros_like(point[:, :2]).to(device)  # [N, 2]
+        wavefront = forward_integral(
+            ray.flip_xy(),
+            ps=self.pixel_size,
+            ks=self.sensor_res[1],
+            pointc=pointc_ref,
+        )
+        wavefront = wavefront.squeeze(0)  # [H, H]
+
+        # PSF center (on the sensor plane)
+        pointc = pointc[0, :]
+        psf_center = [
+            pointc[0] / sensor_w * 2,
+            pointc[1] / sensor_h * 2,
+        ]
+
+        return wavefront, psf_center
 
     def psf_map(
         self,
@@ -1097,139 +1285,41 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         psf_map = psfs.reshape(grid[1], grid[0], 1, ks, ks)
         return psf_map
 
-    # ====================================================================================
-    # PSF (coherent ray tracing)
-    # ====================================================================================
-    def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
-        """Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing. The wavefront has the same size as the image sensor. This function is differentiable.
+    @torch.no_grad()
+    def psf_center(self, points, method="chief_ray"):
+        """Compute reference PSF center (flipped to match the original point) for given point source.
 
         Args:
-            point (tensor): Point source position. Shape of [N, 3], [-1, 1] * [-1, 1] * [-Inf, 0].
-            wvln (float): Ray wavelength in [um].
-            spp (int): Ray sample number per point.
-        """
-        assert spp >= 1_000_000, (
-            f"Ray sampling {spp} is too small for coherent ray tracing, which may lead to inaccurate simulation."
-        )
-        assert torch.get_default_dtype() == torch.float64, (
-            "Default dtype must be set to float64 for accurate phase calculation."
-        )
-
-        sensor_w, sensor_h = self.sensor_size
-        device = self.device
-
-        if isinstance(point, list):
-            point = torch.tensor(point, device=device).unsqueeze(0)  # [1, 3]
-        elif torch.is_tensor(point) and len(point.shape) == 1:
-            point = point.unsqueeze(0).to(torch.float64).to(device)  # [1, 3]
-        else:
-            raise ValueError("Unsupported point type.")
-
-        # Ray origin in the object space
-        scale = self.calc_scale(point[:, 2].item())
-        point_obj = point.clone()
-        point_obj[:, 0] = point[:, 0] * scale * sensor_w / 2  # x coordinate
-        point_obj[:, 1] = point[:, 1] * scale * sensor_h / 2  # y coordinate
-
-        # Ray center determined by chief ray
-        # Shape of [N, 2], un-normalized physical coordinates
-        pointc_chief_ray = self.psf_center(point_obj, method="chief_ray")
-
-        # Ray-tracing to last surface
-        ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
-        ray.coherent = True
-        ray, _ = self.trace(ray)
-
-        # Back-trace to the exit pupil plane
-        pupilz, _ = self.get_exit_pupil()
-        ray = ray.prop_to(pupilz)
-
-        # Calculate a full-resolution complex field for exit-pupil diffraction
-        pointc_ref = torch.zeros_like(point[:, :2]).to(device)  # [N, 2]
-        wavefront = forward_integral(
-            ray.flip_xy(),
-            ps=self.pixel_size,
-            ks=self.sensor_res[1],
-            pointc=pointc_ref,
-        )
-        wavefront = wavefront.squeeze(0)  # [H, H]
-
-        # Aperture clip
-
-        # PSF center (on the sensor plane)
-        pointc_chief_ray = pointc_chief_ray[0, :]
-        psf_center = [
-            pointc_chief_ray[0] / sensor_w * 2,
-            pointc_chief_ray[1] / sensor_h * 2,
-        ]
-
-        return wavefront, psf_center
-
-    def psf_coherent(self, point, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
-        """Single point monochromatic PSF using ray-wave model.
-
-        Steps:
-            1, calculate complex wavefield at DOE (pupil) plane by coherent ray tracing.
-            2, propagate through DOE to sensor plane, calculate intensity PSF, crop the valid region and normalize.
-
-        Args:
-            point (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).
-            ks (int, optional): size of the PSF patch. Defaults to 101.
-            wvln (float, optional): wvln. Defaults to 0.589.
-            spp (int, optional): number of rays to sample. Defaults to 1000000.
+            points: [..., 3] un-normalized point is in object plane. [-Inf, Inf] * [-Inf, Inf] * [-Inf, 0]
 
         Returns:
-            psf_out (torch.Tensor): PSF patch. Normalized to sum to 1. Shape [ks, ks]
+            psf_center: [..., 2] un-normalized psf center in sensor plane.
         """
-        # Pupil field by coherent ray tracing
-        wavefront, psfc = self.pupil_field(point=point, wvln=wvln, spp=spp)
+        if method == "chief_ray":
+            # Shrink the pupil and calculate green light centroid ray as the chief ray
+            ray = self.sample_from_points(points, scale_pupil=0.5, num_rays=SPP_CALC)
+            ray = self.trace2sensor(ray)
+            if not (ray.is_valid == 1).any():
+                raise RuntimeError("When tracing chief ray for PSF center calculation, no ray arrives at the sensor.")
+            psf_center = ray.centroid()
+            psf_center = -psf_center[..., :2]  # shape [..., 2]
 
-        # Propagate to sensor and get intensity. (Manually pad wave field)
-        pupilz, pupilr = self.get_exit_pupil()
-        h, w = wavefront.shape
-        wavefront = F.pad(
-            wavefront.unsqueeze(0).unsqueeze(0),
-            [h // 2, h // 2, w // 2, w // 2],
-            mode="constant",
-            value=0,
-        )
-        sensor_field = AngularSpectrumMethod(
-            wavefront,
-            z=self.d_sensor - pupilz,
-            wvln=wvln,
-            ps=self.pixel_size,
-            padding=False,
-        )
+        elif method == "pinhole":
+            # Pinhole camera perspective projection, distortion not considered
+            if points[..., 2].min().abs() < 100:
+                print("Point source is too close, pinhole model may be inaccurate for PSF center calculation.")
+            tan_point_fov_x = -points[..., 0] / points[..., 2]
+            tan_point_fov_y = -points[..., 1] / points[..., 2]
+            psf_center_x = self.foclen * tan_point_fov_x
+            psf_center_y = self.foclen * tan_point_fov_y
+            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1).to(self.device)
 
-        psf_inten = sensor_field.abs() ** 2
-
-        # Calculate PSF center
-        h, w = psf_inten.shape[-2:]
-        # consider both interplation and padding
-        psfc_idx_i = ((2 - psfc[1]) * h / 4).round().long()
-        psfc_idx_j = ((2 + psfc[0]) * w / 4).round().long()
-
-        # Crop valid PSF region and normalize
-        if ks is not None:
-            psf_inten_pad = (
-                F.pad(
-                    psf_inten,
-                    [ks // 2, ks // 2, ks // 2, ks // 2],
-                    mode="constant",
-                    value=0,
-                )
-                .squeeze(0)
-                .squeeze(0)
-            )
-            psf = psf_inten_pad[
-                psfc_idx_i : psfc_idx_i + ks, psfc_idx_j : psfc_idx_j + ks
-            ]
         else:
-            psf = psf_inten
+            raise ValueError(f"Unsupported method for PSF center calculation: {method}.")
 
-        psf /= psf.sum()  # shape of [ks, ks] or [h, w]
-        psf = diff_float(psf)
-        return psf
+        return psf_center
+
+    
 
     # ====================================================================================
     # Classical optical design
@@ -1437,13 +1527,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if not hasattr(self, "foclen"):
             return
         
-        # 1. Perspective projection
+        # 1. Perspective projection (effective FoV)
         self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
         self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
         self.dfov = 2 * math.atan(self.r_sensor / self.foclen)
         self.rfov = self.dfov / 2 # radius (half diagonal) FoV
 
-        # 2. Ray tracing to calculate real FoV (with distortion)
+        # 2. Ray tracing to calculate real FoV (distortion-affected FoV)
         # Sample rays from edge of sensor, shape [SPP_CALC, 3]
         o1 = torch.zeros([SPP_CALC, 3])
         o1 = torch.tensor([self.r_sensor, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
@@ -1467,7 +1557,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if torch.isnan(rfov):
             self.real_rfov = self.rfov
             self.real_dfov = self.dfov
-            print(f"Ray tracing to compute fov failed, set real_rfov to {self.rfov}.")
+            print(f"Failed to calculate distored FoV by ray tracing, use effective FoV {self.rfov} rad.")
         else:
             self.real_rfov = rfov.item()
             self.real_dfov = 2 * rfov.item()
@@ -1640,8 +1730,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Sample rays from edge of aperture stop
         aper_idx = self.aper_idx
-        aper_z = self.surfaces[aper_idx].d.item()
-        aper_r = self.surfaces[aper_idx].r
+        aper_surf = self.surfaces[aper_idx]
+        aper_z = aper_surf.d.item()
+        if aper_surf.is_square:
+            aper_r = float(np.sqrt(2)) * aper_surf.r
+        else:
+            aper_r = aper_surf.r
 
         if paraxial:
             ray_o = torch.tensor([[DELTA_PARAXIAL, 0, aper_z]]).repeat(32, 1)
