@@ -48,10 +48,12 @@ class Plane(Surface):
         # Solve intersection
         t = (0.0 - ray.o[..., 2]) / ray.d[..., 2]
         new_o = ray.o + t.unsqueeze(-1) * ray.d
+        
+        # Aperture mask
         if self.is_square:
             valid = (
-                (torch.abs(new_o[..., 0]) < self.w / 2)
-                & (torch.abs(new_o[..., 1]) < self.h / 2)
+                (torch.abs(new_o[..., 0]) < (self.w / 2))
+                & (torch.abs(new_o[..., 1]) < (self.h / 2))
                 & (ray.is_valid > 0)
             )
         else:
