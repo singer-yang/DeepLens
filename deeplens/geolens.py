@@ -936,7 +936,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return psf_center
 
-    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=None, recenter=False, mode="geometric"):
+    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=False):
         """Single wavelength geometric (incoherent) PSF calculation.
 
         Args:
@@ -945,20 +945,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             wvln (float, optional): Wavelength.
             spp (int, optional): Sample per pixel.
             recenter (bool, optional): Recenter PSF using chief ray.
-            mode (str, optional): PSF calculation mode. Options: "geometric", "huygens".
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
 
         References:
             [1] https://optics.ansys.com/hc/en-us/articles/42661723066515-What-is-a-Point-Spread-Function
-            [2] https://optics.ansys.com/hc/en-us/articles/42661795535251-What-is-the-difference-between-the-FFT-and-Huygens-PSF
         """
         sensor_w, sensor_h = self.sensor_size
         pixel_size = self.pixel_size
         device = self.device
-        if spp is None:
-            spp = SPP_PSF if mode == "geometric" else SPP_COHERENT
         
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
@@ -978,14 +974,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
         ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
                 
-        # Trace rays to sensor plane
-        if mode == "geometric":
-            ray.coherent = False
-        elif mode == "huygens":
-            ray.coherent = True
-        else:
-            raise ValueError(f"Unsupported PSF calculation mode: {mode}.")
-        
+        # Trace rays to sensor plane (incoherent)
+        ray.coherent = False
         ray = self.trace2sensor(ray)
 
         # Calculate PSF center, shape [N, 2]
@@ -996,8 +986,6 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         
         # Monte Carlo integration
         psf = forward_integral(ray.flip_xy(), ps=pixel_size, ks=ks, pointc=pointc)
-        if mode == "huygens":
-            psf = psf.abs()**2
 
         # Normalize to sum to 1
         psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
@@ -1005,6 +993,74 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if single_point:
             psf = psf.squeeze(0)
 
+        return psf
+
+    def psf_huygens(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=False):
+        """Single wavelength Huygens (coherent) PSF calculation.
+
+        Args:
+            points (Tensor): Normalized point source position. Shape of [N, 3], x, y in range [-1, 1], z in range [-Inf, 0].
+            ks (int, optional): Output kernel size.
+            wvln (float, optional): Wavelength.
+            spp (int, optional): Sample per pixel.
+            recenter (bool, optional): Recenter PSF using chief ray.
+
+        Returns:
+            psf: Shape of [ks, ks] or [N, ks, ks].
+
+        References:
+            [1] https://optics.ansys.com/hc/en-us/articles/42661723066515-What-is-a-Point-Spread-Function
+            [2] https://optics.ansys.com/hc/en-us/articles/42661795535251-What-is-the-difference-between-the-FFT-and-Huygens-PSF
+        """
+        assert torch.get_default_dtype() == torch.float64, (
+            "Default dtype must be set to float64 for accurate phase calculation."
+        )
+        
+        sensor_w, sensor_h = self.sensor_size
+        pixel_size = self.pixel_size
+        device = self.device
+        
+        # Points shape of [N, 3]
+        if not torch.is_tensor(points):
+            points = torch.tensor(points, device=device)
+        
+        if len(points.shape) == 1:
+            single_point = True
+            points = points.unsqueeze(0)
+        else:
+            single_point = False
+
+        # Sample rays. Ray position in the object space by perspective projection
+        depth = points[:, 2]
+        scale = self.calc_scale(depth)
+        point_obj_x = points[..., 0] * scale * sensor_w / 2
+        point_obj_y = points[..., 1] * scale * sensor_h / 2
+        point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
+        ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
+                
+        # Trace rays to sensor plane (coherent)
+        ray.coherent = True
+        ray = self.trace2sensor(ray)
+
+        # Calculate PSF center, shape [N, 2]
+        if recenter:
+            pointc = self.psf_center(point_obj, method="chief_ray")
+        else:
+            pointc = self.psf_center(point_obj, method="pinhole")
+        
+        # Monte Carlo integration (coherent field)
+        psf_complex = forward_integral(ray.flip_xy(), ps=pixel_size, ks=ks, pointc=pointc)
+        
+        # Convert complex field to intensity
+        psf = psf_complex.abs()**2
+
+        # Intensity normalize to sum to 1
+        psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
+
+        if single_point:
+            psf = psf.squeeze(0)
+
+        psf = diff_float(psf)
         return psf
 
     def psf_map(
@@ -1052,8 +1108,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             wvln (float): Ray wavelength in [um].
             spp (int): Ray sample number per point.
         """
-        assert spp >= 1000000, (
-            "Ray sampling is too small for coherent ray tracing, which may lead to inaccurate simulation."
+        assert spp >= 1_000_000, (
+            f"Ray sampling {spp} is too small for coherent ray tracing, which may lead to inaccurate simulation."
         )
         assert torch.get_default_dtype() == torch.float64, (
             "Default dtype must be set to float64 for accurate phase calculation."
