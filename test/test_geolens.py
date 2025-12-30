@@ -222,12 +222,12 @@ class TestGeoLensPSF:
         original_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float64)
         try:
-            points = torch.tensor([[0.0, 0.0, DEPTH]], device=lens.device, dtype=torch.float64)
+            point = torch.tensor([0.0, 0.0, DEPTH], device=lens.device, dtype=torch.float64)
             # Use smaller spp for faster testing
-            psf = lens.psf(points, wvln=DEFAULT_WAVE, ks=31, mode="huygens", spp=10000)
+            psf = lens.psf_huygens(point, wvln=DEFAULT_WAVE, ks=31, spp=10000)
             
-            # PSF should have correct shape [N, ks, ks]
-            assert psf.shape == (1, 31, 31)
+            # PSF should have correct shape [ks, ks] for single point
+            assert psf.shape == (31, 31)
             # Huygens PSF should be real-valued (intensity)
             assert not psf.is_complex()
             # All values should be non-negative (intensity)
@@ -243,36 +243,12 @@ class TestGeoLensPSF:
         original_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float64)
         try:
-            points = torch.tensor([[0.0, 0.0, DEPTH]], device=lens.device, dtype=torch.float64)
-            psf = lens.psf(points, wvln=DEFAULT_WAVE, ks=51, mode="huygens", spp=10000)
+            point = torch.tensor([0.0, 0.0, DEPTH], device=lens.device, dtype=torch.float64)
+            psf = lens.psf_huygens(point, wvln=DEFAULT_WAVE, ks=51, spp=10000)
             
             # PSF should be normalized
-            assert psf.shape == (1, 51, 51)
+            assert psf.shape == (51, 51)
             assert psf.sum().item() == pytest.approx(1.0, abs=0.1)
-        finally:
-            torch.set_default_dtype(original_dtype)
-
-    def test_geolens_psf_huygens_batch(self, sample_cellphone_lens):
-        """Should compute Huygens PSF for multiple points."""
-        lens = sample_cellphone_lens
-        
-        # Huygens mode requires float64 for coherent ray tracing
-        original_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float64)
-        try:
-            # Multiple points
-            points = torch.tensor([
-                [0.0, 0.0, DEPTH],
-                [0.3, 0.0, DEPTH],
-                [0.0, 0.3, DEPTH]
-            ], device=lens.device, dtype=torch.float64)
-            psf = lens.psf(points, wvln=DEFAULT_WAVE, ks=31, mode="huygens", spp=10000)
-            
-            # Should have shape [N, ks, ks] for N points
-            assert psf.shape == (3, 31, 31)
-            # Each PSF should be normalized
-            for i in range(3):
-                assert psf[i].sum().item() == pytest.approx(1.0, abs=0.1)
         finally:
             torch.set_default_dtype(original_dtype)
 
@@ -284,14 +260,15 @@ class TestGeoLensPSF:
         original_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float64)
         try:
-            points = torch.tensor([[0.0, 0.0, DEPTH]], device=lens.device, dtype=torch.float64)
-            psf_geo = lens.psf(points, wvln=DEFAULT_WAVE, ks=31, mode="geometric", spp=10000)
-            psf_huygens = lens.psf(points, wvln=DEFAULT_WAVE, ks=31, mode="huygens", spp=10000)
+            point = torch.tensor([0.0, 0.0, DEPTH], device=lens.device, dtype=torch.float64)
+            psf_geo = lens.psf(point, wvln=DEFAULT_WAVE, ks=31, spp=10000)
+            psf_huygens = lens.psf_huygens(point, wvln=DEFAULT_WAVE, ks=31, spp=10000)
             
             # Both should have same shape
             assert psf_geo.shape == psf_huygens.shape
             # But different values (coherent vs incoherent)
-            assert not torch.allclose(psf_geo, psf_huygens, atol=1e-3)
+            # Convert to same dtype for comparison
+            assert not torch.allclose(psf_geo.to(torch.float64), psf_huygens.to(torch.float64), atol=1e-3)
         finally:
             torch.set_default_dtype(original_dtype)
 

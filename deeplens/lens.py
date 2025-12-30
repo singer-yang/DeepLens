@@ -92,10 +92,10 @@ class Lens(DeepObj):
         # Change sensor size (r_sensor is fixed)
         diam_res = float(np.sqrt(self.sensor_res[0] ** 2 + self.sensor_res[1] ** 2))
         self.sensor_size = (
-            round(2 * self.r_sensor * self.sensor_res[0] / diam_res, 4),
-            round(2 * self.r_sensor * self.sensor_res[1] / diam_res, 4),
+            2 * self.r_sensor * self.sensor_res[0] / diam_res,
+            2 * self.r_sensor * self.sensor_res[1] / diam_res,
         )
-        self.pixel_size = round(self.sensor_size[0] / self.sensor_res[0], 4)
+        self.pixel_size = self.sensor_size[0] / self.sensor_res[0]
         self.calc_fov()
 
     @torch.no_grad()

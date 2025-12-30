@@ -31,7 +31,14 @@ class Aperture(Plane):
 
     @classmethod
     def init_from_dict(cls, surf_dict):
-        return cls(surf_dict["r"], surf_dict["d"])
+        return cls(
+            r=surf_dict["r"],
+            d=surf_dict["d"],
+            is_square=surf_dict["is_square"] if "is_square" in surf_dict else False,
+            pos_xy=surf_dict["pos_xy"] if "pos_xy" in surf_dict else [0.0, 0.0],
+            vec_local=surf_dict["vec_local"] if "vec_local" in surf_dict else [0.0, 0.0, 1.0],
+            device=surf_dict["device"] if "device" in surf_dict else "cpu",
+        )
 
     def ray_reaction(self, ray, n1=1.0, n2=1.0, refraction=False):
         """Compute output ray after intersection and refraction."""
