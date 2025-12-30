@@ -52,8 +52,8 @@ class Plane(Surface):
         # Aperture mask
         if self.is_square:
             valid = (
-                (torch.abs(new_o[..., 0]) < (self.w / 2))
-                & (torch.abs(new_o[..., 1]) < (self.h / 2))
+                (torch.abs(new_o[..., 0]) < self.w / 2)
+                & (torch.abs(new_o[..., 1]) < self.h / 2)
                 & (ray.is_valid > 0)
             )
         else:

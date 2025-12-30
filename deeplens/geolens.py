@@ -913,9 +913,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # ====================================================================================
     # PSF 
     # We support three types of PSF:
-    #   1. Geometric PSF: incoherent intensity ray tracing
-    #   2. Exit-pupil PSF: coherent ray tracing to exit pupil, then free-space propagation with ASM
-    #   3. Huygens PSF: coherent ray tracing to exit pupil, then Huygens-Fresnel integration
+    #   1. Geometric PSF (`psf`): incoherent intensity ray tracing
+    #   2. Exit-pupil PSF (`psf_pupil_prop` / `psf_coherent`): coherent ray tracing to exit pupil, then free-space propagation with ASM
+    #   3. Huygens PSF (`psf_huygens`): coherent ray tracing to exit pupil, then Huygens-Fresnel integration
     # ====================================================================================
     def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=True):
         """Single wavelength geometric (incoherent) PSF calculation.
@@ -974,7 +974,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if single_point:
             psf = psf.squeeze(0)
 
-        return psf
+        return diff_float(psf)
 
     def psf_huygens(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
         """Single wavelength Huygens PSF calculation. 
@@ -1018,6 +1018,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             single_point = True
             points = points.unsqueeze(0)
         else:
+            raise ValueError("Points must be of shape [1, 3].")
             single_point = False
 
         # Sample rays from object point
@@ -1082,7 +1083,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             # Obliquity factor: cos(theta) where theta is angle from normal
             # Using ray direction at exit pupil (dz component)
             obliq = torch.abs(batch_dir[:, 2])  # [batch]
-            amp = torch.sqrt(obliq)  # Amplitude factor
+            amp = 0.5 * (1.0 + obliq)  # Huygens–Fresnel obliquity factor
             
             # Total optical path = OPL through lens + distance to pixel
             total_opl = batch_opl + r  # [ks, ks, batch]
@@ -1101,7 +1102,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         psf = psf_complex.abs()**2
 
         # Intensity normalization
-        psf = psf / (torch.sum(psf) + EPSILON)
+        psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
 
         # Flip PSF
         psf = torch.flip(psf, [-2, -1])
@@ -1109,8 +1110,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if single_point:
             psf = psf.squeeze(0)
 
-        psf = diff_float(psf)
-        return psf
+        return diff_float(psf)
 
     def psf_coherent(self, point, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
         return self.psf_pupil_prop(point, ks=ks, wvln=wvln, spp=spp)
@@ -1138,7 +1138,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             [1] "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model", SIGGRAPH Asia 2024.
 
         Note:
-            [1] This function is similar to ZEMAX FFT_PSF but implement free-space propagation with Angular Spectrum Method (ASM) rathar than FFT transform. Free-space propagation using ASM is more accurate than doing FFT, because FFT (as used in ZEMAX) assumes far-field condition (e.g., chief ray perpendicular to image plane).
+            [1] This function is similar to ZEMAX FFT_PSF but implement free-space propagation with Angular Spectrum Method (ASM) rather than FFT transform. Free-space propagation using ASM is more accurate than doing FFT, because FFT (as used in ZEMAX) assumes far-field condition (e.g., chief ray perpendicular to image plane).
         """
         # Pupil field by coherent ray tracing
         wavefront, psfc = self.pupil_field(point=point, wvln=wvln, spp=spp, recenter=recenter)
@@ -1190,8 +1190,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Intensity normalization, shape of [ks, ks] or [h, w]
         psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
-        psf = diff_float(psf)
-        return psf
+
+        return diff_float(psf)
 
     def pupil_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
         """Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing. The wavefront has the same size as the image sensor. This function is differentiable.
@@ -1564,7 +1564,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if torch.isnan(rfov):
             self.real_rfov = self.rfov
             self.real_dfov = self.dfov
-            print(f"Failed to calculate distored FoV by ray tracing, use effective FoV {self.rfov} rad.")
+            print(f"Failed to calculate distorted FoV by ray tracing, use effective FoV {self.rfov} rad.")
         else:
             self.real_rfov = rfov.item()
             self.real_dfov = 2 * rfov.item()
