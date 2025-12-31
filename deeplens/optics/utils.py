@@ -42,7 +42,6 @@ class DiffQuantize(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, levels, interval=2 * torch.pi):
         step = interval / levels
-        ctx.step = step
         return torch.round(x / step) * step
 
     @staticmethod

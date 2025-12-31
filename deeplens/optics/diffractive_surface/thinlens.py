@@ -57,7 +57,7 @@ class ThinLens(DiffractiveSurface):
             fab_step=doe_dict.get("fab_step", 16),
         )
 
-    def get_phase_map(self, wvln=0.55):
+    def get_phase_map(self, wvln):
         """Get the phase map at the given wavelength."""
 
         # Same focal length for all wavelengths

@@ -87,7 +87,7 @@ class HybridLens(Lens):
                 doe = Grating.init_from_dict(doe_dict)
             else:
                 raise ValueError(
-                    f"Unsupported DOE parameter model: {doe_dict['param_model']}"
+                    f"Unsupported DOE parameter model: {doe_param_model}"
                 )
             self.doe = doe
 

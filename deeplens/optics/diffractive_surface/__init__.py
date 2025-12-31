@@ -8,4 +8,4 @@ from .pixel2d import Pixel2D
 from .thinlens import ThinLens
 from .zernike import Zernike
 
-__all__ = ["DOE", "Fresnel", "Grating", "Pixel2D", "ThinLens", "Zernike", "Binary2"]
+__all__ = ["DiffractiveSurface", "Fresnel", "Grating", "Pixel2D", "ThinLens", "Zernike", "Binary2"]
