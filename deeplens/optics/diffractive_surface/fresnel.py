@@ -23,6 +23,7 @@ class Fresnel(DiffractiveSurface):
         res=(2000, 2000),
         mat="fused_silica",
         fab_ps=0.001,
+        fab_step=16,
         device="cpu",
     ):
         """Initialize Fresnel DOE. A diffractive Fresnel lens shows inverse dispersion property compared to refractive lens.
@@ -34,10 +35,11 @@ class Fresnel(DiffractiveSurface):
             wvln0 (float): Design wavelength. [um]
             mat (str): Material of the DOE.
             fab_ps (float): Fabrication pixel size. [mm]
+            fab_step (int): Fabrication step.
             device (str): Device to run the DOE.
         """
         super().__init__(
-            d=d, res=res, wvln0=wvln0, mat=mat, fab_ps=fab_ps, device=device
+            d=d, res=res, wvln0=wvln0, mat=mat, fab_ps=fab_ps, fab_step=fab_step, device=device
         )
 
         # Initial focal length
@@ -51,22 +53,17 @@ class Fresnel(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize Fresnel DOE from a dict."""
-        d = doe_dict["d"]
-        res = doe_dict.get("res", (2000, 2000))
-        fab_ps = doe_dict.get("fab_ps", 0.001)
-        f0 = doe_dict.get("f0", None)
-        wvln0 = doe_dict.get("wvln0", 0.55)
-        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            d=d,
-            res=res,
-            fab_ps=fab_ps,
-            f0=f0,
-            wvln0=wvln0,
-            mat=mat,
+            d=doe_dict["d"],
+            res=doe_dict["res"],
+            fab_ps=doe_dict.get("fab_ps", 0.001),
+            fab_step=doe_dict.get("fab_step", 16),
+            f0=doe_dict.get("f0", None),
+            wvln0=doe_dict.get("wvln0", 0.55),
+            mat=doe_dict.get("mat", "fused_silica"),
         )
 
-    def _phase_map0(self):
+    def phase_func(self):
         """Get the phase map at design wavelength."""
         wvln0_mm = self.wvln0 * 1e-3
         phase = -2 * torch.pi * (self.x**2 + self.y**2) / (2 * self.f0 * wvln0_mm)

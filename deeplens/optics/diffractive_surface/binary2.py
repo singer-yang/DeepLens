@@ -18,11 +18,12 @@ class Binary2(DiffractiveSurface):
         mat="fused_silica",
         wvln0=0.55,
         fab_ps=0.001,
+        fab_step=16,
         device="cpu",
     ):
         """Initialize Binary DOE."""
         super().__init__(
-            d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, device=device
+            d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, fab_step=fab_step, device=device
         )
 
         # Initialize with random small values
@@ -43,20 +44,16 @@ class Binary2(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize Binary DOE from a dict."""
-        d = doe_dict["d"]
-        res = doe_dict.get("res", (2000, 2000))
-        fab_ps = doe_dict.get("fab_ps", 0.001)
-        wvln0 = doe_dict.get("wvln0", 0.55)
-        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            d=d,
-            res=res,
-            mat=mat,
-            wvln0=wvln0,
-            fab_ps=fab_ps,
+            d=doe_dict["d"],
+            res=doe_dict["res"],
+            mat=doe_dict.get("mat", "fused_silica"),
+            wvln0=doe_dict.get("wvln0", 0.55),
+            fab_ps=doe_dict.get("fab_ps", 0.001),
+            fab_step=doe_dict.get("fab_step", 16),
         )
 
-    def _phase_map0(self):
+    def phase_func(self):
         """Get the phase map at design wavelength."""
         # Calculate radial distance
         r2 = self.x**2 + self.y**2

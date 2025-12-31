@@ -34,6 +34,7 @@ class Grating(DiffractiveSurface):
         mat="fused_silica",
         wvln0=0.55,
         fab_ps=0.001,
+        fab_step=16,
         theta=0.0,
         alpha=0.0,
         device="cpu",
@@ -46,12 +47,13 @@ class Grating(DiffractiveSurface):
             mat (str): Material of the DOE.
             wvln0 (float): Design wavelength. [um]
             fab_ps (float): Fabrication pixel size. [mm]
+            fab_step (int): Fabrication step.
             theta (float): Angle from y-axis to grating vector. [rad]
             alpha (float): Slope of the grating (phase gradient strength).
             device (str): Device to run the DOE.
         """
         super().__init__(
-            d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, device=device
+            d=d, res=res, mat=mat, wvln0=wvln0, fab_ps=fab_ps, fab_step=fab_step, device=device
         )
 
         # Grating parameters
@@ -73,24 +75,18 @@ class Grating(DiffractiveSurface):
         Returns:
             Grating: Initialized Grating DOE object.
         """
-        d = doe_dict["d"]
-        res = doe_dict.get("res", (2000, 2000))
-        fab_ps = doe_dict.get("fab_ps", 0.001)
-        wvln0 = doe_dict.get("wvln0", 0.55)
-        mat = doe_dict.get("mat", "fused_silica")
-        theta = doe_dict.get("theta", 0.0)
-        alpha = doe_dict.get("alpha", 0.0)
         return cls(
-            d=d,
-            res=res,
-            mat=mat,
-            wvln0=wvln0,
-            fab_ps=fab_ps,
-            theta=theta,
-            alpha=alpha,
+            d=doe_dict["d"],
+            res=doe_dict["res"],
+            mat=doe_dict.get("mat", "fused_silica"),
+            wvln0=doe_dict.get("wvln0", 0.55),
+            fab_ps=doe_dict.get("fab_ps", 0.001),
+            fab_step=doe_dict.get("fab_step", 16),
+            theta=doe_dict.get("theta", 0.0),
+            alpha=doe_dict.get("alpha", 0.0),
         )
 
-    def _phase_map0(self):
+    def phase_func(self):
         """Get the phase map at design wavelength.
         
         The grating phase is a linear function of position:
