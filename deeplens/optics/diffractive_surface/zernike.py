@@ -22,6 +22,7 @@ class Zernike(DiffractiveSurface):
         res=(2000, 2000),
         mat="fused_silica",
         fab_ps=0.001,
+        fab_step=16,
         wvln0=0.55,
         device="cpu",
     ):
@@ -33,10 +34,11 @@ class Zernike(DiffractiveSurface):
             z_coeff: Zernike coefficients
             zernike_order: Number of Zernike coefficients to use
             fab_ps: Fabrication pixel size
+            fab_step: Fabrication step
             device: Computation device
         """
         super().__init__(
-            d=d, res=res, mat=mat, fab_ps=fab_ps, wvln0=wvln0, device=device
+            d=d, res=res, mat=mat, fab_ps=fab_ps, fab_step=fab_step, wvln0=wvln0, device=device
         )
 
         # Initialize Zernike coefficients with random values
@@ -52,24 +54,18 @@ class Zernike(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize Zernike DOE from a dict."""
-        d = doe_dict["d"]
-        z_coeff = doe_dict.get("z_coeff", None)
-        zernike_order = doe_dict.get("zernike_order", 37)
-        res = doe_dict.get("res", (2000, 2000))
-        fab_ps = doe_dict.get("fab_ps", 0.001)
-        wvln0 = doe_dict.get("wvln0", 0.55)
-        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            d=d,
-            res=res,
-            mat=mat,
-            fab_ps=fab_ps,
-            z_coeff=z_coeff,
-            zernike_order=zernike_order,
-            wvln0=wvln0,
+            d=doe_dict["d"],
+            res=doe_dict["res"],
+            mat=doe_dict.get("mat", "fused_silica"),
+            fab_ps=doe_dict.get("fab_ps", 0.001),
+            fab_step=doe_dict.get("fab_step", 16),
+            z_coeff=doe_dict.get("z_coeff", None),
+            zernike_order=doe_dict.get("zernike_order", 37),
+            wvln0=doe_dict.get("wvln0", 0.55),
         )
 
-    def _phase_map0(self):
+    def phase_func(self):
         """Get the phase map at design wavelength."""
         return calculate_zernike_phase(self.z_coeff, grid=self.res[0])
 

@@ -21,6 +21,7 @@ class Pixel2D(DiffractiveSurface):
         mat="fused_silica",
         wvln0=0.55,
         fab_ps=0.001,
+        fab_step=16,
         device="cpu",
     ):
         """Initialize Pixel2D DOE, where each pixel is independent parameter.
@@ -31,9 +32,10 @@ class Pixel2D(DiffractiveSurface):
             res (tuple or int): Resolution of the DOE, [w, h]. [pixel]
             mat (str): Material of the DOE.
             fab_ps (float): Fabrication pixel size. [mm]
+            fab_step (int): Fabrication step.
             device (str): Device to run the DOE.
         """
-        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, wvln0=wvln0, device=device)
+        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, fab_step=fab_step, wvln0=wvln0, device=device)
 
         # Initialize phase map with random values
         if phase_map_path is None:
@@ -48,22 +50,17 @@ class Pixel2D(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize Pixel2D DOE from a dict."""
-        d = doe_dict["d"]
-        res = doe_dict.get("res", (2000, 2000))
-        fab_ps = doe_dict.get("fab_ps", 0.001)
-        phase_map_path = doe_dict.get("phase_map_path", None)
-        wvln0 = doe_dict.get("wvln0", 0.55)
-        mat = doe_dict.get("mat", "fused_silica")
         return cls(
-            d=d,
-            res=res,
-            mat=mat,
-            fab_ps=fab_ps,
-            phase_map_path=phase_map_path,
-            wvln0=wvln0,
+            d=doe_dict["d"],
+            res=doe_dict["res"],
+            mat=doe_dict.get("mat", "fused_silica"),
+            fab_ps=doe_dict.get("fab_ps", 0.001),
+            fab_step=doe_dict.get("fab_step", 16),
+            phase_map_path=doe_dict.get("phase_map_path", None),
+            wvln0=doe_dict.get("wvln0", 0.55),
         )
 
-    def _phase_map0(self):
+    def phase_func(self):
         """Get the phase map at design wavelength."""
         return self.phase_map
 
