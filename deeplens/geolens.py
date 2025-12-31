@@ -1821,14 +1821,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Solve the linear system Ax = b
         # Using least squares to handle the case of no exact solution
-        try:
+        if A.device.type == "mps":
+            # Perform lstsq on CPU for MPS devices and move result back
+            x, _ = torch.linalg.lstsq(A.cpu(), b.unsqueeze(-1).cpu())[:2]
+            x = x.to(A.device)
+        else:
             x, _ = torch.linalg.lstsq(A, b.unsqueeze(-1))[:2]
-        except RuntimeError as e:
-            if "MPS" in str(e):
-                x, _ = torch.linalg.lstsq(A.cpu(), b.unsqueeze(-1).cpu())[:2]
-                x = x.to(A.device)
-            else:
-                raise e
         x = x.squeeze(-1)  # Shape: [N*(N-1)/2, 2]
         s = x[:, 0]
         t = x[:, 1]
