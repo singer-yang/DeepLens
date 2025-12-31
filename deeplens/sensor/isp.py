@@ -92,7 +92,7 @@ class InvertibleISP(nn.Module):
         self.gamma_param = gamma_param
 
         self.blc = BlackLevelCompensation(bit=bit, black_level=black_level)
-        self.demosaic = Demosaic(bayer_pattern=bayer_pattern, method="3x3")
+        self.demosaic = Demosaic(bayer_pattern=bayer_pattern, method="malvar")
         self.awb = AutoWhiteBalance(awb_method="manual", white_balance=white_balance)
         self.ccm = ColorCorrectionMatrix(ccm_matrix=color_matrix)
         self.gamma = GammaCorrection(gamma_param=gamma_param)
