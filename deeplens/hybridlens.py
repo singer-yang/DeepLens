@@ -161,7 +161,7 @@ class HybridLens(Lens):
     # PSF-related functions
     # =====================================================================
     def doe_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
-        """Compute the complex wave field at DOE plane using coherent ray tracing. This function reimplements geolens.pupil_field() by changing the computation position from pupil plane to the last surface (DOE).
+        """Compute the complex wave field at DOE plane using coherent ray tracing. This function re-implements geolens.pupil_field() by changing the computation position from pupil plane to the last surface (DOE). The wavefront stores information of all diffraction orders.
 
         Args:
             point (torch.Tensor): Tensor of shape (3,) representing the point source position. Defaults to torch.tensor([0.0, 0.0, -10000.0]).
@@ -169,7 +169,6 @@ class HybridLens(Lens):
             spp (int): Samples per pixel. Must be >= 1,000,000 for accurate simulation. Defaults to SPP_COHERENT.
 
         Returns:
-
             wavefront: Tensor of shape [H, W] representing the complex wavefront.
             psf_center: List containing the PSF center coordinates [x, y].
         """
@@ -225,11 +224,12 @@ class HybridLens(Lens):
         wvln=DEFAULT_WAVE,
         spp=SPP_COHERENT,
     ):
-        """Single point monochromatic PSF using ray-wave model.
+        """Single point monochromatic PSF using ray-wave model. The PSF contains all diffraction orders with correct diffraction efficiencies.
 
         Steps:
-            1, calculate complex wavefield at DOE (pupil) plane by coherent ray tracing.
-            2, propagate through DOE to sensor plane, calculate intensity PSF, crop the valid region and normalize.
+            1, Calculate complex wavefield at DOE plane by coherent ray tracing.
+            2, Apply DOE phase modulation to the wavefield.
+            3, Propagate the wavefield to sensor plane, calculate intensity PSF, crop the valid region and normalize the intensity.
 
         Args:
             points (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).

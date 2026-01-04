@@ -29,13 +29,15 @@ class DiffractiveSurface(DeepObj):
         design_ps=None,
         device="cpu",
     ):
-        """Diffractive surface class. Optical properties are simulated with wave optics.
+        """Diffractive (multi-layer diffractive) surface class. Optical properties of diffractive surfaces are simulated with wave optics.
+
+        By default the DOE is designed for 0.55um, which means it will have the highest 1st-order diffraction efficiency for 0.55um.
 
         Args:
             d (float): Distance of the DOE surface. [mm]
             res (tuple or int): Resolution of the DOE, [w, h]. [pixel]
             fab_ps (float): Fabrication pixel size. [mm]
-            fab_step (int): Fabrication step.
+            fab_step (int): Fabrication step. Default is 16.
             wvln0 (float): Design wavelength. [um]
             mat (str): Material of the DOE.
             design_ps (float): Design pixel size. [mm]
