@@ -1,0 +1,67 @@
+{
+    "info": "A489 with a Grating DOE",
+    "foclen": 7.7719,
+    "fnum": 3.8859,
+    "r_sensor": 2.1213,
+    "d_sensor": 11.257,
+    "sensor_size": [
+        3.0,
+        3.0
+    ],
+    "sensor_res": [
+        3000,
+        3000
+    ],
+    "surfaces": [
+        {
+            "idx": 1,
+            "type": "Aperture",
+            "r": 1.0,
+            "d": 0.0,
+            "mat2": "air",
+            "is_square": false,
+            "diffraction": false,
+            "d_next": 0.1
+        },
+        {
+            "idx": 2,
+            "type": "Aspheric",
+            "r": 6.35,
+            "roc": 4.7531,
+            "d": 0.1,
+            "k": -1.2051,
+            "ai": [
+                0.0,
+                0.000533,
+                1.12e-05,
+                -3.75e-07,
+                -7.63e-09,
+                1.36e-10
+            ],
+            "mat2": "h-k51",
+            "d_next": 7.5
+        },
+        {
+            "idx": 3,
+            "type": "Spheric",
+            "r": 6.35,
+            "roc": -15.65,
+            "d": 7.6,
+            "mat2": "air",
+            "d_next": 3.657
+        }
+    ],
+    "DOE": {
+        "type": "Grating",
+        "d": 8.3098,
+        "res": [
+            6000,
+            6000
+        ],
+        "fab_ps": 0.001,
+        "wvln0": 0.55,
+        "mat": "fused_silica",
+        "theta": 0.0,
+        "alpha": 1000.0
+    }
+}

@@ -6,43 +6,40 @@ Technical Paper:
     Xinge Yang, Matheus Souza, Kunyi Wang, Praneeth Chakravarthula, Qiang Fu and Wolfgang Heidrich, "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model," Siggraph Asia 2024.
 """
 
+import matplotlib.pyplot as plt
 import torch
 from torchvision.utils import save_image
-import matplotlib.pyplot as plt
 
 from deeplens import GeoLens
 
 
-def main():
-    # Better to use a high sensor resolution (4000x4000 is roughly acceptable, but higher is better)
-    lens = GeoLens(
-        filename="./datasets/lenses/cellphone/cellphone68deg.json",
-        dtype=torch.float64,
-    )
-    lens.set_sensor_res(sensor_res=(8000, 8000))
-
-    # ==========================================================
-    # Calculate the exit-pupil field by coherent ray tracing
-    # ==========================================================
-    wavefront, _ = lens.pupil_field(
-        point=torch.tensor([0.0, 0.0, -10000.0]), spp=20_000_000
-    )
+def calculate_wavefield(lens):
+    """Calculate the exit-pupil field (wavefront) by coherent ray tracing."""
+    point = torch.tensor([0.0, 0.0, -10000.0])
+    wavefront, _ = lens.pupil_field(points=point, spp=20_000_000)
     save_image(wavefront.angle(), "./wavefront_phase.png")
     save_image(torch.abs(wavefront), "./wavefront_amp.png")
 
-    # ==========================================================
-    # Compare three different PSFs:
-    #   1. geometric PSF
-    #   2. Huygens PSF
-    #   3. Exit-pupil propagated PSF (mathematically equivalent to Huygens PSF)
-    # ==========================================================
-    psf_coherent = lens.psf_coherent(torch.tensor([0.0, 0.4, -10000.0]), ks=64)
+
+def compare_psf(lens):
+    """Compare three different PSFs and plot center line profiles.
+
+    Compares:
+        1. Geometric PSF (incoherent)
+        2. Huygens PSF
+        3. Exit-pupil propagated PSF (coherent, mathematically equivalent to Huygens PSF)
+    """
+    point = torch.tensor([0.0, 0.4, -10000.0])
+    ks = 64
+
+    # Calculate three different PSFs
+    psf_coherent = lens.psf_coherent(point, ks=ks)
     save_image(psf_coherent, "./psf_coherent.png", normalize=True)
 
-    psf_incoherent = lens.psf(torch.tensor([0.0, 0.4, -10000.0]), ks=64)
+    psf_incoherent = lens.psf(point, ks=ks)
     save_image(psf_incoherent, "./psf_incoherent.png", normalize=True)
 
-    psf_huygens = lens.psf_huygens(torch.tensor([0.0, 0.4, -10000.0]), ks=64)
+    psf_huygens = lens.psf_huygens(point, ks=ks)
     save_image(psf_huygens, "./psf_huygens.png", normalize=True)
 
     # ==========================================================
@@ -87,6 +84,21 @@ def main():
     plt.savefig("./psf_center_line_profile.png", dpi=150)
     plt.close()
     print("Saved PSF center line profile to ./psf_center_line_profile.png")
+
+
+def main():
+    # Better to use a high sensor resolution (4000x4000 is roughly acceptable, but higher is better)
+    lens = GeoLens(
+        filename="./datasets/lenses/cellphone/cellphone68deg.json",
+        dtype=torch.float64,
+    )
+    lens.set_sensor_res(sensor_res=(8000, 8000))
+
+    # Calculate wavefront
+    calculate_wavefield(lens)
+
+    # Compare PSFs
+    compare_psf(lens)
 
 
 if __name__ == "__main__":

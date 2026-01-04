@@ -29,7 +29,7 @@ from deeplens.basics import (
 from deeplens.optics.monte_carlo import forward_integral
 from deeplens.optics.geometric_surface import Plane
 from deeplens.optics.phase_surface import Phase
-from deeplens.optics.diffractive_surface import Binary2, Pixel2D, Fresnel, Zernike
+from deeplens.optics.diffractive_surface import Binary2, Grating, Pixel2D, Fresnel, Zernike
 from deeplens.optics.wave import AngularSpectrumMethod
 from deeplens.optics.utils import diff_float
 
@@ -74,17 +74,20 @@ class HybridLens(Lens):
             data = json.load(f)
 
             doe_dict = data["DOE"]
-            if doe_dict["param_model"] == "binary2":
+            doe_param_model = doe_dict["type"].lower()
+            if doe_param_model == "binary2":
                 doe = Binary2.init_from_dict(doe_dict)
-            elif doe_dict["param_model"] == "pixel2d":
+            elif doe_param_model == "pixel2d":
                 doe = Pixel2D.init_from_dict(doe_dict)
-            elif doe_dict["param_model"] == "fresnel":
+            elif doe_param_model == "fresnel":
                 doe = Fresnel.init_from_dict(doe_dict)
-            elif doe_dict["param_model"] == "zernike":
+            elif doe_param_model == "zernike":
                 doe = Zernike.init_from_dict(doe_dict)
+            elif doe_param_model == "grating":
+                doe = Grating.init_from_dict(doe_dict)
             else:
                 raise ValueError(
-                    f"Unsupported DOE parameter model: {doe_dict['param_model']}"
+                    f"Unsupported DOE parameter model: {doe_param_model}"
                 )
             self.doe = doe
 
@@ -158,7 +161,7 @@ class HybridLens(Lens):
     # PSF-related functions
     # =====================================================================
     def doe_field(self, point, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
-        """Compute the complex wave field at DOE plane using coherent ray tracing. This function reimplements geolens.pupil_field() by changing the computation position from pupil plane to the last surface (DOE).
+        """Compute the complex wave field at DOE plane using coherent ray tracing. This function re-implements geolens.pupil_field() by changing the computation position from pupil plane to the last surface (DOE). The wavefront stores information of all diffraction orders.
 
         Args:
             point (torch.Tensor): Tensor of shape (3,) representing the point source position. Defaults to torch.tensor([0.0, 0.0, -10000.0]).
@@ -166,7 +169,6 @@ class HybridLens(Lens):
             spp (int): Samples per pixel. Must be >= 1,000,000 for accurate simulation. Defaults to SPP_COHERENT.
 
         Returns:
-
             wavefront: Tensor of shape [H, W] representing the complex wavefront.
             psf_center: List containing the PSF center coordinates [x, y].
         """
@@ -222,11 +224,12 @@ class HybridLens(Lens):
         wvln=DEFAULT_WAVE,
         spp=SPP_COHERENT,
     ):
-        """Single point monochromatic PSF using ray-wave model.
+        """Single point monochromatic PSF using ray-wave model. The PSF contains all diffraction orders with correct diffraction efficiencies.
 
         Steps:
-            1, calculate complex wavefield at DOE (pupil) plane by coherent ray tracing.
-            2, propagate through DOE to sensor plane, calculate intensity PSF, crop the valid region and normalize.
+            1, Calculate complex wavefield at DOE plane by coherent ray tracing.
+            2, Apply DOE phase modulation to the wavefield.
+            3, Propagate the wavefield to sensor plane, calculate intensity PSF, crop the valid region and normalize the intensity.
 
         Args:
             points (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).

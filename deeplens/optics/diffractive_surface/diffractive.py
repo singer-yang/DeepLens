@@ -14,25 +14,30 @@ from torchvision.utils import save_image
 
 from deeplens.basics import EPSILON, DeepObj
 from deeplens.optics.materials import Material
+from deeplens.optics.utils import diff_quantize
 
 
 class DiffractiveSurface(DeepObj):
     def __init__(
         self,
         d,
-        res=(2000, 2000),
+        res,
         fab_ps=0.001,
+        fab_step=16,
         wvln0=0.55,
         mat="fused_silica",
         design_ps=None,
         device="cpu",
     ):
-        """Diffractive surface class. Optical properties are simulated with wave optics.
-        
+        """Diffractive (multi-layer diffractive) surface class. Optical properties of diffractive surfaces are simulated with wave optics.
+
+        By default the DOE is designed for 0.55um, which means it will have the highest 1st-order diffraction efficiency for 0.55um.
+
         Args:
             d (float): Distance of the DOE surface. [mm]
             res (tuple or int): Resolution of the DOE, [w, h]. [pixel]
             fab_ps (float): Fabrication pixel size. [mm]
+            fab_step (int): Fabrication step. Default is 16.
             wvln0 (float): Design wavelength. [um]
             mat (str): Material of the DOE.
             design_ps (float): Design pixel size. [mm]
@@ -40,7 +45,7 @@ class DiffractiveSurface(DeepObj):
         """
         # Geometry
         self.d = torch.tensor(d) if not isinstance(d, torch.Tensor) else d
-        self.res = [res, res] if isinstance(res, int) else res
+        self.res = (res, res) if isinstance(res, int) else res
         self.ps = fab_ps if design_ps is None else design_ps
         self.w = self.res[0] * self.ps
         self.h = self.res[1] * self.ps
@@ -54,7 +59,7 @@ class DiffractiveSurface(DeepObj):
 
         # Fabrication for DOE
         self.fab_ps = fab_ps  # [mm], fabrication pixel size
-        self.fab_step = 16
+        self.fab_step = fab_step
 
         # x, y coordinates
         self.x, self.y = torch.meshgrid(
@@ -70,25 +75,31 @@ class DiffractiveSurface(DeepObj):
         """Initialize DOE from a dict."""
         raise NotImplementedError
 
-    def _phase_map0(self):
-        """Calculate phase map at design wavelength.
+    def phase_func(self):
+        """Calculate raw phase function (no wrapping, no quantization) at design wavelength.
 
         Returns:
-            phase0 (tensor): phase map at design wavelength, range [0, 2pi].
+            phase (tensor): raw phase function at design wavelength.
         """
         raise NotImplementedError
 
     def get_phase_map0(self):
-        """Calculate phase map at design wavelength.
+        """Calculate phase map at design wavelength with phase wrapping and quantization.
+
+        In this function, we are actually processing height map. The maximum height is 2pi for design wavelength.
 
         Returns:
             phase0 (tensor): phase map at design wavelength, range [0, 2pi].
         """
-        phase0 = self._phase_map0()
+        # Raw phase map at design wavelength
+        phase0 = self.phase_func()
+
+        # Phase wrapping and quantization
         phase0 = torch.remainder(phase0, 2 * torch.pi)
+        phase0 = diff_quantize(phase0, levels=self.fab_step)
         return phase0
 
-    def get_phase_map(self, wvln=0.55):
+    def get_phase_map(self, wvln):
         """Calculate phase map at the given wavelength.
 
         Args:
@@ -103,7 +114,7 @@ class DiffractiveSurface(DeepObj):
         # Phase map at design wavelength
         phase_map0 = self.get_phase_map0()
 
-        # Phase map at given wavelength
+        # Phase map at given wavelength (implicitly converted to height map)
         n = self.mat.refractive_index(wvln)
         phase_map = phase_map0 * (self.wvln0 / wvln) * (n - 1) / (self.n0 - 1)
 
@@ -251,23 +262,51 @@ class DiffractiveSurface(DeepObj):
     # =======================================
     # Visualization
     # =======================================
-    def show(self, save_name="./DOE_phase_map.png"):
-        """Visualize phase map."""
-        self.draw_phase_map(save_name)
+    def draw_phase_map(self, bits=None, save_name="./DOE_phase_map.png"):
+        """Draw phase map. Range from [0, 2pi].
 
-    def save_pmap(self, save_path="./DOE_phase_map.png"):
-        """Save phase map."""
-        self.draw_phase_map(save_path)
-
-    def draw_phase_map(self, save_name="./DOE_phase_map.png"):
-        """Draw phase map. Range from [0, 2pi]."""
-        pmap = self.get_phase_map0()
+        Args:
+            bits (int, optional): Number of quantization bits. If provided, quantizes the phase map.
+            save_name (str): Path to save the image.
+        """
+        if bits is not None:
+            pmap = self.pmap_quantize(bits)
+        else:
+            pmap = self.get_phase_map0()
         save_image(pmap, save_name, normalize=True)
 
-    def draw_phase_map_nbit(self, bits=16, save_name="./DOE_phase_map.png"):
-        """Draw phase map. Range from [0, 2pi]."""
-        pmap_q = self.pmap_quantize(bits)
-        save_image(pmap_q, save_name, normalize=True)
+    def draw_phase_map3d(self, bits=None, save_name="./DOE_phase_map3d.png"):
+        """Draw 3D phase map.
+
+        Args:
+            bits (int, optional): Number of quantization bits. If provided, quantizes the phase map.
+            save_name (str): Path to save the image.
+        """
+        if bits is not None:
+            pmap = self.pmap_quantize(bits)
+        else:
+            pmap = self.get_phase_map0()
+        
+        pmap = pmap / 20.0
+        x = np.linspace(-self.w / 2, self.w / 2, self.res[0])
+        y = np.linspace(-self.h / 2, self.h / 2, self.res[1])
+        X, Y = np.meshgrid(x, y)
+
+        fig = plt.figure(figsize=(5, 5))
+        ax = fig.add_subplot(111, projection="3d")
+        ax.scatter(
+            X.flatten(),
+            Y.flatten(),
+            pmap.cpu().numpy().flatten(),
+            marker=".",
+            s=0.01,
+            c=pmap.cpu().numpy().flatten(),
+            cmap="viridis",
+        )
+        ax.set_aspect("equal")
+        ax.axis("off")
+        fig.savefig(save_name, dpi=600, bbox_inches="tight")
+        plt.close(fig)
 
     def draw_phase_map_fab(self, save_name="./DOE_phase_map.png"):
         """Draw phase map. Range from [0, 2pi]."""
@@ -285,52 +324,6 @@ class DiffractiveSurface(DeepObj):
         ax[1].grid(False)
         fig.colorbar(ax[1].get_images()[0])
 
-        fig.savefig(save_name, dpi=600, bbox_inches="tight")
-        plt.close(fig)
-
-    def draw_phase_map3d(self, save_name="./DOE_phase_map3d.png"):
-        """Draw 3D phase map."""
-        pmap = self.get_phase_map0() / 20.0
-        x = np.linspace(-self.w / 2, self.w / 2, self.res[0])
-        y = np.linspace(-self.h / 2, self.h / 2, self.res[1])
-        X, Y = np.meshgrid(x, y)
-
-        fig = plt.figure(figsize=(5, 5))
-        ax = fig.add_subplot(111, projection="3d")
-        ax.scatter(
-            X.flatten(),
-            Y.flatten(),
-            pmap.cpu().numpy().flatten(),
-            marker=".",
-            s=0.01,
-            c=pmap.cpu().numpy().flatten(),
-            cmap="viridis",
-        )
-        ax.set_aspect("equal")
-        ax.axis("off")
-        fig.savefig(save_name, dpi=600, bbox_inches="tight")
-        plt.close(fig)
-
-    def draw_quantized_phase_map3d(self, bits=16, save_name="./DOE_quantized_phase_map3d.png"):
-        """Draw 3D quantized phase map."""
-        pmap = self.pmap_quantize(bits) / 20.0
-        x = np.linspace(-self.w / 2, self.w / 2, self.res[0])
-        y = np.linspace(-self.h / 2, self.h / 2, self.res[1])
-        X, Y = np.meshgrid(x, y)
-
-        fig = plt.figure(figsize=(5, 5))
-        ax = fig.add_subplot(111, projection="3d")
-        ax.scatter(
-            X.flatten(),
-            Y.flatten(),
-            pmap.cpu().numpy().flatten(),
-            marker=".",
-            s=0.01,
-            c=pmap.cpu().numpy().flatten(),
-            cmap="viridis",
-        )
-        ax.set_aspect("equal")
-        ax.axis("off")
         fig.savefig(save_name, dpi=600, bbox_inches="tight")
         plt.close(fig)
 
@@ -385,7 +378,7 @@ class DiffractiveSurface(DeepObj):
         """Return a dict of surface."""
         surf_dict = {
             "type": self.__class__.__name__,
-            "size": [round(self.w, 4), round(self.h, 4)],
+            "(size)": [round(self.w, 4), round(self.h, 4)],
             "d": round(self.d.item(), 4),
             "wvln0": round(self.wvln0, 4),
             "res": self.res,

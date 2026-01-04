@@ -19,6 +19,7 @@ class ThinLens(DiffractiveSurface):
         res=(2000, 2000),
         mat="fused_silica",
         fab_ps=0.001,
+        fab_step=16,
         device="cpu",
     ):
         """Initialize a thin lens. A thin lens focuses all wavelengths to the same point.
@@ -29,9 +30,10 @@ class ThinLens(DiffractiveSurface):
             res (tuple or int): Resolution of the DOE, [w, h]. [pixel]
             mat (str): Material of the DOE.
             fab_ps (float): Fabrication pixel size. [mm]
+            fab_step (int): Fabrication step.
             device (str): Device to run the DOE.
         """
-        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, device=device)
+        super().__init__(d=d, res=res, mat=mat, fab_ps=fab_ps, fab_step=fab_step, device=device)
 
         # Initial focal length
         if f0 is None:
@@ -46,20 +48,16 @@ class ThinLens(DiffractiveSurface):
     @classmethod
     def init_from_dict(cls, doe_dict):
         """Initialize a thin lens from a dict."""
-        d = doe_dict["d"]
-        f0 = doe_dict.get("f0", None)
-        res = doe_dict.get("res", (2000, 2000))
-        mat = doe_dict.get("mat", "fused_silica")
-        fab_ps = doe_dict.get("fab_ps", 0.001)
         return cls(
-            d=d,
-            f0=f0,
-            res=res,
-            mat=mat,
-            fab_ps=fab_ps,
+            d=doe_dict["d"],
+            res=doe_dict["res"],
+            f0=doe_dict.get("f0", None),
+            mat=doe_dict.get("mat", "fused_silica"),
+            fab_ps=doe_dict.get("fab_ps", 0.001),
+            fab_step=doe_dict.get("fab_step", 16),
         )
 
-    def get_phase_map(self, wvln=0.55):
+    def get_phase_map(self, wvln):
         """Get the phase map at the given wavelength."""
 
         # Same focal length for all wavelengths
