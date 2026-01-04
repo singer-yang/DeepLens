@@ -5,7 +5,8 @@
 <p align="center">
     <a href="https://deeplens.readthedocs.io/">Docs</a> •
     <a href="https://github.com/singer-yang/DeepLens-tutorials">Tutorials</a> •
-    <a href="#community">Community</a>
+    <a href="#community">Community</a> •
+    <a href="https://pypi.org/project/deeplens-core/">PyPI</a>
 </p>
 
 **DeepLens** is a differentiable optical lens simulator. It is developed for (1) differentiable optical design, (2) end-to-end optics-vision co-design, and (3) photorealistic image simulation. DeepLens helps researchers build custom differentiable optical systems and computational imaging pipelines with minimal effort.
