@@ -61,12 +61,20 @@ from deeplens.utils import (
 )
 
 
-class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTolerance, GeoLensVis3D):
+class GeoLens(
+    Lens,
+    GeoLensEval,
+    GeoLensOptim,
+    GeoLensVis,
+    GeoLensIO,
+    GeoLensTolerance,
+    GeoLensVis3D,
+):
     def __init__(
         self,
         filename=None,
-        sensor_res=None, # (W, H)
-        sensor_size=None, # [mm], (W, H)
+        sensor_res=None,  # (W, H)
+        sensor_size=None,  # [mm], (W, H)
         device=None,
         dtype=torch.float32,
     ):
@@ -127,7 +135,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Complete sensor size and resolution if not set
         if not hasattr(self, "sensor_size"):
-            self.sensor_size = (self.r_sensor * float(np.sqrt(2)), self.r_sensor * float(np.sqrt(2)))
+            self.sensor_size = (
+                self.r_sensor * float(np.sqrt(2)),
+                self.r_sensor * float(np.sqrt(2)),
+            )
 
         if not hasattr(self, "sensor_res"):
             self.sensor_res = (2000, 2000)
@@ -284,7 +295,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     ):
         """
         Sample rays from point sources in object space (absolute physical coordinates).
-        
+
         Used for PSF and chief ray calculation.
 
         Args:
@@ -484,8 +495,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Sample points on sensor plane
         # Use top-left point as reference in rendering, so here we should sample bottom-right point
         x1, y1 = torch.meshgrid(
-            torch.linspace(-w / 2, w / 2, W + 1, device=device,)[1:],
-            torch.linspace(h / 2, -h / 2, H + 1, device=device,)[1:],
+            torch.linspace(
+                -w / 2,
+                w / 2,
+                W + 1,
+                device=device,
+            )[1:],
+            torch.linspace(
+                h / 2,
+                -h / 2,
+                H + 1,
+                device=device,
+            )[1:],
             indexing="xy",
         )
         z1 = torch.full_like(x1, self.d_sensor.item())
@@ -550,8 +571,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # Ray tracing
     # ====================================================================================
     def trace(self, ray, surf_range=None, record=False):
-        """Trace rays through the lens. 
-        
+        """Trace rays through the lens.
+
         Forward or backward tracing is automatically determined by the ray direction.
 
         Args:
@@ -570,7 +591,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             ray_out, ray_o_rec = self.forward_tracing(ray, surf_range, record=record)
         else:
             ray_out, ray_o_rec = self.backward_tracing(ray, surf_range, record=record)
-        
+
         return ray_out, ray_o_rec
 
     def trace2obj(self, ray):
@@ -699,7 +720,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # ====================================================================================
     # Image simulation
     # ====================================================================================
-    def render(self, img_obj, depth=DEPTH,  method="ray_tracing", **kwargs):
+    def render(self, img_obj, depth=DEPTH, method="ray_tracing", **kwargs):
         """Differentiable image simulation.
 
         Image simulation methods:
@@ -732,13 +753,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             )
             psf_grid = kwargs.get("psf_grid", (10, 10))
             psf_ks = kwargs.get("psf_ks", PSF_KS)
-            img_render = self.render_psf_map(img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks)
+            img_render = self.render_psf_map(
+                img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
+            )
 
         elif method == "psf_patch":
             # PSF patch rendering - uses a single PSF to render a patch of the image
             psf_center = kwargs.get("psf_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", PSF_KS)
-            img_render = self.render_psf_patch(img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks)
+            img_render = self.render_psf_patch(
+                img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+            )
 
         elif method == "ray_tracing":
             # Ray tracing rendering
@@ -813,7 +838,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             image (tensor): [N, C, H, W] or [N, H, W] shape rendered image tensor.
         """
         assert torch.is_tensor(img), "Input image should be Tensor."
-        
+
         # Padding
         H, W = img.shape[-2:]
         if len(img.shape) == 3:
@@ -822,7 +847,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             img = F.pad(img, (1, 1, 1, 1), "replicate")
         else:
             raise ValueError("Input image should be [N, C, H, W] or [N, H, W] tensor.")
-          
+
         # Scale object image physical size to get 1:1 pixel-pixel alignment with sensor image
         ray = ray.prop_to(depth)
         p = ray.o[..., :2]
@@ -951,7 +976,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             # Compute PSNR and SSIM
             render_psnr = round(batch_psnr(img, img_render).item(), 3)
             render_ssim = round(batch_ssim(img, img_render).item(), 3)
-            print(f"Rendered image (unwarped): PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}")
+            print(
+                f"Rendered image (unwarped): PSNR={render_psnr:.3f}, SSIM={render_ssim:.3f}"
+            )
 
             if save_name is not None:
                 save_image(img_render, f"{save_name}_unwarped.png")
@@ -970,13 +997,21 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return img_render
 
     # ====================================================================================
-    # PSF 
+    # PSF
     # We support three types of PSF:
     #   1. Geometric PSF (`psf`): incoherent intensity ray tracing
     #   2. Exit-pupil PSF (`psf_pupil_prop` / `psf_coherent`): coherent ray tracing to exit pupil, then free-space propagation with ASM
     #   3. Huygens PSF (`psf_huygens`): coherent ray tracing to exit pupil, then Huygens-Fresnel integration
     # ====================================================================================
-    def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=None, recenter=True, model="geometric"):
+    def psf(
+        self,
+        points,
+        ks=PSF_KS,
+        wvln=DEFAULT_WAVE,
+        spp=None,
+        recenter=True,
+        model="geometric",
+    ):
         """Calculate Point Spread Function (PSF) for given point sources.
 
         Supports multiple PSF calculation models:
@@ -1009,7 +1044,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             raise ValueError(f"Unknown PSF model: {model}")
 
-    def psf_geometric(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=True):
+    def psf_geometric(
+        self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_PSF, recenter=True
+    ):
         """Single wavelength geometric PSF calculation.
 
         Args:
@@ -1028,11 +1065,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         sensor_w, sensor_h = self.sensor_size
         pixel_size = self.pixel_size
         device = self.device
-        
+
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
             points = torch.tensor(points, device=device)
-        
+
         if len(points.shape) == 1:
             single_point = True
             points = points.unsqueeze(0)
@@ -1046,7 +1083,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         point_obj_y = points[..., 1] * scale * sensor_h / 2
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
         ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
-                
+
         # Trace rays to sensor plane (incoherent)
         ray.coherent = False
         ray = self.trace2sensor(ray)
@@ -1056,7 +1093,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             pointc = self.psf_center(point_obj, method="chief_ray")
         else:
             pointc = self.psf_center(point_obj, method="pinhole")
-        
+
         # Monte Carlo integration
         psf = forward_integral(ray.flip_xy(), ps=pixel_size, ks=ks, pointc=pointc)
 
@@ -1068,12 +1105,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return diff_float(psf)
 
-    def psf_coherent(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
-        """Alias for psf_pupil_prop. Calculates PSF by coherent ray tracing to exit pupil followed by Angular Spectrum Method (ASM) propagation.
-        """
+    def psf_coherent(
+        self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True
+    ):
+        """Alias for psf_pupil_prop. Calculates PSF by coherent ray tracing to exit pupil followed by Angular Spectrum Method (ASM) propagation."""
         return self.psf_pupil_prop(points, ks=ks, wvln=wvln, spp=spp, recenter=recenter)
 
-    def psf_pupil_prop(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
+    def psf_pupil_prop(
+        self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True
+    ):
         """Single point monochromatic PSF using exit-pupil diffraction model. This function is differentiable.
 
         Steps:
@@ -1097,7 +1137,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             [1] This function is similar to ZEMAX FFT_PSF but implement free-space propagation with Angular Spectrum Method (ASM) rather than FFT transform. Free-space propagation using ASM is more accurate than doing FFT, because FFT (as used in ZEMAX) assumes far-field condition (e.g., chief ray perpendicular to image plane).
         """
         # Pupil field by coherent ray tracing
-        wavefront, psfc = self.pupil_field(points=points, wvln=wvln, spp=spp, recenter=recenter)
+        wavefront, psfc = self.pupil_field(
+            points=points, wvln=wvln, spp=spp, recenter=recenter
+        )
 
         # Propagate to sensor plane and get intensity
         pupilz, pupilr = self.get_exit_pupil()
@@ -1186,11 +1228,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         elif torch.is_tensor(points) and len(points.shape) == 1:
             points = points.unsqueeze(0).to(device)  # [1, 3]
         elif torch.is_tensor(points) and len(points.shape) == 2:
-            assert points.shape[0] == 1, f"pupil_field only supports single point input, got shape {points.shape}"
+            assert points.shape[0] == 1, (
+                f"pupil_field only supports single point input, got shape {points.shape}"
+            )
         else:
             raise ValueError(f"Unsupported point type {points.type()}.")
 
-        assert points.shape[0] == 1, "Only one point is supported for pupil field calculation."
+        assert points.shape[0] == 1, (
+            "Only one point is supported for pupil field calculation."
+        )
 
         # Ray origin in the object space
         scale = self.calc_scale(points[:, 2].item())
@@ -1230,11 +1276,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return wavefront, psf_center
 
-    def psf_huygens(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
-        """Single wavelength Huygens PSF calculation. 
-        
+    def psf_huygens(
+        self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True
+    ):
+        """Single wavelength Huygens PSF calculation.
+
         This function is not differentiable due to its heavy computational cost.
-        
+
         Steps:
             1, Trace coherent rays to exit-pupil plane.
             2, Treat every ray as a secondary point source emitting a spherical wave.
@@ -1258,23 +1306,25 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         assert torch.get_default_dtype() == torch.float64, (
             "Default dtype must be set to float64 for accurate phase calculation."
         )
-        
+
         sensor_w, sensor_h = self.sensor_size
         pixel_size = self.pixel_size
         device = self.device
         wvln_mm = wvln * 1e-3  # Convert wavelength to mm
-        
+
         # Points shape of [N, 3]
         if not torch.is_tensor(points):
             points = torch.tensor(points, device=device)
-        
+
         if len(points.shape) == 1:
             single_point = True
             points = points.unsqueeze(0)
         elif len(points.shape) == 2 and points.shape[0] == 1:
             single_point = True
         else:
-            raise ValueError(f"Points must be of shape [3] or [1, 3], got {points.shape}.")
+            raise ValueError(
+                f"Points must be of shape [3] or [1, 3], got {points.shape}."
+            )
 
         # Sample rays from object point
         depth = points[:, 2]
@@ -1283,78 +1333,88 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         point_obj_y = points[..., 1] * scale * sensor_h / 2
         point_obj = torch.stack([point_obj_x, point_obj_y, points[..., 2]], dim=-1)
         ray = self.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
-        
+
         # Trace rays coherently through the lens to exit pupil
         ray.coherent = True
         ray = self.trace2exit_pupil(ray)
-                
+
         # Calculate PSF center (not flipped here)
         if recenter:
-            pointc = - self.psf_center(point_obj, method="chief_ray")
+            pointc = -self.psf_center(point_obj, method="chief_ray")
         else:
-            pointc = - self.psf_center(point_obj, method="pinhole")
-        
+            pointc = -self.psf_center(point_obj, method="pinhole")
+
         # Build PSF pixel coordinates (sensor plane at z = d_sensor)
         sensor_z = self.d_sensor.item()
         psf_half_size = (ks / 2) * pixel_size  # Physical half-size of PSF region
-        x_coords = torch.linspace(-psf_half_size + pixel_size/2, psf_half_size - pixel_size/2, ks, device=device)
-        y_coords = torch.linspace(psf_half_size - pixel_size/2, -psf_half_size + pixel_size/2, ks, device=device)
+        x_coords = torch.linspace(
+            -psf_half_size + pixel_size / 2,
+            psf_half_size - pixel_size / 2,
+            ks,
+            device=device,
+        )
+        y_coords = torch.linspace(
+            psf_half_size - pixel_size / 2,
+            -psf_half_size + pixel_size / 2,
+            ks,
+            device=device,
+        )
         psf_x, psf_y = torch.meshgrid(
-            pointc[0, 0] + x_coords,
-            pointc[0, 1] + y_coords,
-            indexing="xy"
+            pointc[0, 0] + x_coords, pointc[0, 1] + y_coords, indexing="xy"
         )  # [ks, ks] each
-        
+
         # Get valid rays only
         valid_mask = ray.is_valid > 0
         valid_pos = ray.o[valid_mask]  # [num_valid, 3]
         valid_dir = ray.d[valid_mask]  # [num_valid, 3]
         valid_opl = ray.opl[valid_mask]  # [num_valid]
         num_valid = valid_pos.shape[0]
-        
+
         # Huygens integration: sum spherical waves from each secondary source
         psf_complex = torch.zeros(ks, ks, dtype=torch.complex128, device=device)
         opl_min = valid_opl.min()
-        
+
         # Compute distance from each secondary source to each pixel
         batch_size = min(num_valid, 10_000)  # Process rays in batches
         for batch_start in range(0, num_valid, batch_size):
             batch_end = min(batch_start + batch_size, num_valid)
-            
+
             # Batch ray data
             batch_pos = valid_pos[batch_start:batch_end]  # [batch, 3]
             batch_dir = valid_dir[batch_start:batch_end]  # [batch, 3]
             batch_opl = valid_opl[batch_start:batch_end].squeeze(-1)  # [batch]
-            
+
             # Distance from each secondary source to each pixel
             # batch_pos: [batch, 3], psf_x: [ks, ks]
             dx = psf_x.unsqueeze(-1) - batch_pos[:, 0]  # [ks, ks, batch]
             dy = psf_y.unsqueeze(-1) - batch_pos[:, 1]  # [ks, ks, batch]
             dz = sensor_z - batch_pos[:, 2]  # [batch]
-            
+
             # Distance r from secondary source to pixel
             r = torch.sqrt(dx**2 + dy**2 + dz**2)  # [ks, ks, batch]
-            
+
             # Obliquity factor: cos(theta) where theta is angle from normal
             # Using ray direction at exit pupil (dz component)
             obliq = torch.abs(batch_dir[:, 2])  # [batch]
             amp = 0.5 * (1.0 + obliq)  # Huygens–Fresnel obliquity factor
-            
+
             # Total optical path = OPL through lens + distance to pixel
             total_opl = batch_opl + r  # [ks, ks, batch]
-            
+
             # Phase relative to reference
-            phase = torch.fmod((total_opl - opl_min) / wvln_mm, 1.0) * (2 * torch.pi)  # [ks, ks, batch]
-            
+            phase = torch.fmod((total_opl - opl_min) / wvln_mm, 1.0) * (
+                2 * torch.pi
+            )  # [ks, ks, batch]
+
             # Complex amplitude: A * exp(i * phase) / r (spherical wave decay)
             # We use 1/r for spherical wave amplitude decay
             complex_amp = (amp / r) * torch.exp(1j * phase)  # [ks, ks, batch]
-            
+
             # Sum contributions from this batch
             psf_complex += complex_amp.sum(dim=-1)  # [ks, ks]
-        
+
         # Convert complex field to intensity
-        psf = psf_complex.abs()**2
+        psf = psf_complex.abs() ** 2
 
         # Intensity normalization
         psf = psf / (torch.sum(psf, dim=(-2, -1), keepdim=True) + EPSILON)
@@ -1376,8 +1436,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         wvln=DEFAULT_WAVE,
         recenter=True,
     ):
-        """Compute the geometric PSF map at given depth. 
-        
+        """Compute the geometric PSF map at given depth.
+
         Overrides the base method in Lens class to improve efficiency by parallel ray tracing over different field points.
 
         Args:
@@ -1416,25 +1476,32 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             ray = self.sample_from_points(points, scale_pupil=0.5, num_rays=SPP_CALC)
             ray = self.trace2sensor(ray)
             if not (ray.is_valid == 1).any():
-                raise RuntimeError("When tracing chief ray for PSF center calculation, no ray arrives at the sensor.")
+                raise RuntimeError(
+                    "When tracing chief ray for PSF center calculation, no ray arrives at the sensor."
+                )
             psf_center = ray.centroid()
             psf_center = -psf_center[..., :2]  # shape [..., 2]
 
         elif method == "pinhole":
             # Pinhole camera perspective projection, distortion not considered
             if points[..., 2].min().abs() < 100:
-                print("Point source is too close, pinhole model may be inaccurate for PSF center calculation.")
+                print(
+                    "Point source is too close, pinhole model may be inaccurate for PSF center calculation."
+                )
             tan_point_fov_x = -points[..., 0] / points[..., 2]
             tan_point_fov_y = -points[..., 1] / points[..., 2]
             psf_center_x = self.foclen * tan_point_fov_x
             psf_center_y = self.foclen * tan_point_fov_y
-            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1).to(self.device)
+            psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1).to(
+                self.device
+            )
 
         else:
-            raise ValueError(f"Unsupported method for PSF center calculation: {method}.")
+            raise ValueError(
+                f"Unsupported method for PSF center calculation: {method}."
+            )
 
         return psf_center
-
 
     # ====================================================================================
     # Classical optical design
@@ -1469,7 +1536,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
                 ray_xy_center_green = ray.centroid()[..., :2].unsqueeze(-2)
 
             # Calculate RMS spot size and radius for different FoVs
-            ray_xy_norm = (ray.o[..., :2] - ray_xy_center_green) * ray.is_valid.unsqueeze(-1)
+            ray_xy_norm = (
+                ray.o[..., :2] - ray_xy_center_green
+            ) * ray.is_valid.unsqueeze(-1)
             spot_rms = ((ray_xy_norm**2).sum(-1).sqrt() * ray.is_valid).sum(-1) / (
                 ray.is_valid.sum(-1) + EPSILON
             )
@@ -1486,10 +1555,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Print results
         print(f"Ray spot analysis results for depth {depth}:")
         print(
-            f"RMS radius: FoV (0.0) {avg_rms_radius_um[0]:.3f} um, FoV (0.5) {avg_rms_radius_um[num_field//2]:.3f} um, FoV (1.0) {avg_rms_radius_um[-1]:.3f} um"
+            f"RMS radius: FoV (0.0) {avg_rms_radius_um[0]:.3f} um, FoV (0.5) {avg_rms_radius_um[num_field // 2]:.3f} um, FoV (1.0) {avg_rms_radius_um[-1]:.3f} um"
         )
         print(
-            f"Geo radius: FoV (0.0) {avg_geo_radius_um[0]:.3f} um, FoV (0.5) {avg_geo_radius_um[num_field//2]:.3f} um, FoV (1.0) {avg_geo_radius_um[-1]:.3f} um"
+            f"Geo radius: FoV (0.0) {avg_geo_radius_um[0]:.3f} um, FoV (0.5) {avg_geo_radius_um[num_field // 2]:.3f} um, FoV (1.0) {avg_geo_radius_um[-1]:.3f} um"
         )
 
         # Save to dict
@@ -1543,7 +1612,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
         paraxial_fov = 0.01
         paraxial_fov_deg = float(np.rad2deg(paraxial_fov))
-        ray = self.sample_parallel(fov_x=0.0, fov_y=paraxial_fov_deg, entrance_pupil=False, scale_pupil=0.2)
+        ray = self.sample_parallel(
+            fov_x=0.0, fov_y=paraxial_fov_deg, entrance_pupil=False, scale_pupil=0.2
+        )
         ray = self.trace2sensor(ray)
 
         # Compute the effective focal length
@@ -1551,20 +1622,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         eff_foclen = paraxial_imgh.item() / float(np.tan(paraxial_fov))
         self.efl = eff_foclen
         self.foclen = eff_foclen
-        
+
         # Compute the back focal length
         self.bfl = self.d_sensor.item() - self.surfaces[-1].d.item()
 
     @torch.no_grad()
     def calc_numerical_aperture(self, n=1.0):
         """Compute numerical aperture (NA).
-        
+
         Args:
             n (float, optional): Refractive index. Defaults to 1.0.
-        
+
         Returns:
             NA (float): Numerical aperture.
-        
+
         Reference:
             [1] https://en.wikipedia.org/wiki/Numerical_aperture
         """
@@ -1575,15 +1646,15 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     @torch.no_grad()
     def calc_focal_plane(self, wvln=DEFAULT_WAVE):
         """Compute the focus distance in the object space. Ray starts from sensor center and traces to the object space.
-        
+
         Args:
             wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
-        
+
         Returns:
             focal_plane (float): Focal plane in the object space.
         """
         device = self.device
-        
+
         # Sample point source rays from sensor center
         o1 = torch.tensor([0, 0, self.d_sensor.item()]).repeat(SPP_CALC, 1)
         o1 = o1.to(device)
@@ -1609,17 +1680,19 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if len(focus_z) > 0:
             focal_plane = float(np.mean(focus_z))
         else:
-            raise ValueError("No valid rays found, focal plane in the image space cannot be computed.")
+            raise ValueError(
+                "No valid rays found, focal plane in the image space cannot be computed."
+            )
 
         return focal_plane
 
     @torch.no_grad()
     def calc_sensor_plane(self, depth=float("inf")):
         """Calculate in-focus sensor plane.
-        
+
         Args:
             depth (float, optional): Depth of the object plane. Defaults to float("inf").
-        
+
         Returns:
             d_sensor (torch.Tensor): Sensor plane in the image space.
         """
@@ -1648,8 +1721,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     @torch.no_grad()
     def calc_fov(self):
-        """Compute FoV (radian) of the lens. 
-        
+        """Compute FoV (radian) of the lens.
+
         We implement two types of FoV calculation:
             1. Perspective projection from focal length and sensor size.
             2. Ray tracing to compute output ray angle.
@@ -1659,12 +1732,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """
         if not hasattr(self, "foclen"):
             return
-        
+
         # 1. Perspective projection (effective FoV)
         self.vfov = 2 * math.atan(self.sensor_size[0] / 2 / self.foclen)
         self.hfov = 2 * math.atan(self.sensor_size[1] / 2 / self.foclen)
         self.dfov = 2 * math.atan(self.r_sensor / self.foclen)
-        self.rfov = self.dfov / 2 # radius (half diagonal) FoV
+        self.rfov = self.dfov / 2  # radius (half diagonal) FoV
 
         # 2. Ray tracing to calculate real FoV (distortion-affected FoV)
         # Sample rays from edge of sensor, shape [SPP_CALC, 3]
@@ -1690,7 +1763,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if torch.isnan(rfov):
             self.real_rfov = self.rfov
             self.real_dfov = self.dfov
-            print(f"Failed to calculate distorted FoV by ray tracing, use effective FoV {self.rfov} rad.")
+            print(
+                f"Failed to calculate distorted FoV by ray tracing, use effective FoV {self.rfov} rad."
+            )
         else:
             self.real_rfov = rfov.item()
             self.real_dfov = 2 * rfov.item()
@@ -1739,12 +1814,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if self.aper_idx is None:
             self.aper_idx = np.argmin([s.r for s in self.surfaces])
             print("No aperture found, use the smallest surface as aperture.")
-        
+
         # Compute entrance and exit pupil
         self.exit_pupilz, self.exit_pupilr = self.calc_exit_pupil(paraxial=False)
         self.entr_pupilz, self.entr_pupilr = self.calc_entrance_pupil(paraxial=False)
-        self.exit_pupilz_parax, self.exit_pupilr_parax = self.calc_exit_pupil(paraxial=True)
-        self.entr_pupilz_parax, self.entr_pupilr_parax = self.calc_entrance_pupil(paraxial=True)
+        self.exit_pupilz_parax, self.exit_pupilr_parax = self.calc_exit_pupil(
+            paraxial=True
+        )
+        self.entr_pupilz_parax, self.entr_pupilr_parax = self.calc_entrance_pupil(
+            paraxial=True
+        )
 
         # Compute F-number
         self.fnum = self.foclen / (2 * self.entr_pupilr)
@@ -1782,17 +1861,17 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     @torch.no_grad()
     def calc_exit_pupil(self, paraxial=False):
         """Calculate exit pupil location and radius.
-        
+
         Paraxial mode:
             Rays are emitted from near the center of the aperture stop and are close to the optical axis.
             This mode estimates the exit pupil position and radius under ideal (first-order) optical assumptions.
             It is fast and stable.
-        
+
         Non-paraxial mode:
             Rays are emitted from the edge of the aperture stop in large quantities.
             The exit pupil position and radius are determined based on the intersection points of these rays.
             This mode is slower and affected by aperture-related aberrations.
-        
+
         Use paraxial mode unless precise ray aiming is required.
 
         Args:
@@ -1821,7 +1900,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             rfov = float(np.arctan(self.r_sensor / self.foclen))
-            phi_rad = torch.linspace(-rfov/2, rfov/2, SPP_CALC)
+            phi_rad = torch.linspace(-rfov / 2, rfov / 2, SPP_CALC)
 
         d = torch.stack(
             (torch.sin(phi_rad), torch.zeros_like(phi_rad), torch.cos(phi_rad)), axis=-1
@@ -1906,7 +1985,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         else:
             ray_o = torch.tensor([[aper_r, 0, aper_z]]).repeat(SPP_CALC, 1)
             rfov = float(np.arctan(self.r_sensor / self.foclen))
-            phi = torch.linspace(-rfov/2, rfov/2, SPP_CALC)
+            phi = torch.linspace(-rfov / 2, rfov / 2, SPP_CALC)
 
         d = torch.stack(
             (torch.sin(phi), torch.zeros_like(phi), -torch.cos(phi)), axis=-1
@@ -1928,7 +2007,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         # Handle the case where no intersection points are found or small entrance pupil
         if len(intersection_points) == 0:
-            print("No intersection points found, use the first surface as entrance pupil.")
+            print(
+                "No intersection points found, use the first surface as entrance pupil."
+            )
             avg_pupilr = self.surfaces[0].r
             avg_pupilz = self.surfaces[0].d.item()
         else:
@@ -2096,7 +2177,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
                 - For camera lens, we usually expand by 20%.
         """
         surface_range = self.find_diff_surf()
-        
+
         # Set expansion factor
         if self.r_sensor < 10.0:
             expand_factor = 0.05 if expand_factor is None else expand_factor
@@ -2116,7 +2197,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             print(f"Using fov_deg: {fov_deg} during surface pruning.")
 
         fov_y = [f * fov_deg / 10 for f in range(0, 11)]
-        ray = self.sample_parallel(fov_x=[0.0], fov_y=fov_y, num_rays=SPP_CALC, scale_pupil=1.5)
+        ray = self.sample_parallel(
+            fov_x=[0.0], fov_y=fov_y, num_rays=SPP_CALC, scale_pupil=1.5
+        )
         _, ray_o_record = self.trace2sensor(ray=ray, record=True)
 
         # Ray record, shape [num_rays, num_surfaces + 2, 3]
@@ -2127,7 +2210,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Compute the maximum ray height for each surface
         ray_r_record = (ray_o_record[..., :2] ** 2).sum(-1).sqrt()
         surf_r_max = ray_r_record.max(dim=0)[0][1:-1]
-        
+
         # Update surface height
         for i in surface_range:
             if surf_r_max[i] > 0:
@@ -2242,9 +2325,13 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Draw MTF
         if depth == float("inf"):
             # This is a hack to draw MTF for infinite depth
-            self.draw_mtf(depth_list=[DEPTH], save_name=f"{save_name}_mtf.png", show=show)
+            self.draw_mtf(
+                depth_list=[DEPTH], save_name=f"{save_name}_mtf.png", show=show
+            )
         else:
-            self.draw_mtf(depth_list=[depth], save_name=f"{save_name}_mtf.png", show=show)
+            self.draw_mtf(
+                depth_list=[depth], save_name=f"{save_name}_mtf.png", show=show
+            )
 
         # Calculate RMS error
         self.analysis_spot(depth=depth)
@@ -2252,7 +2339,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         # Render an image, compute PSNR and SSIM
         if render:
             depth = DEPTH if depth == float("inf") else depth
-            img_org = Image.open("./datasets/charts/NBS_1963_1k.png").convert('RGB')
+            img_org = Image.open("./datasets/charts/NBS_1963_1k.png").convert("RGB")
             img_org = np.array(img_org)
             self.analysis_rendering(
                 img_org,
@@ -2293,10 +2380,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if optim_surf_range is None:
             # optim_surf_range = self.find_diff_surf()
             optim_surf_range = range(len(self.surfaces))
-        
+
         # If lr for each surface is a list is given
         if isinstance(lrs[0], list):
-            return self.get_optimizer_params_manual(lrs=lrs, optim_mat=optim_mat, optim_surf_range=optim_surf_range)
+            return self.get_optimizer_params_manual(
+                lrs=lrs, optim_mat=optim_mat, optim_surf_range=optim_surf_range
+            )
 
         # Optimize lens surface parameters
         params = []
@@ -2307,10 +2396,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
                 params += surf.get_optimizer_params(lrs=[lrs[0]])
 
             elif isinstance(surf, Aspheric):
-                params += surf.get_optimizer_params(lrs=lrs[:4], decay=decay, optim_mat=optim_mat)
+                params += surf.get_optimizer_params(
+                    lrs=lrs[:4], decay=decay, optim_mat=optim_mat
+                )
 
             elif isinstance(surf, AsphericNorm):
-                params += surf.get_optimizer_params(lrs=lrs[:4], decay=decay, optim_mat=optim_mat)
+                params += surf.get_optimizer_params(
+                    lrs=lrs[:4], decay=decay, optim_mat=optim_mat
+                )
 
             elif isinstance(surf, Phase):
                 params += surf.get_optimizer_params(lrs=[lrs[0], lrs[4]])
@@ -2328,10 +2421,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             #     params += surf.get_optimizer_params(lrs=lr, optim_mat=optim_mat)
 
             elif isinstance(surf, Spheric):
-                params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
+                params += surf.get_optimizer_params(
+                    lrs=[lrs[0], lrs[1]], optim_mat=optim_mat
+                )
 
             elif isinstance(surf, ThinLens):
-                params += surf.get_optimizer_params(lrs=[lrs[0], lrs[1]], optim_mat=optim_mat)
+                params += surf.get_optimizer_params(
+                    lrs=[lrs[0], lrs[1]], optim_mat=optim_mat
+                )
 
             else:
                 raise Exception(
@@ -2366,7 +2463,9 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.init_constraints()
 
         # Get optimizer
-        params = self.get_optimizer_params(lrs=lrs, decay=decay, optim_surf_range=optim_surf_range, optim_mat=optim_mat)
+        params = self.get_optimizer_params(
+            lrs=lrs, decay=decay, optim_surf_range=optim_surf_range, optim_mat=optim_mat
+        )
         optimizer = torch.optim.Adam(params)
         # optimizer = torch.optim.SGD(params)
         return optimizer
@@ -2447,7 +2546,7 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.r_sensor = data["r_sensor"]
 
         self.to(self.device)
-        
+
         # Set sensor size and resolution
         sensor_res = data.get("sensor_res", (2000, 2000))
         self.set_sensor_res(sensor_res=sensor_res)
