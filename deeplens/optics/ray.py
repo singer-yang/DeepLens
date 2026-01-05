@@ -29,7 +29,9 @@ class Ray(DeepObj):
         self.o = o if torch.is_tensor(o) else torch.tensor(o)
         self.d = d if torch.is_tensor(d) else torch.tensor(d)
         self.shape = self.o.shape[:-1]
-        assert wvln > 0.1 and wvln < 1, "Ray wavelength unit should be [um]"
+
+        # Wavelength
+        assert wvln > 0.1 and wvln < 10.0, "Ray wavelength unit should be [um]"
         self.wvln = torch.tensor(wvln)
 
         # Auxiliary ray parameters
@@ -71,9 +73,9 @@ class Ray(DeepObj):
         Returns:
             torch.Tensor: Centroid of the ray, shape (..., 3)
         """
-        return (self.o * self.is_valid.unsqueeze(-1)).sum(-2) / self.is_valid.sum(-1).add(
-            EPSILON
-        ).unsqueeze(-1)
+        return (self.o * self.is_valid.unsqueeze(-1)).sum(-2) / self.is_valid.sum(
+            -1
+        ).add(EPSILON).unsqueeze(-1)
 
     def rms_error(self, center_ref=None):
         """Calculate the RMS error of the ray.
@@ -93,7 +95,9 @@ class Ray(DeepObj):
 
         # Calculate RMS error for each region
         rms_error = ((self.o[..., :2] - center_ref[..., :2]) ** 2).sum(-1)
-        rms_error = (rms_error * self.is_valid).sum(-1) / (self.is_valid.sum(-1) + EPSILON)
+        rms_error = (rms_error * self.is_valid).sum(-1) / (
+            self.is_valid.sum(-1) + EPSILON
+        )
         rms_error = rms_error.sqrt()
 
         # Average RMS error
@@ -101,7 +105,7 @@ class Ray(DeepObj):
 
     def flip_xy(self):
         """Flip the x and y coordinates of the ray.
-        
+
         This function is used when calculating point spread function and wavefront distribution.
         """
         self.o = torch.cat([-self.o[..., :2], self.o[..., 2:]], dim=-1)

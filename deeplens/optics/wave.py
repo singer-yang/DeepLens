@@ -69,7 +69,7 @@ class ComplexWave(DeepObj):
             self.res = res
 
         # Wave field parameters
-        assert wvln > 0.1 and wvln < 1, "Wavelength should be in [um]."
+        assert wvln > 0.1 and wvln < 10.0, "Wavelength should be in [um]."
         self.wvln = wvln  # [um], wavelength
         self.k = 2 * torch.pi / (self.wvln * 1e-3)  # [mm^-1], wave number
         self.phy_size = phy_size  # [mm], physical size
@@ -105,7 +105,7 @@ class ComplexWave(DeepObj):
         Returns:
             field (ComplexWave): Complex field on x0y plane.
         """
-        assert wvln > 0.1 and wvln < 1.0, "Wavelength should be in [um]."
+        assert wvln > 0.1 and wvln < 10.0, "Wavelength should be in [um]."
         k = 2 * torch.pi / (wvln * 1e-3)  # [mm^-1], wave number
 
         # Create meshgrid on target plane
@@ -156,7 +156,7 @@ class ComplexWave(DeepObj):
         Returns:
             field (ComplexWave): Complex field.
         """
-        assert wvln > 0.1 and wvln < 1.0, "Wavelength should be in [um]."
+        assert wvln > 0.1 and wvln < 10.0, "Wavelength should be in [um]."
 
         # Create a plane wave field
         u = torch.ones(res, dtype=torch.float64) + 0j
@@ -446,7 +446,7 @@ def AngularSpectrumMethod(u, z, wvln, ps, n=1.0, padding=True):
         [1] https://github.com/kaanaksit/odak/blob/master/odak/wave/classical.py#L293
         [2] https://blog.csdn.net/zhenpixiaoyang/article/details/111569495
     """
-    assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
+    assert wvln > 0.1 and wvln < 10.0, "wvln unit should be [um]."
     wvln_mm = wvln * 1e-3 / n # [um] to [mm]
     k = 2 * torch.pi / wvln_mm  # [mm]-1
 
@@ -526,7 +526,7 @@ def FresnelDiffraction(u, z, wvln, ps, n=1.0, padding=True, TF=None):
         _, _, Wimg, Himg = u.shape
 
     # Wave field parameters in medium
-    assert wvln > 0.1 and wvln < 10, "wvln should be in [um]."
+    assert wvln > 0.1 and wvln < 10.0, "wvln should be in [um]."
     wvln_mm = wvln / n * 1e-3  # [um] to [mm]
     k = 2 * torch.pi / wvln_mm
 
@@ -693,7 +693,7 @@ def RayleighSommerfeldIntegral(
         [2] https://www.mathworks.com/matlabcentral/fileexchange/75049-complete-rayleigh-sommerfeld-model-version-2
     """
     # Parameters
-    assert wvln > 0.1 and wvln < 10, "wvln unit should be [um]."
+    assert wvln > 0.1 and wvln < 10.0, "wvln unit should be [um]."
     wvln_mm = wvln * 1e-3  # [um] to [mm]
     k = n * 2 * torch.pi / wvln_mm  # wave number [mm]-1
     if x2 is None:
