@@ -989,8 +989,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
         return diff_float(psf)
 
-    def psf_coherent(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT):
-        return self.psf_pupil_prop(points, ks=ks, wvln=wvln, spp=spp)
+    def psf_coherent(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
+        return self.psf_pupil_prop(points, ks=ks, wvln=wvln, spp=spp, recenter=recenter)
 
     def psf_pupil_prop(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
         """Single point monochromatic PSF using exit-pupil diffraction model. This function is differentiable.
@@ -1089,9 +1089,11 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if isinstance(points, list):
             points = torch.tensor(points, device=device).unsqueeze(0)  # [1, 3]
         elif torch.is_tensor(points) and len(points.shape) == 1:
-            points = points.unsqueeze(0).to(torch.float64).to(device)  # [1, 3]
+            points = points.unsqueeze(0).to(device)  # [1, 3]
+        elif torch.is_tensor(points) and len(points.shape) == 2:
+            assert points.shape[0] == 1, f"pupil_field only supports single point input, got shape {points.shape}"
         else:
-            raise ValueError("Unsupported point type.")
+            raise ValueError(f"Unsupported point type {points.type()}.")
 
         assert points.shape[0] == 1, "Only one point is supported for pupil field calculation."
 
@@ -1174,9 +1176,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         if len(points.shape) == 1:
             single_point = True
             points = points.unsqueeze(0)
+        elif len(points.shape) == 2 and points.shape[0] == 1:
+            single_point = True
         else:
-            raise ValueError("Points must be of shape [1, 3].")
-            single_point = False
+            raise ValueError(f"Points must be of shape [3] or [1, 3], got {points.shape}.")
 
         # Sample rays from object point
         depth = points[:, 2]
