@@ -31,7 +31,7 @@ import cv2 as cv
 import torch
 import torch.nn.functional as F
 
-from deeplens.basics import DELTA
+from deeplens.basics import DELTA, PSF_KS
 
 
 # ================================================
@@ -538,7 +538,7 @@ def rotate_psf(psf, theta):
 # ================================================
 # Inverse PSF calculation from images
 # ================================================
-def solve_psf(img_org, img_render, ks=51, eps=1e-6):
+def solve_psf(img_org, img_render, ks=PSF_KS, eps=1e-6):
     """Solve PSF, where img_render = img_org * psf.
 
     Args:
@@ -573,7 +573,7 @@ def solve_psf(img_org, img_render, ks=51, eps=1e-6):
     return psf
 
 
-def solve_psf_map(img_org, img_render, ks=51, grid=10):
+def solve_psf_map(img_org, img_render, ks=PSF_KS, grid=10):
     """Solve PSF map by inverse convolution.
 
     Args:

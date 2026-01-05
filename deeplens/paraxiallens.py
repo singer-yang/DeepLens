@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 from deeplens.lens import Lens
-from deeplens.basics import DEPTH, EPSILON
+from deeplens.basics import DEPTH, EPSILON, PSF_KS
 from deeplens.optics.psf import conv_psf_depth_interp
 
 
@@ -45,7 +45,7 @@ class ParaxialLens(Lens):
     # PSF-related functions
     # ===========================================
 
-    def psf(self, points, ks=51, psf_type="gaussian", **kwargs):
+    def psf(self, points, ks=PSF_KS, psf_type="gaussian", **kwargs):
         """PSF is modeled as a 2D uniform circular disk with diameter CoC.
 
         Args:
@@ -169,12 +169,12 @@ class ParaxialLens(Lens):
 
         return dof
 
-    def psf_rgb(self, points, ks=51, **kwargs):
+    def psf_rgb(self, points, ks=PSF_KS, **kwargs):
         """Compute RGB PSF."""
         psf = self.psf(points, ks=ks, psf_type="gaussian", **kwargs)
         return psf.unsqueeze(1).repeat(1, 3, 1, 1)
 
-    def psf_map(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
+    def psf_map(self, grid=(5, 5), ks=PSF_KS, depth=DEPTH, **kwargs):
         """Compute monochrome PSF map."""
         points = torch.tensor([[0, 0, depth]], device=self.device)
         psf = self.psf(points=points, ks=ks, psf_type="gaussian", **kwargs)
@@ -184,7 +184,7 @@ class ParaxialLens(Lens):
     # =============================================
     # Dual-pixel PSF
     # =============================================
-    def psf_dp(self, points, ks=51):
+    def psf_dp(self, points, ks=PSF_KS):
         """Generate dual-pixel PSF for left and right sub-apertures.
 
         This function generates separate PSFs for left and right sub-apertures of a dual pixel sensor,
@@ -243,14 +243,14 @@ class ParaxialLens(Lens):
 
         return psf_l, psf_r
 
-    def psf_rgb_dp(self, points, ks=51):
+    def psf_rgb_dp(self, points, ks=PSF_KS):
         """Compute RGB dual-pixel PSF."""
         psf_l, psf_r = self.psf_dp(points, ks=ks)
         psf_l = psf_l.unsqueeze(1).repeat(1, 3, 1, 1)
         psf_r = psf_r.unsqueeze(1).repeat(1, 3, 1, 1)
         return psf_l, psf_r
 
-    def psf_map_dp(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
+    def psf_map_dp(self, grid=(5, 5), ks=PSF_KS, depth=DEPTH, **kwargs):
         """Compute dual-pixel PSF map."""
         points = torch.tensor([[0, 0, depth]], device=self.device)
         psf_l, psf_r = self.psf_dp(points, ks=ks, **kwargs)
@@ -277,7 +277,7 @@ class ParaxialLens(Lens):
         depth_max = depth.max()
         num_depth = 10
         psf_center = (0.0, 0.0)
-        psf_ks = 101
+        psf_ks = PSF_KS
 
         # Calculate dual-pixel PSF at reference depths
         depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
@@ -307,7 +307,7 @@ if __name__ == "__main__":
     lens.draw_psf_map(
         save_name="./psf_map_paraxial_depth1500_focus1000.png",
         grid=(11, 11),
-        ks=128,
+        ks=PSF_KS,
         depth=-1500,
         log_scale=False,
     )

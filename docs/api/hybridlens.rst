@@ -102,7 +102,7 @@ Wavefield & PSF
    :return: ``(wavefront, psf_center)`` where ``wavefront`` has shape ``[H, W]`` and ``psf_center`` is ``[x, y]`` in normalized sensor coordinates
    :rtype: (torch.Tensor, list)
 
-.. py:method:: HybridLens.psf(points=[0.0, 0.0, -10000.0], ks=101, wvln=0.589, spp=1000000)
+.. py:method:: HybridLens.psf(points=[0.0, 0.0, -10000.0], ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT)
 
    Monochromatic PSF using ray–wave model:
 

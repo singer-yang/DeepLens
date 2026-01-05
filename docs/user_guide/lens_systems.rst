@@ -360,14 +360,14 @@ Common Methods
     
     # PSF calculation
     points = torch.tensor([[0.0, 0.0, -1000.0]])
-    psf = lens.psf(points=points, ks=51, spp=2048)
+    psf = lens.psf(points=points, ks=64, spp=2048)
     
     # Image rendering
     img_out = lens.render(img, depth=-1000, method='psf_map')
     
     # Visualization
     # Draw an RGB PSF map (available for all lens types)
-    lens.draw_psf_map(grid=(7, 7), ks=51, depth=-1000, save_name='psf_map.png')
+    lens.draw_psf_map(grid=(7, 7), ks=64, depth=-1000, save_name='psf_map.png')
     # For GeoLens only: draw 2D layout with ray paths
     # lens.draw_layout(filename='layout.png', depth=-1000)
     

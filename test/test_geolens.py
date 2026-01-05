@@ -219,11 +219,11 @@ class TestGeoLensPSF:
         lens = sample_cellphone_lens
         
         points = torch.tensor([[0.0, 0.0, DEPTH]], device=lens.device)
-        psf = lens.psf(points, wvln=DEFAULT_WAVE, ks=51)
+        psf = lens.psf(points, wvln=DEFAULT_WAVE, ks=64)
         
         # ParaxialLens PSF is usually single channel unless psf_rgb implied
         # psf() returns [N_points, ks, ks] for single point
-        assert psf.shape == (1, 51, 51)
+        assert psf.shape == (1, 64, 64)
         assert psf.sum().item() == pytest.approx(1.0, abs=0.1)
 
     def test_geolens_psf_rgb(self, sample_cellphone_lens):
@@ -231,7 +231,7 @@ class TestGeoLensPSF:
         lens = sample_cellphone_lens
         
         points = torch.tensor([[0.0, 0.0, DEPTH]], device=lens.device)
-        psf_rgb = lens.psf_rgb(points, ks=51)
+        psf_rgb = lens.psf_rgb(points, ks=64)
         
         # Check for 3-channel output
         assert psf_rgb.shape[1] == 3
@@ -275,10 +275,10 @@ class TestGeoLensPSF:
         torch.set_default_dtype(torch.float64)
         try:
             point = torch.tensor([0.0, 0.0, DEPTH], device=lens.device, dtype=torch.float64)
-            psf = lens.psf_huygens(point, wvln=DEFAULT_WAVE, ks=51, spp=10000)
+            psf = lens.psf_huygens(point, wvln=DEFAULT_WAVE, ks=64, spp=10000)
             
             # PSF should be normalized
-            assert psf.shape == (51, 51)
+            assert psf.shape == (64, 64)
             assert psf.sum().item() == pytest.approx(1.0, abs=0.1)
         finally:
             torch.set_default_dtype(original_dtype)

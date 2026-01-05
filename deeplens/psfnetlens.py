@@ -21,7 +21,7 @@ from deeplens.geolens import GeoLens
 from deeplens.lens import Lens
 from deeplens.network.surrogate import MLP
 from deeplens.network.surrogate.psfnet_mplconv import PSFNet_MLPConv
-from deeplens.basics import DEPTH
+from deeplens.basics import DEPTH, PSF_KS
 from deeplens.optics.psf import conv_psf_pixel, conv_psf_pixel_high_res, rotate_psf
 
 
@@ -349,14 +349,14 @@ class PSFNetLens(Lens):
             ]
         return psf
 
-    def psf_map_rgb(self, grid=(11, 11), depth=DEPTH, ks=51, **kwargs):
+    def psf_map_rgb(self, grid=(11, 11), depth=DEPTH, ks=PSF_KS, **kwargs):
         """Compute monochrome PSF map.
 
         Args:
-            grid (tuple, optional): Grid size. Defaults to (5, 5), meaning 5x5 grid.
-            wvln (float, optional): Wavelength. Defaults to 0.589.
+            grid (tuple, optional): Grid size. Defaults to (11, 11), meaning 11x11 grid.
+            wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
             depth (float, optional): Depth of the object. Defaults to DEPTH.
-            ks (int, optional): Kernel size. Defaults to 51, meaning 51x51 kernel size.
+            ks (int, optional): Kernel size. Defaults to PSF_KS, meaning PSF_KS x PSF_KS kernel size.
 
         Returns:
             psf_map: Shape of [grid, grid, 3, ks, ks].

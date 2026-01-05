@@ -233,9 +233,9 @@ class HybridLens(Lens):
 
         Args:
             points (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).
-            ks (int, optional): size of the PSF patch. Defaults to 101.
-            wvln (float, optional): wvln. Defaults to 0.589.
-            spp (int, optional): number of rays to sample. Defaults to 1000000.
+            ks (int, optional): size of the PSF patch. Defaults to PSF_KS.
+            wvln (float, optional): wvln. Defaults to DEFAULT_WAVE.
+            spp (int, optional): number of rays to sample. Defaults to SPP_COHERENT.
 
         Returns:
             psf_out (torch.Tensor): PSF patch. Normalized to sum to 1. Shape [ks, ks]

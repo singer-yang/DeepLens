@@ -357,8 +357,8 @@ Main Rendering
    :param method: Rendering method - "ray_tracing", "psf_map", or "psf_patch"
    :type method: str
    :param kwargs: Additional method-specific arguments:
-      - For "psf_map": psf_grid=(10,10), psf_ks=51
-      - For "psf_patch": psf_center=(0.0,0.0), psf_ks=51
+      - For "psf_map": psf_grid=(10,10), psf_ks=64
+      - For "psf_patch": psf_center=(0.0,0.0), psf_ks=64
       - For "ray_tracing": spp=64
    :return: Rendered image tensor [B, C, H, W]
    :rtype: torch.Tensor
@@ -461,7 +461,7 @@ Post-Processing
 PSF Calculation
 ---------------
 
-.. py:method:: GeoLens.psf(points, ks=51, wvln=0.589, spp=None, recenter=True, model="geometric")
+.. py:method:: GeoLens.psf(points, ks=64, wvln=0.589, spp=None, recenter=True, model="geometric")
 
    Calculate Point Spread Function (PSF) using different models.
 
@@ -480,7 +480,7 @@ PSF Calculation
    :return: PSF tensor [ks, ks] or [N, ks, ks]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_geometric(points, ks=51, wvln=0.589, spp=2048, recenter=True)
+.. py:method:: GeoLens.psf_geometric(points, ks=64, wvln=0.589, spp=2048, recenter=True)
 
    Calculate incoherent geometric PSF using ray tracing.
 
@@ -497,11 +497,11 @@ PSF Calculation
    :return: PSF tensor
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_coherent(points, ks=51, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
 
    Calculate coherent PSF by propagating pupil field to sensor (Ray-Wave model). Alias for ``psf_pupil_prop``.
 
-.. py:method:: GeoLens.psf_pupil_prop(points, ks=51, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_pupil_prop(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
 
    Calculate coherent PSF by propagating pupil field to sensor using ASM.
 
@@ -513,7 +513,7 @@ PSF Calculation
    :return: PSF patch
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_huygens(points, ks=51, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_huygens(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
 
    Calculate Huygens PSF by treating every exit-pupil ray as a secondary spherical wave source.
 
@@ -525,7 +525,7 @@ PSF Calculation
    :return: Huygens PSF patch
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_map(depth=-10000.0, grid=(7, 7), ks=51, spp=2048, wvln=0.589, recenter=True)
+.. py:method:: GeoLens.psf_map(depth=-10000.0, grid=(7, 7), ks=64, spp=2048, wvln=0.589, recenter=True)
 
    Calculate PSF map at different field positions.
 
@@ -553,7 +553,7 @@ PSF Calculation
    :return: PSF centers [..., 2]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_coherent(points, ks=51, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
 
    Calculate coherent PSF using ray-wave model. Alias for ``psf_pupil_prop``.
 

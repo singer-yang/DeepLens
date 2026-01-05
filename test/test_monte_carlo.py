@@ -46,7 +46,7 @@ class TestForwardIntegral:
         
         ray = Ray(o, d, wvln=0.55, device=device_auto)
         
-        ks = 51
+        ks = 64
         ps = 0.01
         field = forward_integral(ray, ps=ps, ks=ks)
         

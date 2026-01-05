@@ -119,7 +119,7 @@ class Lens(DeepObj):
     # 2. PSF map
     # 3. PSF radial
     # ===========================================
-    def psf(self, points, wvln=0.589, ks=51, **kwargs):
+    def psf(self, points, wvln=DEFAULT_WAVE, ks=PSF_KS, **kwargs):
         """Compute monochrome point PSF.
 
         NOTE: 
@@ -128,8 +128,8 @@ class Lens(DeepObj):
 
         Args:
             points (tensor): Shape of [N, 3] or [3].
-            wvln (float, optional): Wavelength. Defaults to 0.589.
-            ks (int, optional): Kernel size. Defaults to 51.
+            wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
+            ks (int, optional): Kernel size. Defaults to PSF_KS.
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
@@ -139,7 +139,7 @@ class Lens(DeepObj):
         """
         raise NotImplementedError
 
-    def psf_rgb(self, points, ks=51, **kwargs):
+    def psf_rgb(self, points, ks=PSF_KS, **kwargs):
         """Compute RGB point PSF.
 
         Args:
@@ -238,7 +238,7 @@ class Lens(DeepObj):
         psf_map = psf_map.reshape(grid[1], grid[0], 1, ks, ks)
         return psf_map
 
-    def psf_map_rgb(self, grid=(5, 5), ks=51, depth=DEPTH, **kwargs):
+    def psf_map_rgb(self, grid=(5, 5), ks=PSF_KS, depth=DEPTH, **kwargs):
         """Compute RGB PSF map.
 
         Args:

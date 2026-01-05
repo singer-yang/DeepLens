@@ -18,7 +18,7 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from deeplens.basics import DEFAULT_WAVE, DEPTH
+from deeplens.basics import DEFAULT_WAVE, DEPTH, PSF_KS
 from deeplens.lens import Lens
 from deeplens.optics.diffractive_surface import (
     Binary2,
@@ -196,13 +196,13 @@ class DiffractiveLens(Lens):
     # =============================================
     # Image simulation
     # =============================================
-    def render_mono(self, img, wvln=DEFAULT_WAVE, ks=101):
+    def render_mono(self, img, wvln=DEFAULT_WAVE, ks=PSF_KS):
         """Simulate monochromatic lens blur by convolving an image with the point spread function.
 
         Args:
             img (torch.Tensor): Input image. Shape: (B, 1, H, W)
             wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
-            ks (int, optional): PSF kernel size. Defaults to 101.
+            ks (int, optional): PSF kernel size. Defaults to PSF_KS.
 
         Returns:
             torch.Tensor: Rendered image after applying lens blur with shape (B, 1, H, W).
@@ -211,13 +211,13 @@ class DiffractiveLens(Lens):
         img_render = conv_psf(img, psf)
         return img_render
 
-    def psf(self, depth=float("inf"), wvln=0.589, ks=101, upsample_factor=1):
+    def psf(self, depth=float("inf"), wvln=DEFAULT_WAVE, ks=PSF_KS, upsample_factor=1):
         """Calculate monochromatic point PSF by wave propagation approach.
 
         Args:
             depth (float, optional): Depth of the point source. Defaults to float('inf').
-            wvln (float, optional): Wavelength in micrometers. Defaults to 0.589 [um].
-            ks (int, optional): PSF kernel size. Defaults to 101.
+            wvln (float, optional): Wavelength in micrometers. Defaults to DEFAULT_WAVE.
+            ks (int, optional): PSF kernel size. Defaults to PSF_KS.
             upsample_factor (int, optional): Upsampling factor to meet Nyquist sampling constraint. Defaults to 1.
 
         Returns:
@@ -340,7 +340,7 @@ class DiffractiveLens(Lens):
     def draw_psf(
         self,
         depth=DEPTH,
-        ks=101,
+        ks=PSF_KS,
         save_name="./psf_doelens.png",
         log_scale=True,
         eps=1e-4,

@@ -13,7 +13,7 @@ Base Lens Class
    :param device: Device to use ('cuda' or 'cpu')
    :param dtype: Data type for computations (default: torch.float32)
 
-   .. py:method:: psf(points, wvln=0.589, ks=51, **kwargs)
+   .. py:method:: psf(points, wvln=0.589, ks=64, **kwargs)
 
       Compute monochrome point PSF. This function should be differentiable.
 
@@ -372,7 +372,7 @@ HybridLens
 
    **Methods:**
 
-   .. py:method:: psf(points=[0.0, 0.0, -10000.0], ks=101, wvln=0.589, spp=1000000)
+   .. py:method:: psf(points=[0.0, 0.0, -10000.0], ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT)
 
       Single point monochromatic PSF using ray-wave model.
 
