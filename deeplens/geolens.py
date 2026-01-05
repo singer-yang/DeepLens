@@ -72,9 +72,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     ):
         """Initialize a refractive lens.
 
-        There are three ways to initialize a GeoLens:
+        There are two ways to initialize a GeoLens:
             1. Read a lens from .json/.zmx/.seq file
             2. Initialize a lens with no lens file, then manually add surfaces and materials
+
+        Args:
+            filename (str, optional): Path to lens file (.json, .zmx, or .seq). Defaults to None.
+            sensor_res (tuple, optional): Sensor resolution as (W, H) in pixels. Defaults to None.
+            sensor_size (tuple, optional): Physical sensor size as (W, H) in [mm]. Defaults to None.
+            device (torch.device, optional): Device for tensor computations. Defaults to None.
+            dtype (torch.dtype, optional): Data type for computations. Defaults to torch.float32.
         """
         super().__init__(device=device, dtype=dtype)
 
@@ -95,7 +102,16 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     def read_lens(self, filename):
         """Read a GeoLens from a file.
 
-        In this step, sensor size and resolution will usually be overwritten.
+        Supported file formats:
+            - .json: DeepLens native JSON format
+            - .zmx: Zemax lens file format
+            - .seq: CODE V sequence file format
+
+        Args:
+            filename (str): Path to the lens file.
+
+        Note:
+            Sensor size and resolution will usually be overwritten by values from the file.
         """
         # Load lens file
         if filename[-4:] == ".txt":
@@ -123,13 +139,26 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.post_computation()
 
     def post_computation(self):
-        """After loading lens, compute foclen, fov and fnum."""
+        """Compute derived optical properties after loading or modifying lens.
+
+        Calculates and caches:
+            - Effective focal length (EFL)
+            - Entrance and exit pupil positions and radii
+            - Field of view (FoV) in horizontal, vertical, and diagonal directions
+            - F-number
+
+        Note:
+            This method should be called after any changes to the lens geometry.
+        """
         self.calc_foclen()
         self.calc_pupil()
         self.calc_fov()
 
     def __call__(self, ray):
-        """The input and output of a GeoLens object are both Ray objects."""
+        """Trace rays through the lens system.
+
+        Makes the GeoLens callable, allowing ray tracing with function call syntax.
+        """
         return self.trace(ray)
 
     # ====================================================================================
@@ -545,10 +574,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return ray_out, ray_o_rec
 
     def trace2obj(self, ray):
-        """Backward trace rays through the lens to first surface.
+        """Traces rays backwards through all lens surfaces from sensor side
+        to object side.
 
         Args:
-            ray (Ray object): Ray object.
+            ray (Ray): Ray object to trace backwards.
+
+        Returns:
+            Ray: Ray object after backward propagation through the lens.
         """
         ray, _ = self.trace(ray)
         return ray
@@ -585,7 +618,10 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         """Forward trace rays through the lens to exit pupil plane.
 
         Args:
-            ray (Ray object): Ray object.
+            ray (Ray): Ray object to trace.
+
+        Returns:
+            Ray: Ray object propagated to the exit pupil plane.
         """
         ray = self.trace2sensor(ray)
         pupil_z, _ = self.get_exit_pupil()
@@ -593,12 +629,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return ray
 
     def forward_tracing(self, ray, surf_range, record):
-        """Forward trace rays through the lens to last surface.
+        """Forward traces rays through each surface in the specified range from object side to image side.
 
         Args:
-            ray (Ray object): Ray object.
-            surf_range (list): Surface range.
-            record (bool): record ray path or not.
+            ray (Ray): Ray object to trace.
+            surf_range (range): Range of surface indices to trace through.
+            record (bool): If True, record ray positions at each surface.
+
+        Returns:
+            tuple: (ray_out, ray_o_record) where:
+                - ray_out (Ray): Ray after propagation through all surfaces.
+                - ray_o_record (list or None): List of ray positions at each surface,
+                    or None if record is False.
         """
         if record:
             ray_o_record = []
@@ -621,12 +663,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return ray, ray_o_record
 
     def backward_tracing(self, ray, surf_range, record):
-        """Backward trace rays through the lens to first surface.
+        """Backward traces rays through each surface in reverse order from image side to object side.
 
         Args:
-            ray (Ray object): Ray object.
-            surf_range (list): Surface range.
-            record (bool): record ray path or not.
+            ray (Ray): Ray object to trace.
+            surf_range (range): Range of surface indices to trace through.
+            record (bool): If True, record ray positions at each surface.
+
+        Returns:
+            tuple: (ray_out, ray_o_record) where:
+                - ray_out (Ray): Ray after backward propagation through all surfaces.
+                - ray_o_record (list or None): List of ray positions at each surface,
+                    or None if record is False.
         """
         if record:
             ray_o_record = []
@@ -660,10 +708,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
             [3] Ray tracing rendering.
 
         Args:
-            img_obj (tensor): Input image object in raw space. Shape of [N, C, H, W].
+            img_obj (Tensor): Input image object in raw space. Shape of [N, C, H, W].
             depth (float, optional): Depth of the object. Defaults to DEPTH.
-            method (str, optional): Image simulation method. Defaults to "psf".
-            **kwargs: Additional arguments for different methods.
+            method (str, optional): Image simulation method. One of 'psf_map', 'psf_patch',
+                or 'ray_tracing'. Defaults to 'ray_tracing'.
+            **kwargs: Additional arguments for different methods:
+                - psf_grid (tuple): Grid size for PSF map method. Defaults to (10, 10).
+                - psf_ks (int): Kernel size for PSF methods. Defaults to PSF_KS.
+                - psf_center (tuple): Center position for PSF patch method.
+                - spp (int): Samples per pixel for ray tracing. Defaults to SPP_RENDER.
+
+        Returns:
+            Tensor: Rendered image tensor. Shape of [N, C, H, W].
         """
         B, C, Himg, Wimg = img_obj.shape
         Wsensor, Hsensor = self.sensor_res
@@ -851,17 +907,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         method="ray_tracing",
         show=False,
     ):
-        """Render a single image for visualization and analysis. 
-        
+        """Render a single image for visualization and analysis.
+
         Args:
-            img_org (tensor): [H, W, 3] shape image.
-            depth (float, optional): depth of object image. Defaults to DEPTH.
-            spp (int, optional): sample per pixel. Defaults to 64.
-            unwarp (bool, optional): unwarp the image. Defaults to False.
-            save_name (str, optional): save name. Defaults to None.
-            noise (float, optional): sensor noise. Defaults to 0.0.
-            method (str, optional): rendering method. Defaults to 'ray_tracing'.
-            show (bool, optional): show the rendered image. Defaults to False.
+            img_org (Tensor): Original image with shape [H, W, 3].
+            save_name (str, optional): Path prefix for saving rendered images. Defaults to None.
+            depth (float, optional): Depth of object image. Defaults to DEPTH.
+            spp (int, optional): Sample per pixel. Defaults to SPP_RENDER.
+            unwarp (bool, optional): If True, unwarp the image to correct distortion. Defaults to False.
+            noise (float, optional): Gaussian noise standard deviation. Defaults to 0.0.
+            method (str, optional): Rendering method ('ray_tracing', etc.). Defaults to 'ray_tracing'.
+            show (bool, optional): If True, display the rendered image. Defaults to False.
+
+        Returns:
+            Tensor: Rendered image tensor with shape [1, 3, H, W].
         """
         # Change sensor resolution to match the image
         sensor_res_original = self.sensor_res
@@ -918,6 +977,26 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     #   3. Huygens PSF (`psf_huygens`): coherent ray tracing to exit pupil, then Huygens-Fresnel integration
     # ====================================================================================
     def psf(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=None, recenter=True, model="geometric"):
+        """Calculate Point Spread Function (PSF) for given point sources.
+
+        Supports multiple PSF calculation models:
+            - geometric: Incoherent intensity ray tracing (fast, differentiable)
+            - coherent: Coherent ray tracing with free-space propagation (accurate, differentiable)
+            - huygens: Huygens-Fresnel integration (accurate, not differentiable)
+
+        Args:
+            points (Tensor): Point source positions. Shape [N, 3] with x, y in [-1, 1]
+                and z in [-Inf, 0]. Normalized coordinates.
+            ks (int, optional): Output kernel size in pixels. Defaults to PSF_KS.
+            wvln (float, optional): Wavelength in [um]. Defaults to DEFAULT_WAVE.
+            spp (int, optional): Samples per pixel. If None, uses model-specific default.
+            recenter (bool, optional): If True, center PSF using chief ray. Defaults to True.
+            model (str, optional): PSF model type. One of 'geometric', 'coherent', 'huygens'.
+                Defaults to 'geometric'.
+
+        Returns:
+            Tensor: PSF normalized to sum to 1. Shape [ks, ks] or [N, ks, ks].
+        """
         if model == "geometric":
             spp = SPP_PSF if spp is None else spp
             return self.psf_geometric(points, ks, wvln, spp, recenter)
@@ -990,6 +1069,8 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return diff_float(psf)
 
     def psf_coherent(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
+        """Alias for psf_pupil_prop. Calculates PSF by coherent ray tracing to exit pupil followed by Angular Spectrum Method (ASM) propagation.
+        """
         return self.psf_pupil_prop(points, ks=ks, wvln=wvln, spp=spp, recenter=recenter)
 
     def psf_pupil_prop(self, points, ks=PSF_KS, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
@@ -1069,12 +1150,26 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         return diff_float(psf)
 
     def pupil_field(self, points, wvln=DEFAULT_WAVE, spp=SPP_COHERENT, recenter=True):
-        """Compute complex wavefront (flipped for further PSF calculation) at exit pupil plane by coherent ray tracing. The wavefront has the same size as the image sensor. This function is differentiable.
+        """Compute complex wavefront at exit pupil plane by coherent ray tracing.
+
+        The wavefront is flipped for subsequent PSF calculation and has the same
+        size as the image sensor. This function is differentiable.
 
         Args:
-            point (tensor): Point source position. Shape of [N, 3], [-1, 1] * [-1, 1] * [-Inf, 0].
-            wvln (float): Ray wavelength in [um].
-            spp (int): Ray sample number per point.
+            points (Tensor or list): Single point source position. Shape [3] or [1, 3],
+                with x, y in [-1, 1] and z in [-Inf, 0].
+            wvln (float, optional): Wavelength in [um]. Defaults to DEFAULT_WAVE.
+            spp (int, optional): Number of rays to sample. Must be >= 1,000,000 for
+                accurate coherent simulation. Defaults to SPP_COHERENT.
+            recenter (bool, optional): If True, center using chief ray. Defaults to True.
+
+        Returns:
+            tuple: (wavefront, psf_center) where:
+                - wavefront (Tensor): Complex wavefront at exit pupil. Shape [H, H].
+                - psf_center (list): Normalized PSF center coordinates [x, y] in [-1, 1].
+
+        Note:
+            Default dtype must be torch.float64 for accurate phase calculation.
         """
         assert spp >= 1_000_000, (
             f"Ray sampling {spp} is too small for coherent ray tracing, which may lead to inaccurate simulation."
@@ -1347,9 +1442,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     def analysis_spot(self, num_field=3, depth=float("inf")):
         """Compute sensor plane ray spot RMS error and radius.
 
+        Analyzes spot sizes across the field of view for multiple wavelengths
+        (red, green, blue) and reports statistics.
+
         Args:
-            num_field (int, optional): Number of fields. Defaults to 3.
-            depth (float, optional): Depth of the point source. Defaults to float("inf").
+            num_field (int, optional): Number of field positions to analyze along the
+                radial direction. Defaults to 3.
+            depth (float, optional): Depth of the point source. Use float('inf') for
+                collimated light. Defaults to float('inf').
+
+        Returns:
+            dict: Spot analysis results keyed by field position (e.g., 'fov0.0', 'fov0.5').
+                Each entry contains 'rms' (RMS radius in um) and 'radius' (geometric radius in um).
         """
         rms_radius_fields = []
         geo_radius_fields = []
@@ -1405,7 +1509,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # ====================================================================================
 
     def find_diff_surf(self):
-        """Get differentiable/optimizable surface list."""
+        """Get differentiable/optimizable surface indices.
+
+        Returns a list of surface indices that can be optimized during lens design.
+        Excludes the aperture surface from optimization.
+
+        Returns:
+            list or range: Surface indices excluding the aperture.
+        """
         if self.aper_idx is None:
             diff_surf_range = range(len(self.surfaces))
         else:
@@ -1418,10 +1529,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     def calc_foclen(self):
         """Compute effective focal length (EFL).
 
-        Trace a paraxial chief ray and compute the image height, then use the image height to compute the EFL.
+        Traces a paraxial chief ray and computes the image height, then uses the image height to compute the EFL.
 
-        Returns:
-            eff_foclen (float): Effective focal length.
+        Updates:
+            self.efl: Effective focal length.
+            self.foclen: Alias for effective focal length.
+            self.bfl: Back focal length (distance from last surface to sensor).
 
         Reference:
             [1] https://wp.optics.arizona.edu/optomech/wp-content/uploads/sites/53/2016/10/Tutorial_MorelSophie.pdf
@@ -1587,20 +1700,34 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     @torch.no_grad()
     def calc_scale(self, depth):
-        """Calculate the scale factor (obj_height / img_height) with pinhole camera model."""
+        """Calculate the scale factor (object height / image height).
+
+        Uses the pinhole camera model to compute magnification.
+
+        Args:
+            depth (float): Object distance from the lens (negative z direction).
+
+        Returns:
+            float: Scale factor relating object height to image height.
+        """
         return -depth / self.foclen
 
     @torch.no_grad()
     def calc_pupil(self):
         """Compute entrance and exit pupil positions and radii.
-        
+
         The entrance and exit pupils must be recalculated whenever:
             - First-order parameters change (e.g., field of view, object height, image height),
             - Lens geometry or materials change (e.g., surface curvatures, refractive indices, thicknesses),
             - Or generally, any time the lens configuration is modified.
 
-        Args:
-            paraxial (bool): If True, use paraxial approximation. Default: True.
+        Updates:
+            self.aper_idx: Index of the aperture surface.
+            self.exit_pupilz, self.exit_pupilr: Exit pupil position and radius.
+            self.entr_pupilz, self.entr_pupilr: Entrance pupil position and radius.
+            self.exit_pupilz_parax, self.exit_pupilr_parax: Paraxial exit pupil.
+            self.entr_pupilz_parax, self.entr_pupilr_parax: Paraxial entrance pupil.
+            self.fnum: F-number calculated from focal length and entrance pupil.
         """
         # Find aperture
         self.aper_idx = None
@@ -1623,14 +1750,30 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.fnum = self.foclen / (2 * self.entr_pupilr)
 
     def get_entrance_pupil(self, paraxial=False):
-        """Get entrance pupil location and radius."""
+        """Get entrance pupil location and radius.
+
+        Args:
+            paraxial (bool, optional): If True, return paraxial approximation values.
+                If False, return real ray-traced values. Defaults to False.
+
+        Returns:
+            tuple: (z_position, radius) of the entrance pupil in [mm].
+        """
         if paraxial:
             return self.entr_pupilz_parax, self.entr_pupilr_parax
         else:
             return self.entr_pupilz, self.entr_pupilr
 
     def get_exit_pupil(self, paraxial=False):
-        """Get exit pupil location and radius."""
+        """Get exit pupil location and radius.
+
+        Args:
+            paraxial (bool, optional): If True, return paraxial approximation values.
+                If False, return real ray-traced values. Defaults to False.
+
+        Returns:
+            tuple: (z_position, radius) of the exit pupil in [mm].
+        """
         if paraxial:
             return self.exit_pupilz_parax, self.exit_pupilr_parax
         else:
@@ -1999,7 +2142,20 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     @torch.no_grad()
     def correct_shape(self, expand_factor=None):
-        """Correct wrong lens shape during the lens design."""
+        """Correct wrong lens shape during lens design optimization.
+
+        Applies correction rules to ensure valid lens geometry:
+            1. Move the first surface to z = 0.0
+            2. Fix aperture distance if aperture is at the front
+            3. Prune all surfaces to allow valid rays through
+
+        Args:
+            expand_factor (float, optional): Height expansion factor for surface pruning.
+                If None, auto-selects based on lens type. Defaults to None.
+
+        Returns:
+            bool: True if any shape corrections were made, False otherwise.
+        """
         aper_idx = self.aper_idx
         optim_surf_range = self.find_diff_surf()
         shape_changed = False
@@ -2036,7 +2192,12 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
 
     @torch.no_grad()
     def match_materials(self, mat_table="CDGM"):
-        """Match material"""
+        """Match lens materials to a glass catalog.
+
+        Args:
+            mat_table (str, optional): Glass catalog name. Common options include
+                'CDGM', 'SCHOTT', 'OHARA'. Defaults to 'CDGM'.
+        """
         for surf in self.surfaces:
             surf.mat2.match_material(mat_table=mat_table)
 
@@ -2214,7 +2375,18 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
     # Lens file IO
     # ====================================================================================
     def read_lens_json(self, filename="./test.json"):
-        """Read the lens from .json file."""
+        """Read the lens from a JSON file.
+
+        Loads lens configuration including surfaces, materials, and optical properties
+        from the DeepLens native JSON format.
+
+        Args:
+            filename (str, optional): Path to the JSON lens file. Defaults to './test.json'.
+
+        Note:
+            After loading, the lens is moved to self.device and post_computation is called
+            to calculate derived properties.
+        """
         self.surfaces = []
         self.materials = []
         with open(filename, "r") as f:
@@ -2282,7 +2454,14 @@ class GeoLens(Lens, GeoLensEval, GeoLensOptim, GeoLensVis, GeoLensIO, GeoLensTol
         self.post_computation()
 
     def write_lens_json(self, filename="./test.json"):
-        """Write the lens into .json file."""
+        """Write the lens to a JSON file.
+
+        Saves the complete lens configuration including all surfaces, materials,
+        focal length, F-number, and sensor properties to the DeepLens JSON format.
+
+        Args:
+            filename (str, optional): Path for the output JSON file. Defaults to './test.json'.
+        """
         data = {}
         data["info"] = self.lens_info if hasattr(self, "lens_info") else "None"
         data["foclen"] = round(self.foclen, 4)
