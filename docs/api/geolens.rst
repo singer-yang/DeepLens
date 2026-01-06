@@ -357,8 +357,8 @@ Main Rendering
    :param method: Rendering method - "ray_tracing", "psf_map", or "psf_patch"
    :type method: str
    :param kwargs: Additional method-specific arguments:
-      - For "psf_map": psf_grid=(10,10), psf_ks=51
-      - For "psf_patch": psf_center=(0.0,0.0), psf_ks=51
+      - For "psf_map": psf_grid=(10,10), psf_ks=64
+      - For "psf_patch": psf_center=(0.0,0.0), psf_ks=64
       - For "ray_tracing": spp=64
    :return: Rendered image tensor [B, C, H, W]
    :rtype: torch.Tensor
@@ -461,14 +461,30 @@ Post-Processing
 PSF Calculation
 ---------------
 
-Incoherent PSF
-~~~~~~~~~~~~~~
+.. py:method:: GeoLens.psf(points, ks=64, wvln=0.589, spp=None, recenter=True, model="geometric")
 
-.. py:method:: GeoLens.psf(points, ks=51, wvln=0.589, spp=2048, recenter=False)
+   Calculate Point Spread Function (PSF) using different models.
 
-   Calculate incoherent PSF for point sources.
+   :param points: Point source positions in shape [3], [N, 3], or [Nx, Ny, 3]
+   :type points: torch.Tensor or list
+   :param ks: PSF kernel size
+   :type ks: int
+   :param wvln: Wavelength in micrometers
+   :type wvln: float
+   :param spp: Samples per pixel (defaults to spp_psf for geometric, spp_coherent for coherent/huygens)
+   :type spp: int or None
+   :param recenter: Recenter PSF using chief ray
+   :type recenter: bool
+   :param model: PSF model - "geometric", "coherent", or "huygens"
+   :type model: str
+   :return: PSF tensor [ks, ks] or [N, ks, ks]
+   :rtype: torch.Tensor
 
-   :param points: Point positions [N, 3] with x,y in [-1,1] and z in [-inf,0]
+.. py:method:: GeoLens.psf_geometric(points, ks=64, wvln=0.589, spp=2048, recenter=True)
+
+   Calculate incoherent geometric PSF using ray tracing.
+
+   :param points: Point positions [N, 3]
    :type points: torch.Tensor or list
    :param ks: PSF kernel size
    :type ks: int
@@ -478,10 +494,38 @@ Incoherent PSF
    :type spp: int
    :param recenter: Recenter PSF using chief ray
    :type recenter: bool
-   :return: PSF tensor [ks, ks] or [N, ks, ks]
+   :return: PSF tensor
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_map(depth=-10000.0, grid=(7, 7), ks=51, spp=2048, wvln=0.589, recenter=True)
+.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+
+   Calculate coherent PSF by propagating pupil field to sensor (Ray-Wave model). Alias for ``psf_pupil_prop``.
+
+.. py:method:: GeoLens.psf_pupil_prop(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+
+   Calculate coherent PSF by propagating pupil field to sensor using ASM.
+
+   :param points: Point source positions
+   :param ks: Kernel size
+   :param wvln: Wavelength
+   :param spp: Sample rays (typically 1M)
+   :param recenter: Recenter PSF
+   :return: PSF patch
+   :rtype: torch.Tensor
+
+.. py:method:: GeoLens.psf_huygens(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+
+   Calculate Huygens PSF by treating every exit-pupil ray as a secondary spherical wave source.
+
+   :param points: Point source position
+   :param ks: Kernel size
+   :param wvln: Wavelength
+   :param spp: Sample rays
+   :param recenter: Recenter PSF
+   :return: Huygens PSF patch
+   :rtype: torch.Tensor
+
+.. py:method:: GeoLens.psf_map(depth=-10000.0, grid=(7, 7), ks=64, spp=2048, wvln=0.589, recenter=True)
 
    Calculate PSF map at different field positions.
 
@@ -506,40 +550,39 @@ Incoherent PSF
 
    :param points: Point source positions [..., 3]
    :type points: torch.Tensor
-   :param method: Method for center calculation - "chief_ray" or "pinhole"
-   :type method: str
    :return: PSF centers [..., 2]
    :rtype: torch.Tensor
 
-Coherent PSF
-~~~~~~~~~~~~
+.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
 
-.. py:method:: GeoLens.psf_coherent(point, ks=51, wvln=0.589, spp=1000000)
+   Calculate coherent PSF using ray-wave model. Alias for ``psf_pupil_prop``.
 
-   Calculate coherent PSF using ray-wave model.
-
-   :param point: Point source position [x, y, z]
-   :type point: torch.Tensor or list
-   :param ks: PSF kernel size
+   :param points: Point source position [3] or [1, 3]
+   :type points: torch.Tensor or list
+   :param ks: Kernel size
    :type ks: int
-   :param wvln: Wavelength in micrometers
-   :type wvln: float
-   :param spp: Samples per pixel (needs >= 1M for accuracy)
-   :type spp: int
-   :return: Coherent PSF [ks, ks]
-   :rtype: torch.Tensor
-
-.. py:method:: GeoLens.pupil_field(point, wvln=0.589, spp=1000000)
-
-   Calculate complex wavefront at exit pupil using coherent ray tracing.
-
-   :param point: Point source position [x, y, z]
-   :type point: torch.Tensor or list
    :param wvln: Wavelength
    :type wvln: float
-   :param spp: Samples (>= 1M recommended)
+   :param spp: Sample rays (>= 1M recommended)
    :type spp: int
-   :return: Wavefront field and PSF center
+   :param recenter: Recenter PSF using chief ray
+   :type recenter: bool
+   :return: PSF patch [ks, ks]
+   :rtype: torch.Tensor
+
+.. py:method:: GeoLens.pupil_field(points, wvln=0.589, spp=1000000, recenter=True)
+
+   Calculate complex wavefront at exit pupil using coherent ray tracing. Only single-point input is supported.
+
+   :param points: Point source position [3] or [1, 3]
+   :type points: torch.Tensor or list
+   :param wvln: Wavelength in micrometers
+   :type wvln: float
+   :param spp: Samples (>= 1M required)
+   :type spp: int
+   :param recenter: Recenter PSF using chief ray
+   :type recenter: bool
+   :return: Tuple of (wavefront field, PSF center)
    :rtype: tuple(torch.Tensor, list)
 
 Optical Analysis (GeoLensEval)

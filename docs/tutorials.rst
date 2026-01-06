@@ -127,7 +127,7 @@ Basic PSF Calculation
     import matplotlib.pyplot as plt
 
     # Single-point PSF at 10 m, centered field (normalized x=y=0)
-    psf = lens.psf(points=torch.tensor([0.0, 0.0, -10000.0]), ks=51, spp=2048)
+    psf = lens.psf(points=torch.tensor([0.0, 0.0, -10000.0]), ks=64, spp=2048)
 
     # Visualize
     plt.imshow(psf.cpu(), cmap="inferno")
@@ -142,8 +142,8 @@ Calculate PSF map across different field positions:
 .. code-block:: python
 
     # Compute and save PSF map across field
-    psf_map = lens.psf_map(depth=-10000.0, grid=(7, 7), ks=51, spp=1024)
-    lens.draw_psf_map(grid=(7, 7), ks=51, depth=-10000.0, save_name="psf_map.png")
+    psf_map = lens.psf_map(depth=-10000.0, grid=(7, 7), ks=64, spp=1024)
+    lens.draw_psf_map(grid=(7, 7), ks=64, depth=-10000.0, save_name="psf_map.png")
 
 Depth-Varying PSF
 ^^^^^^^^^^^^^^^^^
@@ -158,7 +158,7 @@ Analyze defocus effects:
     
     fig, axes = plt.subplots(1, len(depths), figsize=(15, 3))
     for i, depth in enumerate(depths):
-        psf = lens.psf(points=torch.tensor([0.0, 0.0, depth]), ks=51, spp=1024)
+        psf = lens.psf(points=torch.tensor([0.0, 0.0, depth]), ks=64, spp=1024)
         axes[i].imshow(psf.cpu(), cmap="inferno")
         axes[i].set_title(f'{abs(depth)} mm')
         axes[i].axis('off')
@@ -207,7 +207,7 @@ Render scenes with depth variation:
     depth_map = - (depth_map * 5000 + 500)  # 500mm to 5500mm -> -[500, 5500] mm
 
     # Render with depth using PSF interpolation
-    img_rendered = lens.render_rgbd(rgb_tensor, depth_map, method="psf_map", psf_grid=(10, 10), psf_ks=51)
+    img_rendered = lens.render_rgbd(rgb_tensor, depth_map, method="psf_map", psf_grid=(10, 10), psf_ks=64)
     
     save_image(img_rendered, 'depth_rendered.png')
 

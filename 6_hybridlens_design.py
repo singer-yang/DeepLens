@@ -79,7 +79,7 @@ def main(args):
     iterations = 1000
     pbar = tqdm(total=iterations + 1, desc="Progress", postfix={"loss": 0})
     for i in range(iterations + 1):
-        psf = lens.psf(points=[0.0, 0.0, -10000.0], ks=101, wvln=0.489)
+        psf = lens.psf(points=[0.0, 0.0, -10000.0], ks=128, wvln=0.489)
 
         optimizer.zero_grad()
         loss = loss_fn(psf)

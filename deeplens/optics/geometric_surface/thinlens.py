@@ -1,4 +1,4 @@
-"""Thin lens element. Both sides are in air."""
+"""Thin lens element. Both sides are air."""
 
 import torch
 import torch.nn.functional as F

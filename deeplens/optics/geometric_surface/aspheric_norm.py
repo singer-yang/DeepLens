@@ -276,6 +276,12 @@ class AsphericNorm(Surface):
     # =======================================
     # IO
     # =======================================
+    def construct_ai(self):
+        for i in range(1, self.ai_degree + 1):
+            p_name = f"norm_ai{2 * i}"
+            norm_ai = getattr(self, p_name)
+            setattr(self, f"ai{2 * i}", norm_ai / (self.norm_r ** (2 * i)))
+
     def surf_dict(self):
         """Return a dict of surface."""
         surf_dict = {

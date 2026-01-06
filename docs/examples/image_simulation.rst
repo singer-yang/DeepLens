@@ -154,7 +154,7 @@ For accurate diffraction simulation, use coherent PSF:
     # Compute coherent (wave optics) PSF
     point = torch.tensor([0.0, 0.0, -10000.0])
     psf_wave = lens.psf_coherent(
-        point=point,
+        points=point,
         ks=PSF_KS,
         wvln=0.550,
         spp=SPP_COHERENT  # ~16.7M rays for accurate phase

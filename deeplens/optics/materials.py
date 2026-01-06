@@ -263,7 +263,7 @@ class Material(DeepObj):
         elif self.dispersion == "optimizable":
             # Cauchy's equation, calculate (A, B) on the fly
             B = (self.n - 1) / self.V / (1 / 0.486**2 - 1 / 0.656**2)
-            A = self.n - B * 1 / 0.589**2
+            A = self.n - B * 1 / 0.587**2
             n = A + B / wvln**2
 
         else:

@@ -18,7 +18,7 @@ import torch
 import torch.nn.functional as F
 from torchvision.utils import save_image
 
-from deeplens.basics import DEFAULT_WAVE, DEPTH
+from deeplens.basics import DEFAULT_WAVE, DEPTH, PSF_KS
 from deeplens.lens import Lens
 from deeplens.optics.diffractive_surface import (
     Binary2,
@@ -64,7 +64,12 @@ class DiffractiveLens(Lens):
 
     @classmethod
     def load_example1(cls):
-        """Create an example diffractive lens with a single Fresnel DOE."""
+        """Create an example diffractive lens with a single Fresnel DOE.
+
+        Returns:
+            DiffractiveLens: A configured diffractive lens with a Fresnel surface
+                at f=50mm, 4mm size, and 4000 resolution.
+        """
         self = cls(sensor_size=(4.0, 4.0), sensor_res=(2000, 2000))
 
         # Diffractive Fresnel DOE
@@ -78,7 +83,12 @@ class DiffractiveLens(Lens):
 
     @classmethod
     def load_example2(cls):
-        """Create an example diffractive lens with a thin lens and binary DOE combination."""
+        """Create an example diffractive lens with a thin lens and binary DOE combination.
+
+        Returns:
+            DiffractiveLens: A configured diffractive lens with a ThinLens (f=50mm)
+                and a Binary2 DOE, both at 4mm size and 4000 resolution.
+        """
         self = cls(sensor_size=(8.0, 8.0), sensor_res=(2000, 2000))
 
         # Diffractive Fresnel DOE
@@ -96,7 +106,14 @@ class DiffractiveLens(Lens):
         return self
 
     def read_lens_json(self, filename):
-        """Load the lens from a .json file."""
+        """Load the lens configuration from a JSON file.
+
+        Reads lens parameters including sensor configuration and diffractive surfaces
+        from the specified JSON file.
+
+        Args:
+            filename (str): Path to the JSON configuration file.
+        """
         assert filename.endswith(".json"), "File must be a .json file."
 
         with open(filename, "r") as f:
@@ -133,7 +150,14 @@ class DiffractiveLens(Lens):
                 d += d_next
 
     def write_lens_json(self, filename):
-        """Write the lens to a file."""
+        """Write the lens configuration to a JSON file.
+
+        Saves all lens parameters including sensor configuration and
+        diffractive surface data to the specified file.
+
+        Args:
+            filename (str): Output path for the JSON file.
+        """
         assert filename.endswith(".json"), "File must be a .json file."
 
         # Save lens to a file
@@ -170,6 +194,7 @@ class DiffractiveLens(Lens):
     # Utils
     # =============================================
     def __call__(self, wave):
+        """Propagate a wave through the lens system."""
         return self.forward(wave)
 
     def forward(self, wave):
@@ -196,13 +221,13 @@ class DiffractiveLens(Lens):
     # =============================================
     # Image simulation
     # =============================================
-    def render_mono(self, img, wvln=DEFAULT_WAVE, ks=101):
+    def render_mono(self, img, wvln=DEFAULT_WAVE, ks=PSF_KS):
         """Simulate monochromatic lens blur by convolving an image with the point spread function.
 
         Args:
             img (torch.Tensor): Input image. Shape: (B, 1, H, W)
             wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
-            ks (int, optional): PSF kernel size. Defaults to 101.
+            ks (int, optional): PSF kernel size. Defaults to PSF_KS.
 
         Returns:
             torch.Tensor: Rendered image after applying lens blur with shape (B, 1, H, W).
@@ -211,13 +236,13 @@ class DiffractiveLens(Lens):
         img_render = conv_psf(img, psf)
         return img_render
 
-    def psf(self, depth=float("inf"), wvln=0.589, ks=101, upsample_factor=1):
+    def psf(self, depth=float("inf"), wvln=DEFAULT_WAVE, ks=PSF_KS, upsample_factor=1):
         """Calculate monochromatic point PSF by wave propagation approach.
 
         Args:
             depth (float, optional): Depth of the point source. Defaults to float('inf').
-            wvln (float, optional): Wavelength in micrometers. Defaults to 0.589 [um].
-            ks (int, optional): PSF kernel size. Defaults to 101.
+            wvln (float, optional): Wavelength in micrometers. Defaults to DEFAULT_WAVE.
+            ks (int, optional): PSF kernel size. Defaults to PSF_KS.
             upsample_factor (int, optional): Upsampling factor to meet Nyquist sampling constraint. Defaults to 1.
 
         Returns:
@@ -308,7 +333,13 @@ class DiffractiveLens(Lens):
     # Visualization
     # =============================================
     def draw_layout(self, save_name="./doelens.png"):
-        """Draw the lens setup."""
+        """Draw the lens layout diagram.
+
+        Visualizes the DOE and sensor positions in a 2D layout.
+
+        Args:
+            save_name (str, optional): Path to save the figure. Defaults to './doelens.png'.
+        """
         fig, ax = plt.subplots()
 
         # Draw DOE
@@ -340,18 +371,21 @@ class DiffractiveLens(Lens):
     def draw_psf(
         self,
         depth=DEPTH,
-        ks=101,
+        ks=PSF_KS,
         save_name="./psf_doelens.png",
         log_scale=True,
         eps=1e-4,
     ):
         """Draw on-axis RGB PSF.
 
+        Computes and saves a visualization of the RGB PSF for a given depth.
+
         Args:
-            depth (float): Depth of the point source
-            ks (int): Size of the PSF kernel
-            save_name (str): Path to save the PSF image
-            log_scale (bool): If True, display PSF in log scale
+            depth (float, optional): Depth of the point source. Defaults to DEPTH.
+            ks (int, optional): Size of the PSF kernel in pixels. Defaults to PSF_KS.
+            save_name (str, optional): Path to save the PSF image. Defaults to './psf_doelens.png'.
+            log_scale (bool, optional): If True, display PSF in log scale. Defaults to True.
+            eps (float, optional): Small value for log scale to avoid log(0). Defaults to 1e-4.
         """
         psf_rgb = self.psf_rgb(point=[0, 0, depth], ks=ks)
 

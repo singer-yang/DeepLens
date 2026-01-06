@@ -11,7 +11,7 @@ train:
   img_res: !!python/tuple [224, 224]
   spp: 1024
 
-  psf_ks: 101
+  psf_ks: 64
   psf_grid: 7
   depth: -10000.
   noise: 0.001 

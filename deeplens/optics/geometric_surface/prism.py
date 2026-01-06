@@ -1,3 +1,9 @@
+# Copyright 2025 Xinge Yang and DeepLens contributors.
+# This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
+#
+# Licensed under the Apache License, Version 2.0.
+# See LICENSE file in the project root for full license information.
+
 """Prism surface consisting of entry plane, mirror, and exit plane in sequential mode."""
 
 import numpy as np

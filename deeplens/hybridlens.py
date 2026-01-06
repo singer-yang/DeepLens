@@ -18,20 +18,26 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from deeplens.geolens import GeoLens
-from deeplens.lens import Lens
 from deeplens.basics import (
-    SPP_COHERENT,
-    PSF_KS,
     DEFAULT_WAVE,
+    PSF_KS,
+    SPP_COHERENT,
     WAVE_RGB,
 )
-from deeplens.optics.monte_carlo import forward_integral
+from deeplens.geolens import GeoLens
+from deeplens.lens import Lens
+from deeplens.optics.diffractive_surface import (
+    Binary2,
+    Fresnel,
+    Grating,
+    Pixel2D,
+    Zernike,
+)
 from deeplens.optics.geometric_surface import Plane
+from deeplens.optics.monte_carlo import forward_integral
 from deeplens.optics.phase_surface import Phase
-from deeplens.optics.diffractive_surface import Binary2, Grating, Pixel2D, Fresnel, Zernike
-from deeplens.optics.wave import AngularSpectrumMethod
 from deeplens.optics.utils import diff_float
+from deeplens.optics.wave import AngularSpectrumMethod
 
 
 class HybridLens(Lens):
@@ -50,6 +56,15 @@ class HybridLens(Lens):
         device=None,
         dtype=torch.float64,
     ):
+        """Initialize a hybrid refractive-diffractive lens.
+
+        Args:
+            filename (str, optional): Path to the lens configuration JSON file. Defaults to None.
+            sensor_res (tuple, optional): Sensor resolution in pixels (W, H). Defaults to (2000, 2000).
+            sensor_size (tuple, optional): Physical sensor dimensions in mm (W, H). Defaults to (8.0, 8.0).
+            device (str, optional): Computation device ('cpu' or 'cuda'). Defaults to None.
+            dtype (torch.dtype, optional): Data type for computations. Defaults to torch.float64.
+        """
         super().__init__(device=device, dtype=dtype)
 
         # Lens sensor size and resolution
@@ -65,7 +80,14 @@ class HybridLens(Lens):
         self.double()
 
     def read_lens_json(self, filename):
-        """Read the lens from .json file."""
+        """Read the lens configuration from a JSON file.
+
+        Loads a GeoLens and associated DOE from the specified file.
+        Supported DOE types: binary2, pixel2d, fresnel, zernike, grating.
+
+        Args:
+            filename (str): Path to the JSON configuration file.
+        """
         # Load geolens
         geolens = GeoLens(filename=filename, device=self.device)
 
@@ -86,9 +108,7 @@ class HybridLens(Lens):
             elif doe_param_model == "grating":
                 doe = Grating.init_from_dict(doe_dict)
             else:
-                raise ValueError(
-                    f"Unsupported DOE parameter model: {doe_param_model}"
-                )
+                raise ValueError(f"Unsupported DOE parameter model: {doe_param_model}")
             self.doe = doe
 
         # Add a Plane/Phase surface to GeoLens (DOE placeholder)
@@ -104,7 +124,13 @@ class HybridLens(Lens):
         self.to(self.device)
 
     def write_lens_json(self, lens_path):
-        """Write the lens into .json file."""
+        """Write the lens configuration to a JSON file.
+
+        Saves the GeoLens and DOE configurations to a JSON file.
+
+        Args:
+            lens_path (str): Path for the output JSON file.
+        """
         geolens = self.geolens
         data = {}
         data["info"] = geolens.lens_info if hasattr(geolens, "lens_info") else "None"
@@ -142,19 +168,41 @@ class HybridLens(Lens):
     # Utils
     # =====================================================================
     def analysis(self, save_name="./test.png"):
+        """Perform lens analysis and save visualizations.
+
+        Draws the lens layout and DOE phase map.
+
+        Args:
+            save_name (str, optional): Base path for saving analysis images. Defaults to './test.png'.
+        """
         self.draw_layout(save_name=save_name)
         self.doe.draw_phase_map(save_name=f"{save_name}_doe.png")
 
     def double(self):
+        """Convert lens to double precision (float64) for accurate phase calculations."""
         self.geolens.astype(torch.float64)
         self.doe.astype(torch.float64)
 
     def refocus(self, foc_dist):
-        """Refocus the DoeLens to a given depth. DOE is not moved because it is installed with geolens in the Siggraph Asia 2024 paper."""
+        """Refocus the HybridLens to a given depth.
+
+        Adjusts the GeoLens focus distance. The DOE is not moved because it is
+        installed with the geolens as described in the Siggraph Asia 2024 paper.
+
+        Args:
+            foc_dist (float): Target focus distance.
+        """
         self.geolens.refocus(foc_dist)
 
     def calc_scale(self, depth):
-        """Calculate the scale factor for the point source."""
+        """Calculate the scale factor for object-to-image mapping.
+
+        Args:
+            depth (float): Object depth distance.
+
+        Returns:
+            float: Scale factor (object height / image height).
+        """
         return self.geolens.calc_scale(depth)
 
     # =====================================================================
@@ -193,7 +241,9 @@ class HybridLens(Lens):
         point_obj[:, 1] = point[:, 1] * scale * geolens.sensor_size[0] / 2
 
         # Determine ray center via chief ray
-        pointc_chief_ray = geolens.psf_center(point_obj, method="chief_ray")[0]  # shape [2]
+        pointc_chief_ray = geolens.psf_center(point_obj, method="chief_ray")[
+            0
+        ]  # shape [2]
 
         # Ray tracing to the DOE plane
         ray = geolens.sample_from_points(points=point_obj, num_rays=spp, wvln=wvln)
@@ -233,9 +283,9 @@ class HybridLens(Lens):
 
         Args:
             points (torch.Tensor, optional): [x, y, z] coordinates of the point source. Defaults to torch.Tensor([0,0,-10000]).
-            ks (int, optional): size of the PSF patch. Defaults to 101.
-            wvln (float, optional): wvln. Defaults to 0.589.
-            spp (int, optional): number of rays to sample. Defaults to 1000000.
+            ks (int, optional): size of the PSF patch. Defaults to PSF_KS.
+            wvln (float, optional): wvln. Defaults to DEFAULT_WAVE.
+            spp (int, optional): number of rays to sample. Defaults to SPP_COHERENT.
 
         Returns:
             psf_out (torch.Tensor): PSF patch. Normalized to sum to 1. Shape [ks, ks]
@@ -324,7 +374,20 @@ class HybridLens(Lens):
     # =====================================================================
     @torch.no_grad()
     def draw_layout(self, save_name="./DOELens.png", depth=-10000.0, ax=None, fig=None):
-        """Draw DOELens layout with ray-tracing and wave-propagation."""
+        """Draw HybridLens layout with ray-tracing and wave-propagation visualization.
+
+        Shows the lens geometry with ray paths through the refractive elements
+        and wave propagation arcs from the DOE to the sensor.
+
+        Args:
+            save_name (str, optional): Path to save the figure. Defaults to './DOELens.png'.
+            depth (float, optional): Object depth for ray tracing. Defaults to -10000.0.
+            ax (matplotlib.axes.Axes, optional): Existing axes to draw on. Defaults to None.
+            fig (matplotlib.figure.Figure, optional): Existing figure to use. Defaults to None.
+
+        Returns:
+            tuple: (ax, fig) if ax was provided, otherwise saves the figure.
+        """
         geolens = self.geolens
 
         # Draw lens layout
@@ -353,7 +416,7 @@ class HybridLens(Lens):
                 wvln=WAVE_RGB[2 - i],
             )
             ray.prop_to(-1.0)
-            
+
             ray, ray_o_record = geolens.trace(ray=ray, record=True)
             ax, fig = geolens.draw_ray_2d(
                 ray_o_record, ax=ax, fig=fig, color=color_list[i]
@@ -362,11 +425,15 @@ class HybridLens(Lens):
             # Draw wave propagation
             # Calculate ray center for wave propagation visualization
             ray_center_doe = (
-                ((ray.o * ray.is_valid.unsqueeze(-1)).sum(dim=0) / ray.is_valid.sum()).cpu().numpy()
+                ((ray.o * ray.is_valid.unsqueeze(-1)).sum(dim=0) / ray.is_valid.sum())
+                .cpu()
+                .numpy()
             )  # shape [3]
             ray.prop_to(geolens.d_sensor)  # shape [num_rays, 3]
             ray_center_sensor = (
-                ((ray.o * ray.is_valid.unsqueeze(-1)).sum(dim=0) / ray.is_valid.sum()).cpu().numpy()
+                ((ray.o * ray.is_valid.unsqueeze(-1)).sum(dim=0) / ray.is_valid.sum())
+                .cpu()
+                .numpy()
             )  # shape [3]
 
             arc_radi = ray_center_sensor[2] - ray_center_doe[2]
@@ -407,6 +474,17 @@ class HybridLens(Lens):
     def get_optimizer(
         self, doe_lr=1e-4, lens_lr=[1e-4, 1e-4, 1e-2, 1e-5], lr_decay=0.01
     ):
+        """Get optimizer for lens and DOE parameters.
+
+        Args:
+            doe_lr (float, optional): Learning rate for DOE parameters. Defaults to 1e-4.
+            lens_lr (list, optional): Learning rates for lens parameters [d, c, k, a].
+                Defaults to [1e-4, 1e-4, 1e-2, 1e-5].
+            lr_decay (float, optional): Decay rate for higher-order coefficients. Defaults to 0.01.
+
+        Returns:
+            torch.optim.Adam: Configured optimizer for all trainable parameters.
+        """
         params = []
         params += self.geolens.get_optimizer_params(lrs=lens_lr, decay=lr_decay)
         params += self.doe.get_optimizer_params(lr=doe_lr)
