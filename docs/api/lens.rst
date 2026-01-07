@@ -65,15 +65,17 @@ Base Lens Class
 GeoLens
 -------
 
-.. py:class:: GeoLens(filename=None, sensor_res=(2000, 2000), sensor_size=(8.0, 8.0), device=None, dtype=torch.float32)
+.. py:class:: GeoLens(filename=None, device=None, dtype=torch.float32)
 
    Geometric lens system using ray tracing.
 
    :param filename: Path to lens file (.json, .zmx)
-   :param sensor_res: Sensor resolution (W, H) in pixels
-   :param sensor_size: Sensor size (W, H) in mm
    :param device: Device to use
    :param dtype: Data type
+
+   .. note::
+      Sensor size and resolution are read from the lens file. If not provided,
+      defaults of 8mm x 8mm and 2000x2000 pixels will be used.
 
    **Attributes:**
 
@@ -258,7 +260,7 @@ GeoLens
 PSFNetLens
 ----------
 
-.. py:class:: PSFNetLens(lens_path, in_chan=3, psf_chan=3, model_name='mlp_conv', kernel_size=64, sensor_res=(3000, 3000))
+.. py:class:: PSFNetLens(lens_path, in_chan=3, psf_chan=3, model_name='mlp_conv', kernel_size=64)
 
    Neural surrogate lens model that represents the PSF using a neural network.
 
@@ -272,8 +274,10 @@ PSFNetLens
    :type model_name: str
    :param kernel_size: PSF kernel size
    :type kernel_size: int
-   :param sensor_res: Sensor resolution (W, H)
-   :type sensor_res: tuple
+
+   .. note::
+      Sensor size and resolution are read from the lens file. If not provided,
+      GeoLens defaults will be used.
 
    **Attributes:**
 
@@ -355,20 +359,20 @@ PSFNetLens
 HybridLens
 ----------
 
-.. py:class:: HybridLens(filename=None, sensor_res=(2000, 2000), sensor_size=(8.0, 8.0), device=None, dtype=torch.float64)
+.. py:class:: HybridLens(filename=None, device=None, dtype=torch.float64)
 
    Hybrid refractive-diffractive lens using a differentiable ray-wave model.
 
    :param filename: Path to hybrid-lens JSON file. If None, create empty hybrid lens
    :type filename: str or None
-   :param sensor_res: Sensor resolution (W, H) in pixels
-   :type sensor_res: tuple
-   :param sensor_size: Sensor physical size (W, H) in mm
-   :type sensor_size: tuple
    :param device: Computing device ('cuda' or 'cpu'). If None, auto-selects
    :type device: str or None
    :param dtype: Data type for computations (default: torch.float64)
    :type dtype: torch.dtype
+
+   .. note::
+      Sensor size and resolution are read from the lens file (GeoLens section).
+      If not provided, defaults of 8mm x 8mm and 2000x2000 pixels will be used.
 
    **Methods:**
 
@@ -403,13 +407,14 @@ HybridLens
 ParaxialLens
 ------------
 
-.. py:class:: ParaxialLens(foclen=50.0, fnum=2.0, sensor_res=(512, 512), device='cuda')
+.. py:class:: ParaxialLens(foclen, fnum, sensor_size=None, sensor_res=None, device='cpu')
 
    Paraxial (thin lens) model.
 
    :param foclen: Focal length in mm
    :param fnum: F-number
-   :param sensor_res: Sensor resolution
+   :param sensor_size: Sensor size (W, H) in mm. If None, defaults to (8.0, 8.0)
+   :param sensor_res: Sensor resolution (W, H) in pixels. If None, defaults to (2000, 2000)
    :param device: Device to use
 
    **Methods:**

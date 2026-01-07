@@ -60,7 +60,7 @@
         }
     ],
     "DOE": {
-        "type": "DOE",
+        "type": "Binary2",
         "(size)": 3.0,
         "d": 8.3098,
         "res": [
@@ -69,7 +69,6 @@
         ],
         "fab_ps": 0.001,
         "is_square": true,
-        "param_model": "binary2",
         "doe_path": null,
         "order2": 0.0,
         "order4": 0.0,

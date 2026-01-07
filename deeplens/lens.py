@@ -4,7 +4,7 @@
 # Licensed under the Apache License, Version 2.0.
 # See LICENSE file in the project root for full license information.
 
-"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is recommended to inherit from the Lens class and rewrite core functions."""
+"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is should inherit from the Lens class and rewrite core functions."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -47,14 +47,6 @@ class Lens(DeepObj):
 
         # Lens default dtype
         self.dtype = dtype
-
-        # Sensor
-        # self.sensor_res = sensor_res
-
-        # # Lens
-        # if filename is not None:
-        #     self.read_lens(filename)
-        # self.to(self.device)
 
     def read_lens_json(self, filename):
         """Read lens from a json file."""
@@ -107,7 +99,7 @@ class Lens(DeepObj):
         """
         if not hasattr(self, "foclen"):
             return
-        
+
         self.vfov = 2 * float(np.atan(self.sensor_size[0] / 2 / self.foclen))
         self.hfov = 2 * float(np.atan(self.sensor_size[1] / 2 / self.foclen))
         self.dfov = 2 * float(np.atan(self.r_sensor / self.foclen))
@@ -122,7 +114,7 @@ class Lens(DeepObj):
     def psf(self, points, wvln=DEFAULT_WAVE, ks=PSF_KS, **kwargs):
         """Compute monochrome point PSF.
 
-        NOTE: 
+        NOTE:
             [1] This function should be designed to be differentiable.
             [2] For each point source, we should consider diffraction in the calculation, even for incoherent imaging.
 
@@ -399,7 +391,7 @@ class Lens(DeepObj):
     def render(self, img_obj, depth=DEPTH, method="psf_patch", **kwargs):
         """Differentiable image simulation, considering only 2D scene.
 
-        NOTE: 
+        NOTE:
             [1] This function performs only the optical component of image simulation and is designed to be fully differentiable. Other components (e.g., noise simulation) are handled by other functions (see Camera class).
             [2] For incoherent imaging, we should calculate the intensity PSF (squared magnitude of the complex amplitude) and convolve it with the object-space image. For coherent imaging, we should convolve the complex PSF with the complex object image and then calculate the intensity by squaring the magnitude.
 

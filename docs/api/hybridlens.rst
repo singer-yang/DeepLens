@@ -15,20 +15,20 @@ Class Overview
 Main Class
 ----------
 
-.. py:class:: HybridLens(filename=None, sensor_res=(2000, 2000), sensor_size=(8.0, 8.0), device=None, dtype=torch.float64)
+.. py:class:: HybridLens(filename=None, device=None, dtype=torch.float64)
 
    Hybrid refractive–diffractive lens using a differentiable ray–wave model.
 
    :param filename: Path to hybrid-lens JSON file. If None, create empty hybrid lens
    :type filename: str or None
-   :param sensor_res: Sensor resolution (W, H) in pixels
-   :type sensor_res: tuple
-   :param sensor_size: Sensor physical size (W, H) in mm
-   :type sensor_size: tuple
    :param device: Computing device (``'cuda'`` or ``'cpu'``). If None, auto-selects
    :type device: str or None
    :param dtype: Data type for computations (default: ``torch.float64``)
    :type dtype: torch.dtype
+
+   .. note::
+      Sensor size and resolution are read from the lens file (GeoLens section).
+      If not provided, defaults of 8mm x 8mm and 2000x2000 pixels will be used.
 
    **Key Attributes:**
 

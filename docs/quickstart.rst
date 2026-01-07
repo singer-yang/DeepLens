@@ -112,8 +112,7 @@ For fast PSF simulation using neural networks:
     
     # Create PSFNetLens with the original lens file
     lens = PSFNetLens(
-        lens_path='./datasets/lenses/camera/ef50mm_f1.8.json',
-        sensor_res=(3000, 3000)
+        lens_path='./datasets/lenses/camera/ef50mm_f1.8.json'
     )
     
     # Load pretrained network weights
