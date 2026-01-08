@@ -23,6 +23,7 @@ class RGBSensor(Sensor):
         self.res = config["sensor_res"]
         self.pixel_size = 2 / math.sqrt(self.res[0] ** 2 + self.res[1] ** 2)
         self.bit = config["bit"]
+        self.nbit_max = 2**self.bit - 1  
         self.black_level = config["black_level"]
         self.bayer_pattern = config.get("bayer_pattern", "rggb")
 
