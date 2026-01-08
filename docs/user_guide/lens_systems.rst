@@ -41,13 +41,14 @@ Initialization
 
     from deeplens import GeoLens
     
-    # Load from file
+    # Load from file (sensor_res and sensor_size are read from the file)
     lens = GeoLens(
         filename='./datasets/lenses/camera/ef50mm_f1.8.json',
-        sensor_res=(2000, 2000),
-        sensor_size=(8.0, 8.0),  # mm
         device='cuda'
     )
+    
+    # Optionally override sensor configuration
+    lens.set_sensor(sensor_size=(8.0, 8.0), sensor_res=(2000, 2000))
 
 
 Supported Surface Types
@@ -142,10 +143,9 @@ DiffractiveLens - Paraxial Wave Optics
 
     from deeplens.diffraclens import DiffractiveLens
     
+    # Load from file (sensor_res and sensor_size are read from the file)
     lens = DiffractiveLens(
         filename='./datasets/lenses/doe/doe_example.json',
-        sensor_res=(2000, 2000),
-        sensor_size=(8.0, 8.0),
         device='cuda'
     )
 
@@ -167,10 +167,9 @@ HybridLens - Refractive-Diffractive Lens System
     import torch
     from deeplens.hybridlens import HybridLens
     
+    # Load from file (sensor_res and sensor_size are read from the file)
     lens = HybridLens(
         filename='./datasets/lenses/hybridlens/a489_doe.json',
-        sensor_res=(2000, 2000),
-        sensor_size=(8.0, 8.0),
         device='cuda',
         dtype=torch.float64
     )
@@ -197,14 +196,13 @@ PSFNetLens - Neural Surrogate
 
     from deeplens import PSFNetLens
     
-    # Initialize PSFNetLens with lens file
+    # Initialize PSFNetLens with lens file (sensor_res is read from lens file)
     lens = PSFNetLens(
         lens_path='./datasets/lenses/camera/ef50mm_f1.8.json',
         in_chan=3,
         psf_chan=3,
         model_name='mlpconv',
-        kernel_size=64,
-        sensor_res=(3000, 3000)
+        kernel_size=64
     )
     
     # Load pre-trained network weights

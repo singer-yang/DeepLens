@@ -73,8 +73,6 @@ class GeoLens(
     def __init__(
         self,
         filename=None,
-        sensor_res=None,  # (W, H)
-        sensor_size=None,  # [mm], (W, H)
         device=None,
         dtype=torch.float32,
     ):
@@ -86,8 +84,6 @@ class GeoLens(
 
         Args:
             filename (str, optional): Path to lens file (.json, .zmx, or .seq). Defaults to None.
-            sensor_res (tuple, optional): Sensor resolution as (W, H) in pixels. Defaults to None.
-            sensor_size (tuple, optional): Physical sensor size as (W, H) in [mm]. Defaults to None.
             device (torch.device, optional): Device for tensor computations. Defaults to None.
             dtype (torch.dtype, optional): Data type for computations. Defaults to torch.float32.
         """
@@ -99,13 +95,10 @@ class GeoLens(
         else:
             self.surfaces = []
             self.materials = []
+            # Set default sensor size and resolution
+            self.sensor_size = (8.0, 8.0)
+            self.sensor_res = (2000, 2000)
             self.to(self.device)
-
-        # Lens sensor size and resolution (will be overwritten if read from file)
-        if sensor_res is not None and sensor_size is not None:
-            self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
-        elif sensor_res is not None:
-            self.set_sensor_res(sensor_res)
 
     def read_lens(self, filename):
         """Read a GeoLens from a file.
@@ -133,15 +126,20 @@ class GeoLens(
         else:
             raise ValueError(f"File format {filename[-4:]} not supported.")
 
-        # Complete sensor size and resolution if not set
+        # Complete sensor size and resolution if not set from lens file
         if not hasattr(self, "sensor_size"):
-            self.sensor_size = (
-                self.r_sensor * float(np.sqrt(2)),
-                self.r_sensor * float(np.sqrt(2)),
+            self.sensor_size = (8.0, 8.0)
+            print(
+                f"Sensor_size not found in lens file. Using default: {self.sensor_size} mm. "
+                "Consider specifying sensor_size in the lens file or using set_sensor()."
             )
 
         if not hasattr(self, "sensor_res"):
             self.sensor_res = (2000, 2000)
+            print(
+                f"Sensor_res not found in lens file. Using default: {self.sensor_res} pixels. "
+                "Consider specifying sensor_res in the lens file or using set_sensor()."
+            )
             self.set_sensor_res(self.sensor_res)
 
         # After loading lens, compute foclen, fov and fnum

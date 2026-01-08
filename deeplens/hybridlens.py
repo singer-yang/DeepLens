@@ -51,8 +51,6 @@ class HybridLens(Lens):
     def __init__(
         self,
         filename=None,
-        sensor_res=(2000, 2000),
-        sensor_size=(8.0, 8.0),
         device=None,
         dtype=torch.float64,
     ):
@@ -60,15 +58,10 @@ class HybridLens(Lens):
 
         Args:
             filename (str, optional): Path to the lens configuration JSON file. Defaults to None.
-            sensor_res (tuple, optional): Sensor resolution in pixels (W, H). Defaults to (2000, 2000).
-            sensor_size (tuple, optional): Physical sensor dimensions in mm (W, H). Defaults to (8.0, 8.0).
             device (str, optional): Computation device ('cpu' or 'cuda'). Defaults to None.
             dtype (torch.dtype, optional): Data type for computations. Defaults to torch.float64.
         """
         super().__init__(device=device, dtype=dtype)
-
-        # Lens sensor size and resolution
-        # self.set_sensor(sensor_size=sensor_size, sensor_res=sensor_res)
 
         # Load lens file
         if filename is not None:
@@ -76,6 +69,13 @@ class HybridLens(Lens):
         else:
             self.geolens = None
             self.doe = None
+            # Set default sensor size and resolution if no file provided
+            self.sensor_size = (8.0, 8.0)
+            self.sensor_res = (2000, 2000)
+            print(
+                f"No lens file provided. Using default sensor_size: {self.sensor_size} mm, "
+                f"sensor_res: {self.sensor_res} pixels. Use set_sensor() to change."
+            )
 
         self.double()
 

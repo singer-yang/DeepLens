@@ -20,14 +20,36 @@ from deeplens.optics.psf import conv_psf_depth_interp
 
 
 class ParaxialLens(Lens):
-    def __init__(self, foclen, fnum, sensor_size, sensor_res, device="cpu"):
+    def __init__(self, foclen, fnum, sensor_size=None, sensor_res=None, device="cpu"):
+        """Initialize a paraxial lens.
+
+        Args:
+            foclen (float): Focal length in [mm].
+            fnum (float): F-number.
+            sensor_size (tuple, optional): Physical sensor size as (W, H) in [mm]. Defaults to (8.0, 8.0).
+            sensor_res (tuple, optional): Sensor resolution as (W, H) in pixels. Defaults to (2000, 2000).
+            device (str, optional): Computation device. Defaults to "cpu".
+        """
         super(ParaxialLens, self).__init__(device=device)
 
         # Lens parameters
         self.foclen = foclen  # Focal length [mm]
         self.fnum = fnum
 
-        # Sensor size and resolution
+        # Sensor size and resolution with defaults
+        if sensor_size is None:
+            sensor_size = (8.0, 8.0)
+            print(
+                f"Sensor_size not provided. Using default: {sensor_size} mm. "
+                "Use set_sensor() to change."
+            )
+        if sensor_res is None:
+            sensor_res = (2000, 2000)
+            print(
+                f"Sensor_res not provided. Using default: {sensor_res} pixels. "
+                "Use set_sensor() to change."
+            )
+
         self.sensor_size = sensor_size
         self.sensor_res = sensor_res
         self.pixel_size = self.sensor_size[0] / self.sensor_res[0]  # Pixel size [mm]
@@ -124,7 +146,9 @@ class ParaxialLens(Lens):
         Reference:
             [1] https://en.wikipedia.org/wiki/Circle_of_confusion
         """
-        foc_dist = torch.tensor(self.foc_dist, device=self.device, dtype=depth.dtype).abs()
+        foc_dist = torch.tensor(
+            self.foc_dist, device=self.device, dtype=depth.dtype
+        ).abs()
         foclen = self.foclen
         fnum = self.fnum
 
@@ -260,7 +284,7 @@ class ParaxialLens(Lens):
 
     def render_rgbd_dp(self, rgb_img, depth):
         """Render RGBD image with dual-pixel PSF.
-        
+
         Args:
             rgb_img (tensor): [B, 3, H, W]
             depth (tensor): [B, 1, H, W]
@@ -271,8 +295,8 @@ class ParaxialLens(Lens):
         """
         # Convert depth to negative values
         if (depth > 0).any():
-            depth = - depth
-        
+            depth = -depth
+
         depth_min = depth.min()
         depth_max = depth.max()
         num_depth = 10
@@ -289,8 +313,10 @@ class ParaxialLens(Lens):
             ],
             dim=-1,
         )
-        psfs_left, psfs_right = self.psf_rgb_dp(points=points, ks=psf_ks) # shape [num_depth, 3, ks, ks]
-        
+        psfs_left, psfs_right = self.psf_rgb_dp(
+            points=points, ks=psf_ks
+        )  # shape [num_depth, 3, ks, ks]
+
         # Render dual-pixel image with PSF convolution and depth interpolation
         img_left = conv_psf_depth_interp(rgb_img, depth, psfs_left, depths_ref)
         img_right = conv_psf_depth_interp(rgb_img, depth, psfs_right, depths_ref)

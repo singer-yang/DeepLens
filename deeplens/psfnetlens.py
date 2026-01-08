@@ -33,7 +33,6 @@ class PSFNetLens(Lens):
         psf_chan=3,
         model_name="mlp_conv",
         kernel_size=64,
-        sensor_res=(3000, 3000),
     ):
         """Initialize a PSF network lens.
 
@@ -45,14 +44,12 @@ class PSFNetLens(Lens):
             psf_chan (int): Number of output channels.
             model_name (str): Name of the model.
             kernel_size (int): Kernel size.
-            sensor_res (tuple): Sensor resolution.
         """
         super().__init__()
 
-        # Load lens
+        # Load lens (sensor_size and sensor_res are read from the lens file)
         self.lens_path = lens_path
         self.lens = GeoLens(filename=lens_path, device=self.device)
-        self.lens.set_sensor_res(sensor_res=sensor_res)
         self.rfov = self.lens.rfov
 
         # Init PSF network
@@ -69,10 +66,6 @@ class PSFNetLens(Lens):
         )
         self.psfnet.to(self.device)
 
-        print(
-            f"Sensor pixel size is {self.lens.pixel_size * 1000} um, PSF kernel size is {self.kernel_size}."
-        )
-
         # Object depth range
         self.d_close = -200
         self.d_far = -20000
@@ -83,10 +76,14 @@ class PSFNetLens(Lens):
         self.foc_d_far = -20000
         self.refocus(foc_dist=-20000)
 
+    def set_sensor_res(self, sensor_res):
+        """Set sensor resolution for both PSFNetLens and the embedded GeoLens."""
+        self.lens.set_sensor_res(sensor_res)
+        self.pixel_size = self.lens.pixel_size
+
     # ==================================================
     # Training functions
     # ==================================================
-
     def init_net(self, in_chan=2, psf_chan=3, kernel_size=64, model_name="mlpconv"):
         """Initialize a PSF network.
 
@@ -125,13 +122,18 @@ class PSFNetLens(Lens):
         Args:
             net_path (str): path to load the network
         """
+        # Check the correct model is loaded
         psfnet_dict = torch.load(net_path, map_location="cpu", weights_only=False)
         print(
-            f"Network pixel size: {round(psfnet_dict['pixel_size'], 4)} mm, Lens pixel size: {round(self.pixel_size, 4)} mm"
+            f"Pretrained model lens pixel size: {psfnet_dict['pixel_size']*1000.0:.1f} um, "
+            f"Current lens pixel size: {self.pixel_size*1000.0:.1f} um"
         )
         print(
-            f"Network lens path: {psfnet_dict['lens_path']}, Lens path: {self.lens_path}"
+            f"Pretrained model lens path: {psfnet_dict['lens_path']}, "
+            f"Current lens path: {self.lens_path}"
         )
+
+        # Load the model weights
         self.psfnet.load_state_dict(psfnet_dict["psfnet_model_weights"])
 
     def save_psfnet(self, psfnet_path):

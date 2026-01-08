@@ -34,7 +34,7 @@ def compare_psf(lens):
 
     # Calculate three different PSFs
     psf_coherent = lens.psf_coherent(point, ks=ks)
-    save_image(psf_coherent, "./psf_coherent.png", normalize=True)
+    save_image(psf_coherent, "./psf_raywave.png", normalize=True)
 
     psf_incoherent = lens.psf(point, ks=ks)
     save_image(psf_incoherent, "./psf_incoherent.png", normalize=True)
@@ -61,30 +61,29 @@ def compare_psf(lens):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     # Linear scale plot
-    axes[0].plot(coherent_center, label="Pupil PSF", alpha=0.8)
+    axes[0].plot(coherent_center, label="Ray-wave PSF", alpha=0.8)
     axes[0].plot(incoherent_center, label="Geometric PSF", alpha=0.8)
     axes[0].plot(huygens_center, label="Huygens PSF", alpha=0.8)
     axes[0].set_xlabel("Pixel Position")
     axes[0].set_ylabel("Intensity")
-    axes[0].set_title("PSF Center Line Profile (Linear Scale)")
+    axes[0].set_title("PSF Center Line Compare (Linear Scale)")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
     # Log scale plot to better visualize peaks and diffraction orders
-    axes[1].semilogy(coherent_center + 1e-10, label="Pupil PSF", alpha=0.8)
+    axes[1].semilogy(coherent_center + 1e-10, label="Ray-wave PSF", alpha=0.8)
     axes[1].semilogy(incoherent_center + 1e-10, label="Geometric PSF", alpha=0.8)
     axes[1].semilogy(huygens_center + 1e-10, label="Huygens PSF", alpha=0.8)
     axes[1].set_xlabel("Pixel Position")
     axes[1].set_ylabel("Intensity (log scale)")
-    axes[1].set_title("PSF Center Line Profile (Log Scale)")
+    axes[1].set_title("PSF Center Line Compare (Log Scale)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig("./psf_center_line_profile.png", dpi=150)
+    plt.savefig("./psf_center_line_compare.png", dpi=150)
     plt.close()
-    print("Saved PSF center line profile to ./psf_center_line_profile.png")
-
+    print("Saved PSF center line comparison to ./psf_center_line_compare.png")
 
 def main():
     # Better to use a high sensor resolution (4000x4000 is roughly acceptable, but higher is better)
