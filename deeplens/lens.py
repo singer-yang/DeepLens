@@ -4,7 +4,7 @@
 # Licensed under the Apache License, Version 2.0.
 # See LICENSE file in the project root for full license information.
 
-"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it is should inherit from the Lens class and rewrite core functions."""
+"""Base class for optical lens. When creating a new lens (geolens, diffractivelens, etc.), it should inherit from the Lens class and rewrite core functions."""
 
 import matplotlib.pyplot as plt
 import numpy as np
