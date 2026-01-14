@@ -734,7 +734,7 @@ class GeoLens(
             **kwargs: Additional arguments for different methods:
                 - psf_grid (tuple): Grid size for PSF map method. Defaults to (10, 10).
                 - psf_ks (int): Kernel size for PSF methods. Defaults to PSF_KS.
-                - psf_center (tuple): Center position for PSF patch method.
+                - patch_center (tuple): Center position for PSF patch method.
                 - spp (int): Samples per pixel for ray tracing. Defaults to SPP_RENDER.
 
         Returns:
@@ -757,10 +757,10 @@ class GeoLens(
 
         elif method == "psf_patch":
             # PSF patch rendering - uses a single PSF to render a patch of the image
-            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            patch_center = kwargs.get("patch_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             img_render = self.render_psf_patch(
-                img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+                img_obj, depth=depth, patch_center=patch_center, psf_ks=psf_ks
             )
 
         elif method == "ray_tracing":
@@ -1460,18 +1460,19 @@ class GeoLens(
         return psf_map
 
     @torch.no_grad()
-    def psf_center(self, points, method="chief_ray"):
+    def psf_center(self, points_obj, method="chief_ray"):
         """Compute reference PSF center (flipped to match the original point) for given point source.
 
         Args:
-            points: [..., 3] un-normalized point is in object plane. [-Inf, Inf] * [-Inf, Inf] * [-Inf, 0]
+            points_obj: [..., 3] un-normalized point in object plane. [-Inf, Inf] * [-Inf, Inf] * [-Inf, 0]
+            method: "chief_ray" or "pinhole". Defaults to "chief_ray".
 
         Returns:
             psf_center: [..., 2] un-normalized psf center in sensor plane.
         """
         if method == "chief_ray":
             # Shrink the pupil and calculate green light centroid ray as the chief ray
-            ray = self.sample_from_points(points, scale_pupil=0.5, num_rays=SPP_CALC)
+            ray = self.sample_from_points(points_obj, scale_pupil=0.5, num_rays=SPP_CALC)
             ray = self.trace2sensor(ray)
             if not (ray.is_valid == 1).any():
                 raise RuntimeError(
@@ -1482,12 +1483,12 @@ class GeoLens(
 
         elif method == "pinhole":
             # Pinhole camera perspective projection, distortion not considered
-            if points[..., 2].min().abs() < 100:
+            if points_obj[..., 2].min().abs() < 100:
                 print(
                     "Point source is too close, pinhole model may be inaccurate for PSF center calculation."
                 )
-            tan_point_fov_x = -points[..., 0] / points[..., 2]
-            tan_point_fov_y = -points[..., 1] / points[..., 2]
+            tan_point_fov_x = -points_obj[..., 0] / points_obj[..., 2]
+            tan_point_fov_y = -points_obj[..., 1] / points_obj[..., 2]
             psf_center_x = self.foclen * tan_point_fov_x
             psf_center_y = self.foclen * tan_point_fov_y
             psf_center = torch.stack([psf_center_x, psf_center_y], dim=-1).to(

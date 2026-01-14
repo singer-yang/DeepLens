@@ -358,7 +358,7 @@ Main Rendering
    :type method: str
    :param kwargs: Additional method-specific arguments:
       - For "psf_map": psf_grid=(10,10), psf_ks=64
-      - For "psf_patch": psf_center=(0.0,0.0), psf_ks=64
+      - For "psf_patch": patch_center=(0.0,0.0), psf_ks=64
       - For "ray_tracing": spp=64
    :return: Rendered image tensor [B, C, H, W]
    :rtype: torch.Tensor
@@ -544,12 +544,14 @@ PSF Calculation
    :return: PSF map [grid_h, grid_w, 1, ks, ks]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_center(points, method="chief_ray")
+.. py:method:: GeoLens.psf_center(points_obj, method="chief_ray")
 
    Calculate PSF center position on sensor.
 
-   :param points: Point source positions [..., 3]
-   :type points: torch.Tensor
+   :param points_obj: Un-normalized point source positions in object plane [..., 3]
+   :type points_obj: torch.Tensor
+   :param method: Calculation method - "chief_ray" or "pinhole". Defaults to "chief_ray".
+   :type method: str
    :return: PSF centers [..., 2]
    :rtype: torch.Tensor
 
@@ -709,6 +711,15 @@ Distortion
    :param depth: Object depth
    :type depth: float
    :return: Distortion map [num_grid, num_grid, 2]
+   :rtype: torch.Tensor
+
+.. py:method:: GeoLens.distortion_center(points)
+
+   Calculate the distortion center for given normalized points.
+
+   :param points: Normalized point source positions [..., 3]. x, y in [-1, 1], z (depth) in [-Inf, 0]
+   :type points: torch.Tensor
+   :return: Normalized distortion center positions [..., 2]. x, y in [-1, 1]
    :rtype: torch.Tensor
 
 .. py:method:: GeoLens.draw_distortion(filename=None, num_grid=16, depth=-10000.0)

@@ -443,6 +443,37 @@ class GeoLensEval:
         distortion_grid = torch.stack((x_dist, y_dist), dim=-1)
         return distortion_grid
 
+    def distortion_center(self, points):
+        """Calculate the distortion center for given normalized points.
+
+        Args:
+            points: Normalized point source positions. Shape [N, 3] or [..., 3].
+                x, y in [-1, 1], z (depth) in [-Inf, 0].
+
+        Returns:
+            distortion_center: Normalized distortion center positions. Shape [N, 2] or [..., 2].
+                x, y in [-1, 1].
+        """
+        sensor_w, sensor_h = self.sensor_size
+
+        # Convert normalized points to object space coordinates
+        depth = points[..., 2]
+        scale = self.calc_scale(depth)
+        points_obj_x = points[..., 0] * scale * sensor_w / 2
+        points_obj_y = points[..., 1] * scale * sensor_h / 2
+        points_obj = torch.stack([points_obj_x, points_obj_y, depth], dim=-1)
+
+        # Sample rays and trace to sensor
+        ray = self.sample_from_points(points=points_obj)
+        ray = self.trace2sensor(ray)
+
+        # Calculate centroid and normalize to [-1, 1]
+        ray_center = -ray.centroid()  # shape [..., 3]
+        distortion_center_x = ray_center[..., 0] / (sensor_w / 2)
+        distortion_center_y = ray_center[..., 1] / (sensor_h / 2)
+        distortion_center = torch.stack((distortion_center_x, distortion_center_y), dim=-1)
+        return distortion_center
+
     def draw_distortion(
         self, save_name=None, num_grid=16, depth=DEPTH, wvln=DEFAULT_WAVE, show=False
     ):

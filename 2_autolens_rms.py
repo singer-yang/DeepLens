@@ -143,7 +143,7 @@ def curriculum_design(
                     )
                     rays_backup.append(ray)
 
-                center_ref = -self.psf_center(points=ray.o[:, :, 0, :], method="pinhole")
+                center_ref = -self.psf_center(points_obj=ray.o[:, :, 0, :], method="pinhole")
                 center_ref = center_ref.unsqueeze(-2).repeat(1, 1, spp, 1)
 
         # =======================================

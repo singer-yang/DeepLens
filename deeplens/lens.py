@@ -116,18 +116,15 @@ class Lens(DeepObj):
 
         NOTE:
             [1] This function should be designed to be differentiable.
-            [2] For each point source, we should consider diffraction in the calculation, even for incoherent imaging.
+            [2] We should consider diffraction in the PSF calculation. Check Cittert-Zernike Theorem for reference.
 
         Args:
-            points (tensor): Shape of [N, 3] or [3].
+            points (tensor): Shape of [N, 3] or [3]. [-1, 1] * [-1, 1] * [-Inf, 0]
             wvln (float, optional): Wavelength. Defaults to DEFAULT_WAVE.
             ks (int, optional): Kernel size. Defaults to PSF_KS.
 
         Returns:
             psf: Shape of [ks, ks] or [N, ks, ks].
-
-        Reference:
-            [1] Cittert-Zernike Theorem.
         """
         raise NotImplementedError
 
@@ -432,10 +429,10 @@ class Lens(DeepObj):
 
         elif method == "psf_patch":
             # Render an image patch with its corresponding PSF
-            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            patch_center = kwargs.get("patch_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", 51)
             img_render = self.render_psf_patch(
-                img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+                img_obj, depth=depth, patch_center=patch_center, psf_ks=psf_ks
             )
 
         elif method == "psf_pixel":
@@ -448,36 +445,36 @@ class Lens(DeepObj):
 
         return img_render
 
-    def render_psf(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=PSF_KS):
+    def render_psf(self, img_obj, depth=DEPTH, patch_center=(0, 0), psf_ks=PSF_KS):
         """Render image patch using PSF convolution. Better not use this function to avoid confusion."""
         return self.render_psf_patch(
-            img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+            img_obj, depth=depth, patch_center=patch_center, psf_ks=psf_ks
         )
 
-    def render_psf_patch(self, img_obj, depth=DEPTH, psf_center=(0, 0), psf_ks=PSF_KS):
+    def render_psf_patch(self, img_obj, depth=DEPTH, patch_center=(0, 0), psf_ks=PSF_KS):
         """Render an image patch using PSF convolution, and return positional encoding channel.
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
             depth (float): Depth of the object.
-            psf_center (tensor): Center of the PSF patch. Shape of [2] or [B, 2].
+            patch_center (tensor): Center of the image patch. Shape of [2] or [B, 2].
             psf_ks (int): PSF kernel size. Defaults to PSF_KS.
 
         Returns:
             img_render: Rendered image. Shape of [B, C, H, W].
         """
-        # Convert psf_center to tensor
-        if isinstance(psf_center, (list, tuple)):
-            points = (psf_center[0], psf_center[1], depth)
+        # Convert patch_center to tensor
+        if isinstance(patch_center, (list, tuple)):
+            points = (patch_center[0], patch_center[1], depth)
             points = torch.tensor(points).unsqueeze(0)
-        elif isinstance(psf_center, torch.Tensor):
-            depth = torch.full_like(psf_center[..., 0], depth)
+        elif isinstance(patch_center, torch.Tensor):
+            depth = torch.full_like(patch_center[..., 0], depth)
             points = torch.stack(
-                [psf_center[..., 0], psf_center[..., 1], depth], dim=-1
+                [patch_center[..., 0], patch_center[..., 1], depth], dim=-1
             )
         else:
             raise Exception(
-                f"PSF center must be a list or tuple or tensor, but got {type(psf_center)}."
+                f"Patch center must be a list or tuple or tensor, but got {type(patch_center)}."
             )
 
         # Compute PSF and perform PSF convolution
@@ -527,7 +524,7 @@ class Lens(DeepObj):
 
         if method == "psf_patch":
             # Render a small image patch (same FoV, different depth)
-            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            patch_center = kwargs.get("patch_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
@@ -537,8 +534,8 @@ class Lens(DeepObj):
             depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
             points = torch.stack(
                 [
-                    torch.full_like(depths_ref, psf_center[0]),
-                    torch.full_like(depths_ref, psf_center[1]),
+                    torch.full_like(depths_ref, patch_center[0]),
+                    torch.full_like(depths_ref, patch_center[1]),
                     depths_ref,
                 ],
                 dim=-1,

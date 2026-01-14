@@ -492,3 +492,68 @@ class TestGeoLensDeviceHandling:
         psf = lens.psf(points, wvln=DEFAULT_WAVE, ks=31)
         
         assert psf.device.type == device_auto.type
+
+
+class TestGeoLensDistortion:
+    """Test distortion calculation methods."""
+
+    def test_geolens_distortion_map(self, sample_cellphone_lens):
+        """Should compute distortion map."""
+        lens = sample_cellphone_lens
+        
+        distortion_map = lens.distortion_map(num_grid=(5, 5), depth=DEPTH)
+        
+        assert distortion_map.shape == (5, 5, 2)
+        # Distortion values should be normalized to approximately [-1, 1]
+        assert distortion_map.abs().max() <= 2.0
+
+    def test_geolens_distortion_center_single_point(self, sample_cellphone_lens):
+        """Should compute distortion center for single point."""
+        lens = sample_cellphone_lens
+        
+        # Single normalized point at center
+        points = torch.tensor([[0.0, 0.0, DEPTH]], device=lens.device)
+        distortion_center = lens.distortion_center(points)
+        
+        # Output should be [N, 2]
+        assert distortion_center.shape == (1, 2)
+        # Center point should have distortion center near origin
+        assert distortion_center.abs().max() < 0.5
+
+    def test_geolens_distortion_center_multiple_points(self, sample_cellphone_lens):
+        """Should compute distortion center for multiple points."""
+        lens = sample_cellphone_lens
+        
+        # Multiple normalized points
+        points = torch.tensor([
+            [0.0, 0.0, DEPTH],
+            [0.5, 0.0, DEPTH],
+            [0.0, 0.5, DEPTH],
+            [0.5, 0.5, DEPTH],
+        ], device=lens.device)
+        distortion_center = lens.distortion_center(points)
+        
+        # Output should be [N, 2]
+        assert distortion_center.shape == (4, 2)
+        # All values should be in valid normalized range
+        assert distortion_center.abs().max() <= 2.0
+
+    def test_geolens_distortion_center_normalized_range(self, sample_cellphone_lens):
+        """Distortion center output should be in normalized [-1, 1] range for reasonable inputs."""
+        lens = sample_cellphone_lens
+        
+        # Grid of normalized points
+        x = torch.linspace(-0.8, 0.8, 3)
+        y = torch.linspace(-0.8, 0.8, 3)
+        xx, yy = torch.meshgrid(x, y, indexing='xy')
+        z = torch.full_like(xx, DEPTH)
+        points = torch.stack([xx, yy, z], dim=-1).reshape(-1, 3).to(lens.device)
+        
+        distortion_center = lens.distortion_center(points)
+        
+        # Output should be [9, 2]
+        assert distortion_center.shape == (9, 2)
+        # Most distortion centers should be within reasonable range
+        # (may exceed 1.0 due to lens distortion, but shouldn't be extreme)
+        assert distortion_center.abs().max() < 3.0
+
