@@ -358,7 +358,7 @@ Main Rendering
    :type method: str
    :param kwargs: Additional method-specific arguments:
       - For "psf_map": psf_grid=(10,10), psf_ks=64
-      - For "psf_patch": psf_center=(0.0,0.0), psf_ks=64
+      - For "psf_patch": patch_center=(0.0,0.0), psf_ks=64
       - For "ray_tracing": spp=64
    :return: Rendered image tensor [B, C, H, W]
    :rtype: torch.Tensor

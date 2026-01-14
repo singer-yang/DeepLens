@@ -734,7 +734,7 @@ class GeoLens(
             **kwargs: Additional arguments for different methods:
                 - psf_grid (tuple): Grid size for PSF map method. Defaults to (10, 10).
                 - psf_ks (int): Kernel size for PSF methods. Defaults to PSF_KS.
-                - psf_center (tuple): Center position for PSF patch method.
+                - patch_center (tuple): Center position for PSF patch method.
                 - spp (int): Samples per pixel for ray tracing. Defaults to SPP_RENDER.
 
         Returns:
@@ -757,10 +757,10 @@ class GeoLens(
 
         elif method == "psf_patch":
             # PSF patch rendering - uses a single PSF to render a patch of the image
-            psf_center = kwargs.get("psf_center", (0.0, 0.0))
+            patch_center = kwargs.get("patch_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             img_render = self.render_psf_patch(
-                img_obj, depth=depth, psf_center=psf_center, psf_ks=psf_ks
+                img_obj, depth=depth, patch_center=patch_center, psf_ks=psf_ks
             )
 
         elif method == "ray_tracing":

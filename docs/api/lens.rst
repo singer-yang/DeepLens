@@ -36,7 +36,7 @@ Base Lens Class
       :type depth: float
       :param method: Rendering method - 'psf_map' or 'psf_patch'
       :type method: str
-      :param kwargs: Additional method-specific arguments (psf_grid, psf_ks, psf_center)
+      :param kwargs: Additional method-specific arguments (psf_grid, psf_ks, patch_center)
       :return: Rendered image tensor [B, C, H, W]
       :rtype: torch.Tensor
 

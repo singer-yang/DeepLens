@@ -300,15 +300,15 @@ class ParaxialLens(Lens):
         depth_min = depth.min()
         depth_max = depth.max()
         num_depth = 10
-        psf_center = (0.0, 0.0)
+        patch_center = (0.0, 0.0)
         psf_ks = PSF_KS
 
         # Calculate dual-pixel PSF at reference depths
         depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
         points = torch.stack(
             [
-                torch.full_like(depths_ref, psf_center[0]),
-                torch.full_like(depths_ref, psf_center[1]),
+                torch.full_like(depths_ref, patch_center[0]),
+                torch.full_like(depths_ref, patch_center[1]),
                 depths_ref,
             ],
             dim=-1,

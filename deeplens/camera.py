@@ -168,9 +168,9 @@ class Camera(Renderer):
             img_lq_ls = []
             for b in range(img_linrgb.shape[0]):
                 img = img_linrgb[b, ...].unsqueeze(0)
-                psf_center = kwargs["field_center"][b, ...]
+                patch_center = kwargs["field_center"][b, ...]
                 img_lq = self.lens.render(
-                    img, method="psf_patch", psf_center=psf_center
+                    img, method="psf_patch", patch_center=patch_center
                 )
                 img_lq_ls.append(img_lq)
             img_lq = torch.cat(img_lq_ls, dim=0)
@@ -189,10 +189,10 @@ class Camera(Renderer):
             img_lq_ls = []
             for b in range(img_linrgb.shape[0]):
                 img = img_linrgb[b, ...].unsqueeze(0)
-                psf_center = kwargs["field_center"][b, ...].unsqueeze(0)
+                patch_center = kwargs["field_center"][b, ...].unsqueeze(0)
                 depth = kwargs["depth"][b, ...].unsqueeze(0)
                 img_lq = self.lens.render_rgbd(
-                    img, depth, method="psf_patch", psf_center=psf_center
+                    img, depth, method="psf_patch", patch_center=patch_center
                 )
                 img_lq_ls.append(img_lq)
             img_lq = torch.cat(img_lq_ls, dim=0)
