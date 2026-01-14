@@ -544,12 +544,14 @@ PSF Calculation
    :return: PSF map [grid_h, grid_w, 1, ks, ks]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_center(points, method="chief_ray")
+.. py:method:: GeoLens.psf_center(points_obj, method="chief_ray")
 
    Calculate PSF center position on sensor.
 
-   :param points: Point source positions [..., 3]
-   :type points: torch.Tensor
+   :param points_obj: Un-normalized point source positions in object plane [..., 3]
+   :type points_obj: torch.Tensor
+   :param method: Calculation method - "chief_ray" or "pinhole". Defaults to "chief_ray".
+   :type method: str
    :return: PSF centers [..., 2]
    :rtype: torch.Tensor
 
