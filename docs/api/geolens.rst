@@ -713,6 +713,15 @@ Distortion
    :return: Distortion map [num_grid, num_grid, 2]
    :rtype: torch.Tensor
 
+.. py:method:: GeoLens.distortion_center(points)
+
+   Calculate the distortion center for given normalized points.
+
+   :param points: Normalized point source positions [..., 3]. x, y in [-1, 1], z (depth) in [-Inf, 0]
+   :type points: torch.Tensor
+   :return: Normalized distortion center positions [..., 2]. x, y in [-1, 1]
+   :rtype: torch.Tensor
+
 .. py:method:: GeoLens.draw_distortion(filename=None, num_grid=16, depth=-10000.0)
 
    Visualize distortion map.
