@@ -145,7 +145,7 @@ class Spheric(Surface):
             # Handle flat surface as a plane
             t = (0.0 - ray.o[..., 2]) / ray.d[..., 2]
             new_o = ray.o + t.unsqueeze(-1) * ray.d
-            valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
+            valid = (new_o[..., 0] ** 2 + new_o[..., 1] ** 2 < self.r**2) & (
                 ray.is_valid > 0
             )
         else:
