@@ -10,6 +10,7 @@ from deeplens.optics.psf import (
     conv_psf_map,
     conv_psf_pixel,
     conv_psf_depth_interp,
+    conv_psf_map_depth_interp,
     crop_psf_map,
     interp_psf_map,
     rotate_psf,
@@ -155,8 +156,62 @@ class TestConvPSFDepthInterp:
         
         assert not torch.isnan(result).any()
 
+    def test_conv_psf_depth_interp_disparity(self, device_auto):
+        """Should handle disparity interpolation mode."""
+        img = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.rand(1, 1, 64, 64, device=device_auto) + 1.0  # Avoid roughly 0 depth for disparity
+        
+        psf_kernels = torch.rand(5, 3, 11, 11, device=device_auto)
+        psf_kernels = psf_kernels / psf_kernels.sum(dim=(-1, -2), keepdim=True)
+        psf_depths = torch.linspace(1.0, 2.0, 5, device=device_auto)
+        
+        result = conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="disparity")
+        
+        assert result.shape == img.shape
+        assert not torch.isnan(result).any()
 
-class TestCropPSFMap:
+    def test_conv_psf_depth_interp_invalid_mode(self, device_auto):
+        """Should raise error for invalid interpolation mode."""
+        img = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.rand(1, 1, 64, 64, device=device_auto)
+        psf_kernels = torch.rand(5, 3, 11, 11, device=device_auto)
+        psf_depths = torch.linspace(0, 1, 5, device=device_auto)
+        
+        with pytest.raises(AssertionError):
+            conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="invalid")
+
+
+class TestConvPSFMapDepthInterp:
+    """Test depth-interpolated PSF map convolution."""
+
+    def test_conv_psf_map_depth_interp_shape(self, device_auto):
+        """Output should have same shape as input."""
+        img = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.rand(1, 1, 64, 64, device=device_auto)
+        
+        # PSF map: [grid_h, grid_w, num_depth, C, ks, ks]
+        psf_map = torch.rand(4, 4, 5, 3, 11, 11, device=device_auto)
+        psf_map = psf_map / psf_map.sum(dim=(-1, -2), keepdim=True)
+        psf_depths = torch.linspace(0, 1, 5, device=device_auto)
+        
+        result = conv_psf_map_depth_interp(img, depth, psf_map, psf_depths)
+        
+        assert result.shape == img.shape
+
+    def test_conv_psf_map_depth_interp_disparity(self, device_auto):
+        """Should handle disparity interpolation mode."""
+        img = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.rand(1, 1, 64, 64, device=device_auto) + 1.0
+        
+        psf_map = torch.rand(4, 4, 5, 3, 11, 11, device=device_auto)
+        psf_map = psf_map / psf_map.sum(dim=(-1, -2), keepdim=True)
+        psf_depths = torch.linspace(1.0, 2.0, 5, device=device_auto)
+        
+        result = conv_psf_map_depth_interp(img, depth, psf_map, psf_depths, interp_mode="disparity")
+        
+        assert result.shape == img.shape
+        assert not torch.isnan(result).any()
+
     """Test PSF map cropping."""
 
     def test_crop_psf_map_shape(self, device_auto):

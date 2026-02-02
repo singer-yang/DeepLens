@@ -1,6 +1,7 @@
 # Run all tests
 cd ./DeepLens
 pytest test/ -v
+python3 -m pytest test/ -v
 
 # Run specific test file
 pytest test/test_ray.py -v

@@ -40,6 +40,21 @@ Base Lens Class
       :return: Rendered image tensor [B, C, H, W]
       :rtype: torch.Tensor
 
+   .. py:method:: render_rgbd(img_obj, depth_map, method='psf_patch', **kwargs)
+
+      Render RGBD image using depth map.
+
+      :param img_obj: Input image tensor [B, C, H, W]
+      :type img_obj: torch.Tensor
+      :param depth_map: Depth map tensor [B, 1, H, W]
+      :type depth_map: torch.Tensor
+      :param method: Rendering method - 'psf_map', 'psf_patch', or 'psf_pixel'
+      :type method: str
+      :param kwargs: Additional arguments (interp_mode, psf_grid, psf_ks, etc.)
+      :type kwargs: dict
+      :return: Rendered image tensor [B, C, H, W]
+      :rtype: torch.Tensor
+
    .. py:method:: set_sensor(sensor_size, sensor_res)
 
       Set sensor dimensions.
