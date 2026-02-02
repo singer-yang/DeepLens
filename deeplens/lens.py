@@ -509,7 +509,7 @@ class Lens(DeepObj):
 
         Args:
             img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
-            depth_map (tensor): Depth map. Shape of [B, 1, H, W].
+            depth_map (tensor): Depth map [mm]. Shape of [B, 1, H, W]. Values should be positive.
             method (str, optional): Image simulation method. Defaults to "psf_patch".
             **kwargs: Additional arguments for different methods.
                 - interp_mode (str): "depth" or "disparity". Defaults to "depth".
@@ -521,19 +521,26 @@ class Lens(DeepObj):
             [1] "Aberration-Aware Depth-from-Focus", TPAMI 2023.
             [2] "Efficient Depth- and Spatially-Varying Image Simulation for Defocus Deblur", ICCVW 2025.
         """
-        depth_map = -1.0 * depth_map
+        if depth_map.min() < 0:
+            raise ValueError("Depth map should be positive.")
+
+        if len(depth_map.shape) == 3:
+            # [B, H, W] -> [B, 1, H, W]
+            depth_map = depth_map.unsqueeze(1)
 
         if method == "psf_patch":
-            # Render a small image patch (same FoV, different depth)
+            # Render an image patch (same FoV, different depth)
             patch_center = kwargs.get("patch_center", (0.0, 0.0))
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
             num_depth = kwargs.get("num_depth", 32)
-            interp_mode = kwargs.get("interp_mode", "depth")
+            interp_mode = kwargs.get("interp_mode", "disparity")
 
             # Calculate PSF at different depths, (num_depth, 3, ks, ks)
-            depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
+            disp_ref = torch.linspace(1.0/depth_max, 1.0/depth_min, num_depth).to(self.device)
+            depths_ref = - 1.0 / disp_ref # Convert to negative for PSF calculation
+
             points = torch.stack(
                 [
                     torch.full_like(depths_ref, patch_center[0]),
@@ -542,23 +549,25 @@ class Lens(DeepObj):
                 ],
                 dim=-1,
             )
-            psfs = self.psf_rgb(points=points, ks=psf_ks)
+            psfs = self.psf_rgb(points=points, ks=psf_ks) # (num_depth, 3, ks, ks)
 
             # Image simulation
             img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref, interp_mode=interp_mode)
             return img_render
 
         elif method == "psf_map":
-            # Render full resolution image with PSF map convolution
+            # Render full resolution image with PSF map convolution (different FoV, different depth)
             psf_grid = kwargs.get("psf_grid", (10, 10))  # (grid_w, grid_h)
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
             num_depth = kwargs.get("num_depth", 32)
-            interp_mode = kwargs.get("interp_mode", "depth")
-            depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
+            interp_mode = kwargs.get("interp_mode", "disparity")
 
-            # Calculate PSF map at different depths
+            # Calculate PSF map at different depths (convert to negative for PSF calculation)
+            disp_ref = torch.linspace(1.0/depth_max, 1.0/depth_min, num_depth).to(self.device)
+            depths_ref = -1.0 / disp_ref # Convert to negative for PSF calculation
+
             psf_maps = []
             for depth in tqdm(depths_ref):
                 psf_map = self.psf_map_rgb(grid=psf_grid, ks=psf_ks, depth=depth)
@@ -575,7 +584,7 @@ class Lens(DeepObj):
 
         elif method == "psf_pixel":
             # Render full resolution image with pixel-wise PSF convolution. This method is computationally expensive.
-            psf_ks = kwargs.get("psf_ks", 32)
+            psf_ks = kwargs.get("psf_ks", PSF_KS)
             assert img_obj.shape[0] == 1, "Now only support batch size 1"
 
             # Calculate points in the object space
@@ -585,7 +594,7 @@ class Lens(DeepObj):
                 indexing="xy",
             )
             points_xy = torch.stack(points_xy, dim=0).unsqueeze(0)
-            points = torch.cat([points_xy, depth_map], dim=1)  # shape [B, 3, H, W]
+            points = torch.cat([points_xy, -depth_map], dim=1)  # shape [B, 3, H, W]
 
             # Calculate PSF at different pixels. This step is the most time-consuming.
             points = points.permute(0, 2, 3, 1).reshape(-1, 3)  # shape [H*W, 3]
