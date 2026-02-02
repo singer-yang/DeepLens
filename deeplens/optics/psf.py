@@ -116,7 +116,7 @@ def conv_psf_map(img, psf_map):
     return img_render
 
 
-def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths):
+def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths, interp_mode="depth"):
     """Convolve an image with a PSF map. Within each image patch, do interpolation with a depth map.
 
     Args:
@@ -124,6 +124,7 @@ def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths):
         depth: (B, 1, H, W), [0, 1]
         psf_map: (grid_h, grid_w, num_depth, 3, ks, ks)
         psf_depths: (num_depth). Used to interpolate psf_map.
+        interp_mode: "depth" or "disparity". If "disparity", weights are calculated based on disparity (1/depth).
     
     Returns:
         img_render: (B, 3, H, W), [0, 1]
@@ -132,14 +133,7 @@ def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths):
     grid_h, grid_w, num_depths, C_psf, ks, _ = psf_map.shape
     assert C_psf == C, f"PSF map channels ({C_psf}) must match image channels ({C})."
     
-    # Padding
-    pad_h_left  = (ks - 1) // 2
-    pad_h_right = ks // 2
-    pad_w_left  = (ks - 1) // 2
-    pad_w_right = ks // 2
-    img_pad = F.pad(img, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
-    
-    # Render image patch by patch
+    # Render image patch by patch, reusing conv_psf_depth_interp for each patch
     img_render = torch.zeros_like(img)
     for i in range(grid_h):
         h_low  = (i * H) // grid_h
@@ -149,60 +143,21 @@ def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths):
             w_low  = (j * W) // grid_w
             w_high = ((j + 1) * W) // grid_w
 
-            # Extract depth patch
-            depth_patch = depth[:, :, h_low:h_high, w_low:w_high]  # [B, 1, patch_h, patch_w]
+            # Extract image and depth patches
+            img_patch = img[:, :, h_low:h_high, w_low:w_high]
+            depth_patch = depth[:, :, h_low:h_high, w_low:w_high]
             
             # Extract PSF kernels for this patch at all depths
             psf_kernels = psf_map[i, j, :, :, :, :]  # [num_depths, C, ks, ks]
             
-            # Extract image patch with overlap for convolution
-            img_pad_patch = img_pad[
-                :,
-                :,
-                h_low : h_high + pad_h_left + pad_h_right,
-                w_low : w_high + pad_w_left + pad_w_right,
-            ]
-            
-            # Convolve the image patch with all depth PSFs
-            imgs_blur = []
-            for d in range(num_depths):
-                psf = torch.flip(psf_kernels[d], dims=(-2, -1)).unsqueeze(1)  # [C, 1, ks, ks]
-                img_blur = F.conv2d(img_pad_patch, psf, groups=C)  # [B, C, patch_h, patch_w]
-                imgs_blur.append(img_blur)
-            imgs_blur = torch.stack(imgs_blur, dim=0)  # [num_depths, B, C, patch_h, patch_w]
-            
-            # Calculate indices for depth interpolation
-            patch_h = h_high - h_low
-            patch_w = w_high - w_low
-            depth_flat = depth_patch.flatten(1)  # [B, patch_h*patch_w]
-            depth_flat = depth_flat.clamp(min(psf_depths) + DELTA, max(psf_depths) - DELTA)
-            indices = torch.searchsorted(psf_depths, depth_flat, right=True)  # [B, patch_h*patch_w]
-            indices = indices.clamp(1, num_depths - 1)
-            idx0 = indices - 1
-            idx1 = indices
-            
-            # Calculate weights for depth interpolation
-            d0 = psf_depths[idx0]  # [B, patch_h*patch_w]
-            d1 = psf_depths[idx1]
-            denom = d1 - d0
-            denom[denom == 0] = 1e-6  # Avoid division by zero
-            w1 = (depth_flat - d0) / denom  # [B, patch_h*patch_w]
-            w0 = 1 - w1
-            
-            # Create a weight tensor
-            weights = torch.zeros(num_depths, B, patch_h * patch_w, device=img.device, dtype=img.dtype)
-            weights.scatter_add_(0, idx0.unsqueeze(0).long(), w0.unsqueeze(0))
-            weights.scatter_add_(0, idx1.unsqueeze(0).long(), w1.unsqueeze(0))
-            weights = weights.view(num_depths, B, 1, patch_h, patch_w)
-            
-            # Apply weights to the blurred images
-            render_patch = torch.sum(imgs_blur * weights, dim=0)  # [B, C, patch_h, patch_w]
+            # Use conv_psf_depth_interp for this patch
+            render_patch = conv_psf_depth_interp(img_patch, depth_patch, psf_kernels, psf_depths, interp_mode)
             img_render[:, :, h_low:h_high, w_low:w_high] = render_patch
     
     return img_render
 
 
-def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
+def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="depth"):
     """Convolve an image batch with PSFs at multiple given depths, then do interpolation with a depth map.
 
     The differentiability of this function is not guaranteed.
@@ -212,21 +167,44 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
         depth: (B, 1, H, W), [0, 1]
         psf_kernels: (num_depth, 3, ks, ks)
         psf_depths: (num_depth). Used to interpolate psf_kernels.
+        interp_mode: "depth" or "disparity". If "disparity", weights are calculated based on disparity (1/depth).
 
     Returns:
         img_blur: (B, 3, H, W), [0, 1]
     """
+    assert interp_mode in ["depth", "disparity"], f"interp_mode must be 'depth' or 'disparity', got {interp_mode}"
+    
     # assert img.device != torch.device("cpu"), "Image must be on GPU"
     num_depths, _, ks, _ = psf_kernels.shape
 
+    # =================================
     # PSF convolution for all depths
-    imgs_blur = []
-    for i in range(num_depths):
-        img_blur = conv_psf(img, psf_kernels[i, ...])  # shape [B, 3, H, W]
-        imgs_blur.append(img_blur)
-    imgs_blur = torch.stack(imgs_blur, dim=0)  # shape [num_depths, B, 3, H, W]
+    # =================================
+    B, C, H, W = img.shape
+    
+    # Expand img: [B, C, H, W] -> [B, num_depths, C, H, W] -> [B, num_depths*C, H, W]
+    img_expanded = img.unsqueeze(1).expand(B, num_depths, C, H, W).reshape(B, num_depths * C, H, W)
+    
+    # Prepare PSF kernel: [num_depths, C, ks, ks] -> [num_depths*C, 1, ks, ks]
+    # Flip the PSF because F.conv2d uses cross-correlation
+    psf_stacked = torch.flip(psf_kernels, [-2, -1]).reshape(num_depths * C, 1, ks, ks)
+    
+    # Padding (following conv_psf logic for even/odd kernel sizes)
+    pad_h_left  = (ks - 1) // 2
+    pad_h_right = ks // 2
+    pad_w_left  = (ks - 1) // 2
+    pad_w_right = ks // 2
+    img_padded = F.pad(img_expanded, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
+    
+    # Grouped convolution: each of the num_depths*C channels is convolved with its own kernel
+    imgs_blur = F.conv2d(img_padded, psf_stacked, groups=num_depths * C)  # [B, num_depths*C, H, W]
+    
+    # Reshape to [num_depths, B, C, H, W]
+    imgs_blur = imgs_blur.reshape(B, num_depths, C, H, W).permute(1, 0, 2, 3, 4)
 
-    # Calculate indices for depth interpolation
+    # =================================
+    # Depth/Disparity interpolation
+    # =================================
     B, _, H, W = depth.shape
     depth_flat = depth.flatten(1)  # shape [B, H*W]
     depth_flat = depth_flat.clamp(min(psf_depths) + DELTA, max(psf_depths) - DELTA)
@@ -238,9 +216,21 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths):
     # Calculate weights for depth interpolation
     d0 = psf_depths[idx0]  # shape [B, H*W]
     d1 = psf_depths[idx1]
-    denom = d1 - d0
-    denom[denom == 0] = 1e-6  # Avoid division by zero
-    w1 = (depth_flat - d0) / denom  # shape [B, H*W]
+    
+    if interp_mode == "depth":
+        # Interpolate in depth space
+        denom = d1 - d0
+        denom[denom == 0] = 1e-6  # Avoid division by zero
+        w1 = (depth_flat - d0) / denom  # shape [B, H*W]
+    else:
+        # Interpolate in disparity space (disparity = 1/depth)
+        disp_flat = 1.0 / depth_flat
+        disp0 = 1.0 / d0
+        disp1 = 1.0 / d1
+        denom = disp1 - disp0
+        denom[denom == 0] = 1e-6  # Avoid division by zero
+        w1 = (disp_flat - disp0) / denom  # shape [B, H*W]
+    
     w0 = 1 - w1
 
     # Create a weight tensor

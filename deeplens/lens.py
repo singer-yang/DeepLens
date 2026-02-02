@@ -512,6 +512,7 @@ class Lens(DeepObj):
             depth_map (tensor): Depth map. Shape of [B, 1, H, W].
             method (str, optional): Image simulation method. Defaults to "psf_patch".
             **kwargs: Additional arguments for different methods.
+                - interp_mode (str): "depth" or "disparity". Defaults to "depth".
 
         Returns:
             img_render: Rendered image. Shape of [B, C, H, W].
@@ -528,7 +529,8 @@ class Lens(DeepObj):
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
-            num_depth = kwargs.get("num_depth", 10)
+            num_depth = kwargs.get("num_depth", 32)
+            interp_mode = kwargs.get("interp_mode", "depth")
 
             # Calculate PSF at different depths, (num_depth, 3, ks, ks)
             depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
@@ -543,7 +545,7 @@ class Lens(DeepObj):
             psfs = self.psf_rgb(points=points, ks=psf_ks)
 
             # Image simulation
-            img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref)
+            img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref, interp_mode=interp_mode)
             return img_render
 
         elif method == "psf_map":
@@ -552,7 +554,8 @@ class Lens(DeepObj):
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
-            num_depth = kwargs.get("num_depth", 16)
+            num_depth = kwargs.get("num_depth", 32)
+            interp_mode = kwargs.get("interp_mode", "depth")
             depths_ref = torch.linspace(depth_min, depth_max, num_depth).to(self.device)
 
             # Calculate PSF map at different depths
@@ -566,7 +569,7 @@ class Lens(DeepObj):
 
             # Image simulation
             img_render = conv_psf_map_depth_interp(
-                img_obj, depth_map, psf_map, depths_ref
+                img_obj, depth_map, psf_map, depths_ref, interp_mode=interp_mode
             )
             return img_render
 

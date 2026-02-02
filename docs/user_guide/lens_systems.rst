@@ -125,6 +125,15 @@ Image Rendering
         spp=32
     )
     
+    # Render RGBD image with depth or disparity interpolation
+    # method='psf_patch' for fast patch rendering, 'psf_map' for full image
+    img_rendered = lens.render_rgbd(
+        img,
+        depth_map=depth_values, # Should be a tensor of shape [B, 1, H, W]
+        method='psf_map',
+        interp_mode='disparity'  # 'depth' (default) or 'disparity'
+    )
+    
     save_image(img_rendered, 'output.png')
 
 Features
