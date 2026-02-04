@@ -107,60 +107,45 @@ class Aspheric(Surface):
             return self.c + self.c_error, self.k + self.k_error
         return self.c, self.k
 
-    def _get_ai(self, i):
-        """Get the i-th aspheric coefficient (ai2, ai4, ai6, ...)."""
-        return getattr(self, f"ai{2 * i}")
-
-    def _eval_aspheric_poly(self, r2):
-        """Evaluate aspheric polynomial using multiplication chains.
-
-        Returns sum of ai_{2i} * r^{2i} for i = 1 to ai_degree.
-        Uses multiplication chains instead of pow() for performance.
-        """
-        if self.ai_degree == 0:
-            return 0
-
-        result = self._get_ai(1) * r2
-        r_pow = r2
-        for i in range(2, self.ai_degree + 1):
-            r_pow = r_pow * r2
-            result = result + self._get_ai(i) * r_pow
-        return result
-
-    def _eval_aspheric_poly_derivative(self, r2):
-        """Evaluate derivative of aspheric polynomial w.r.t. r2.
-
-        Returns sum of i * ai_{2i} * r^{2(i-1)} for i = 1 to ai_degree.
-        Uses multiplication chains instead of pow() for performance.
-        """
-        if self.ai_degree == 0:
-            return 0
-
-        result = self._get_ai(1)  # derivative of ai2 * r2 w.r.t. r2 is ai2
-        r_pow = 1
-        for i in range(2, self.ai_degree + 1):
-            r_pow = r_pow * r2
-            result = result + i * self._get_ai(i) * r_pow
-        return result
-
     def _sag(self, x, y):
-        """Compute surface height z = sag(x, y)."""
+        """Compute surface sag (height) z = sag(x, y).
+
+        The aspheric surface is defined as:
+            z = r²c / (1 + sqrt(1 - (1+k)r²c²)) + Σ ai_{2i} * r^{2i}
+
+        where r² = x² + y², c is curvature, k is conic constant, and ai are
+        the aspheric coefficients (ai2, ai4, ai6, ...).
+        """
         c, k = self._get_curvature_params()
 
         r2 = x**2 + y**2
         total_surface = r2 * c / (1 + torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON))
-        total_surface = total_surface + self._eval_aspheric_poly(r2)
+
+        # Aspheric polynomial: ai2*r² + ai4*r⁴ + ai6*r⁶ + ...
+        r_pow = r2
+        for i in range(1, self.ai_degree + 1):
+            total_surface = total_surface + getattr(self, f"ai{2*i}") * r_pow
+            r_pow = r_pow * r2
 
         return total_surface
 
     def _dfdxy(self, x, y):
-        """Compute first-order height derivatives df/dx and df/dy."""
+        """Compute first-order height derivatives df/dx and df/dy.
+
+        For the aspheric polynomial Σ ai_{2i} * r^{2i}, the derivative w.r.t. r²
+        is Σ i * ai_{2i} * r^{2(i-1)}, i.e.: ai2 + 2*ai4*r² + 3*ai6*r⁴ + ...
+        """
         c, k = self._get_curvature_params()
 
         r2 = x**2 + y**2
         sf = torch.sqrt(1 - (1 + k) * r2 * c**2 + EPSILON)
         dsdr2 = (1 + sf + (1 + k) * r2 * c**2 / 2 / sf) * c / (1 + sf) ** 2
-        dsdr2 = dsdr2 + self._eval_aspheric_poly_derivative(r2)
+
+        # Derivative of aspheric polynomial w.r.t. r²: ai2 + 2*ai4*r² + 3*ai6*r⁴ + ...
+        r_pow = 1
+        for i in range(1, self.ai_degree + 1):
+            dsdr2 = dsdr2 + i * getattr(self, f"ai{2*i}") * r_pow
+            r_pow = r_pow * r2
 
         return dsdr2 * 2 * x, dsdr2 * 2 * y
 
