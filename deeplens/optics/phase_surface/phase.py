@@ -133,7 +133,7 @@ class Phase(DeepObj):
                 & (ray.is_valid > 0)
             )
         else:
-            valid = (torch.sqrt(new_o[..., 0] ** 2 + new_o[..., 1] ** 2) < self.r) & (
+            valid = (new_o[..., 0] ** 2 + new_o[..., 1] ** 2 < self.r**2) & (
                 ray.is_valid > 0
             )
 

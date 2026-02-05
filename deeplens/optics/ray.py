@@ -25,25 +25,25 @@ class Ray(DeepObj):
             coherent (bool): Whether to use coherent ray tracing.
             device (str): Device to store the ray.
         """
-        # Basic ray parameters
-        self.o = o if torch.is_tensor(o) else torch.tensor(o)
-        self.d = d if torch.is_tensor(d) else torch.tensor(d)
+        # Basic ray parameters - move to device
+        self.o = (o if torch.is_tensor(o) else torch.tensor(o)).to(device)
+        self.d = (d if torch.is_tensor(d) else torch.tensor(d)).to(device)
         self.shape = self.o.shape[:-1]
 
         # Wavelength
         assert wvln > 0.1 and wvln < 10.0, "Ray wavelength unit should be [um]"
-        self.wvln = torch.tensor(wvln)
+        self.wvln = torch.tensor(wvln, device=device)
 
-        # Auxiliary ray parameters
-        self.is_valid = torch.ones(self.shape)
-        self.en = torch.ones((*self.shape, 1))
-        self.obliq = torch.ones((*self.shape, 1))
+        # Auxiliary ray parameters - create directly on device
+        self.is_valid = torch.ones(self.shape, device=device)
+        self.en = torch.ones((*self.shape, 1), device=device)
+        self.obliq = torch.ones((*self.shape, 1), device=device)
 
         # Coherent ray tracing
         self.coherent = coherent  # bool
-        self.opl = torch.zeros((*self.shape, 1))
+        self.opl = torch.zeros((*self.shape, 1), device=device)
 
-        self.to(device)
+        self.device = device
         self.d = F.normalize(self.d, p=2, dim=-1)
 
     def prop_to(self, z, n=1.0):
