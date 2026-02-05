@@ -1638,7 +1638,6 @@ class GeoLens(
         Reference:
             [1] https://en.wikipedia.org/wiki/Numerical_aperture
         """
-        breakpoint()
         return n * math.sin(math.atan(1 / 2 / self.fnum))
         # return n / (2 * self.fnum)
 
