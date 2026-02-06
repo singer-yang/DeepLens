@@ -1611,10 +1611,27 @@ class GeoLens(
         # Trace a paraxial chief ray, shape [1, 1, num_rays, 3]
         paraxial_fov = 0.01
         paraxial_fov_deg = float(np.rad2deg(paraxial_fov))
+
+        # 1. Trace on-axis parallel rays to find paraxial focus z (equivalent to infinite focus)
+        ray_axis = self.sample_parallel(
+            fov_x=0.0, fov_y=0.0, entrance_pupil=False, scale_pupil=0.2
+        )
+        ray_axis, _ = self.trace(ray_axis)
+        valid_axis = ray_axis.is_valid > 0
+        t = -(ray_axis.d[valid_axis, 0] * ray_axis.o[valid_axis, 0]
+              + ray_axis.d[valid_axis, 1] * ray_axis.o[valid_axis, 1]) / (
+            ray_axis.d[valid_axis, 0] ** 2 + ray_axis.d[valid_axis, 1] ** 2
+        )
+        focus_z = ray_axis.o[valid_axis, 2] + t * ray_axis.d[valid_axis, 2]
+        focus_z = focus_z[~torch.isnan(focus_z) & (focus_z > 0)]
+        paraxial_focus_z = float(torch.mean(focus_z))
+
+        # 2. Trace off-axis paraxial ray to paraxial focus, measure image height
         ray = self.sample_parallel(
             fov_x=0.0, fov_y=paraxial_fov_deg, entrance_pupil=False, scale_pupil=0.2
         )
-        ray = self.trace2sensor(ray)
+        ray, _ = self.trace(ray)
+        ray = ray.prop_to(paraxial_focus_z)
 
         # Compute the effective focal length
         paraxial_imgh = (ray.o[:, 1] * ray.is_valid).sum() / ray.is_valid.sum()
@@ -1624,6 +1641,8 @@ class GeoLens(
 
         # Compute the back focal length
         self.bfl = self.d_sensor.item() - self.surfaces[-1].d.item()
+
+        return eff_foclen
 
     @torch.no_grad()
     def calc_numerical_aperture(self, n=1.0):
