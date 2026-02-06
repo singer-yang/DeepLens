@@ -172,8 +172,9 @@ def curriculum_design(
                     weight_mask = weight_mask * (~dropout_mask)
 
             # Loss on rms error, shape of [num_grid, num_grid]
-            l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1)
+            l_rms = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
             l_rms /= ray_valid.sum(-1) + EPSILON
+            l_rms = (l_rms + EPSILON).sqrt()
 
             # Weighted loss
             l_rms_weighted = (l_rms * weight_mask).sum()
