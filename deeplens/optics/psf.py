@@ -124,15 +124,17 @@ def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths, interp_mode="dept
 
     Args:
         img: (B, 3, H, W), [0, 1]
-        depth: (B, 1, H, W), [0, 1]
+        depth: (B, 1, H, W), (-inf, 0)
         psf_map: (grid_h, grid_w, num_depth, 3, ks, ks)
-        psf_depths: (num_depth). Used to interpolate psf_map.
+        psf_depths: (num_depth). (-inf, 0). Used to interpolate psf_map.
         interp_mode: "depth" or "disparity". If "disparity", weights are calculated based on disparity (1/depth).
     
     Returns:
         img_render: (B, 3, H, W), [0, 1]
     """
     assert interp_mode in ["depth", "disparity"], f"interp_mode must be 'depth' or 'disparity', got {interp_mode}"
+    assert depth.min() < 0 and depth.max() < 0, f"depth must be negative, got {depth.min()} and {depth.max()}"
+    assert psf_depths.min() < 0 and psf_depths.max() < 0, f"psf_depths must be negative, got {psf_depths.min()} and {psf_depths.max()}"
 
     B, C, H, W = img.shape
     grid_h, grid_w, num_depths, C_psf, ks, _ = psf_map.shape
@@ -240,15 +242,17 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="dept
 
     Args:
         img: (B, 3, H, W), [0, 1]
-        depth: (B, 1, H, W), [0, 1]
+        depth: (B, 1, H, W), (-inf, 0)
         psf_kernels: (num_depth, 3, ks, ks)
-        psf_depths: (num_depth). Used to interpolate psf_kernels.
+        psf_depths: (num_depth). (-inf, 0). Used to interpolate psf_kernels.
         interp_mode: "depth" or "disparity". If "disparity", weights are calculated based on disparity (1/depth).
 
     Returns:
         img_blur: (B, 3, H, W), [0, 1]
     """
     assert interp_mode in ["depth", "disparity"], f"interp_mode must be 'depth' or 'disparity', got {interp_mode}"
+    assert depth.min() < 0 and depth.max() < 0, f"depth must be negative, got {depth.min()} and {depth.max()}"
+    assert psf_depths.min() < 0 and psf_depths.max() < 0, f"psf_depths must be negative, got {psf_depths.min()} and {psf_depths.max()}"
     
     # assert img.device != torch.device("cpu"), "Image must be on GPU"
     num_depths, _, ks, _ = psf_kernels.shape

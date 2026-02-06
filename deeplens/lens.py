@@ -603,7 +603,7 @@ class Lens(DeepObj):
             psfs = self.psf_rgb(points=points, ks=psf_ks) # (num_depth, 3, ks, ks)
 
             # Image simulation
-            img_render = conv_psf_depth_interp(img_obj, depth_map, psfs, depths_ref, interp_mode=interp_mode)
+            img_render = conv_psf_depth_interp(img_obj, -depth_map, psfs, depths_ref, interp_mode=interp_mode)
             return img_render
 
         elif method == "psf_map":
@@ -628,7 +628,7 @@ class Lens(DeepObj):
 
             # Image simulation
             img_render = conv_psf_map_depth_interp(
-                img_obj, depth_map, psf_map, depths_ref, interp_mode=interp_mode
+                img_obj, -depth_map, psf_map, depths_ref, interp_mode=interp_mode
             )
             return img_render
 
