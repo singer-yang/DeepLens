@@ -508,7 +508,7 @@ PSF Calculation
    :param points: Point source positions
    :param ks: Kernel size
    :param wvln: Wavelength
-   :param spp: Sample rays (typically ~1.7e7)
+   :param spp: Sample rays (typically 16777216, ~16.8M, 2^24)
    :param recenter: Recenter PSF
    :return: PSF patch
    :rtype: torch.Tensor
@@ -565,7 +565,7 @@ PSF Calculation
    :type ks: int
    :param wvln: Wavelength
    :type wvln: float
-   :param spp: Sample rays (>= 1.7e7 recommended)
+   :param spp: Sample rays (>= 16777216, ~16.8M, 2^24 recommended)
    :type spp: int
    :param recenter: Recenter PSF using chief ray
    :type recenter: bool
@@ -580,7 +580,7 @@ PSF Calculation
    :type points: torch.Tensor or list
    :param wvln: Wavelength in micrometers
    :type wvln: float
-   :param spp: Samples (>= 1.7e7 required)
+   :param spp: Samples (>= 16777216, ~16.8M, 2^24 required)
    :type spp: int
    :param recenter: Recenter PSF using chief ray
    :type recenter: bool

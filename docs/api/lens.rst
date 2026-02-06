@@ -10,8 +10,11 @@ Base Lens Class
 
    Base class for all lens systems in DeepLens.
 
-   :param device: Device to use ('cuda' or 'cpu')
    :param dtype: Data type for computations (default: torch.float32)
+   :param device: Device to use ('cuda' or 'cpu')
+
+   .. note::
+      Prefer keyword arguments when constructing lenses; positional arguments follow (dtype, device).
 
    .. py:method:: psf(points, wvln=0.587, ks=64, **kwargs)
 
@@ -526,7 +529,7 @@ Basic Usage
     psf = lens.psf(points=[0.0, 0.0, -1000.0], spp=2048)
     
     # Render image
-    img_rendered = lens.render(img, depth=1000)
+    img_rendered = lens.render(img, depth=-1000)
 
 Lens Optimization
 ^^^^^^^^^^^^^^^^^
@@ -544,7 +547,10 @@ Lens Optimization
     # Optimization loop
     for i in range(1000):
         optimizer.zero_grad()
-        ray = lens.sample_point_source(depth=-1e4, num_rays=256)
+        ray = lens.sample_point_source(
+            depth=-1e4,
+            num_rays=256,  # 256 vs 16384 for faster iterations (lower sampling accuracy per step)
+        )
         ray_out, _ = lens.trace(ray)
         loss = loss_fn(ray_out) + lens.loss_constraint()
         loss.backward()

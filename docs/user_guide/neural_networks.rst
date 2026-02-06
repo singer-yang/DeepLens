@@ -399,7 +399,7 @@ Create custom datasets:
             
             # Generate PSF
             points = torch.tensor(
-                [field[0].item(), field[1].item(), -depth.item()]
+                [[field[0].item(), field[1].item(), -depth.item()]]
             )
             psf = self.lens.psf(points=points)
             
@@ -433,7 +433,7 @@ Joint Lens-Network Optimization
     for epoch in range(100):
         for img_clean in dataloader:
             # Forward through lens
-            img_degraded = lens.render(img_clean, depth=1000)
+            img_degraded = lens.render(img_clean, depth=-1000)
             
             # Restore with network
             img_restored = network(img_degraded)

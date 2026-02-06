@@ -429,7 +429,7 @@ For large images:
         output = torch.zeros_like(img)
         
         # Calculate PSF once
-        psf = lens.psf_rgb(points=[0.0, 0.0, depth], spp=1024)
+        psf = lens.psf_rgb(points=torch.tensor([[0.0, 0.0, -depth]]), spp=1024)
         
         for i in range(0, H, tile_size - overlap):
             for j in range(0, W, tile_size - overlap):
