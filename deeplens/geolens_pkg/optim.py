@@ -590,9 +590,9 @@ class GeoLensOptim:
                         weight_mask /= weight_mask.mean()
 
                 # Loss on RMS error
-                l_rms = (((ray_err**2).sum(-1) + EPSILON).sqrt() * ray_valid).sum(-1) # l2 loss
-                # l_rms = (ray_err.abs().sum(-1) * ray_valid).sum(-1) # l1 loss
+                l_rms = ((ray_err**2).sum(-1) * ray_valid).sum(-1)
                 l_rms /= ray_valid.sum(-1) + EPSILON
+                l_rms = (l_rms + EPSILON).sqrt()
 
                 # Weighted loss
                 l_rms_weighted = (l_rms * weight_mask).sum()

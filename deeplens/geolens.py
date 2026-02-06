@@ -1538,9 +1538,10 @@ class GeoLens(
             ray_xy_norm = (
                 ray.o[..., :2] - ray_xy_center_green
             ) * ray.is_valid.unsqueeze(-1)
-            spot_rms = ((ray_xy_norm**2).sum(-1).sqrt() * ray.is_valid).sum(-1) / (
-                ray.is_valid.sum(-1) + EPSILON
-            )
+            spot_rms = (
+                ((ray_xy_norm**2).sum(-1) * ray.is_valid).sum(-1)
+                / (ray.is_valid.sum(-1) + EPSILON)
+            ).sqrt()
             spot_radius = (ray_xy_norm**2).sum(-1).sqrt().max(dim=-1).values
 
             # Append to list
