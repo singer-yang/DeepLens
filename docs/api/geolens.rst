@@ -126,7 +126,7 @@ Ray Sampling
 Grid Sampling
 ~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.sample_grid_rays(depth=float("inf"), num_grid=(11, 11), num_rays=16384, wvln=0.58756180, uniform_fov=True, sample_more_off_axis=False, scale_pupil=1.0)
+.. py:method:: GeoLens.sample_grid_rays(depth=float("inf"), num_grid=(11, 11), num_rays=16384, wvln=0.587, uniform_fov=True, sample_more_off_axis=False, scale_pupil=1.0)
 
    Sample grid rays from object space for PSF map or spot diagram analysis.
 
@@ -147,7 +147,7 @@ Grid Sampling
    :return: Ray object with shape [num_grid[1], num_grid[0], num_rays, 3]
    :rtype: Ray
 
-.. py:method:: GeoLens.sample_radial_rays(num_field=5, depth=float("inf"), num_rays=2048, wvln=0.589)
+.. py:method:: GeoLens.sample_radial_rays(num_field=5, depth=float("inf"), num_rays=16384, wvln=0.587)
 
    Sample radial (meridional, y-direction) rays at different field angles.
 
@@ -165,7 +165,7 @@ Grid Sampling
 Point Source Sampling
 ~~~~~~~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.sample_from_points(points=[[0.0, 0.0, -10000.0]], num_rays=2048, wvln=0.589, scale_pupil=1.0)
+.. py:method:: GeoLens.sample_from_points(points=[[0.0, 0.0, -10000.0]], num_rays=16384, wvln=0.587, scale_pupil=1.0)
 
    Sample rays from point sources at absolute 3D coordinates.
 
@@ -183,7 +183,7 @@ Point Source Sampling
 Parallel & Angular Sampling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.sample_parallel(fov_x=[0.0], fov_y=[0.0], num_rays=512, wvln=0.589, entrance_pupil=True, depth=-1.0, scale_pupil=1.0)
+.. py:method:: GeoLens.sample_parallel(fov_x=[0.0], fov_y=[0.0], num_rays=1024, wvln=0.587, entrance_pupil=True, depth=-1.0, scale_pupil=1.0)
 
    Sample parallel rays at given field angles.
 
@@ -204,7 +204,7 @@ Parallel & Angular Sampling
    :return: Ray object with shape [len(fov_y), len(fov_x), num_rays, 3]
    :rtype: Ray
 
-.. py:method:: GeoLens.sample_point_source(fov_x=[0.0], fov_y=[0.0], depth=-10000.0, num_rays=2048, wvln=0.589, entrance_pupil=True, scale_pupil=1.0)
+.. py:method:: GeoLens.sample_point_source(fov_x=[0.0], fov_y=[0.0], depth=-20000.0, num_rays=16384, wvln=0.587, entrance_pupil=True, scale_pupil=1.0)
 
    Sample point source rays at given field angles and depth.
 
@@ -228,7 +228,7 @@ Parallel & Angular Sampling
 Sensor Sampling
 ~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.sample_sensor(spp=64, wvln=0.589, sub_pixel=False)
+.. py:method:: GeoLens.sample_sensor(spp=64, wvln=0.587, sub_pixel=False)
 
    Sample backward rays from sensor pixels for ray-tracing rendering.
 
@@ -257,7 +257,7 @@ Helper Methods
    :return: Sampled points with shape [*shape, 3]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=2048, depth=-10000.0, wvln=0.589, scale_pupil=1.0, sample_more_off_axis=True)
+.. py:method:: GeoLens.sample_ring_arm_rays(num_ring=8, num_arm=8, spp=2048, depth=-20000.0, wvln=0.587, scale_pupil=1.0, sample_more_off_axis=True)
 
    Sample rays using ring-arm pattern for optimization (from ``GeoLensOptim``).
 
@@ -346,7 +346,7 @@ Image Rendering
 Main Rendering
 ~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.render(img_obj, depth=-10000.0, method="ray_tracing", **kwargs)
+.. py:method:: GeoLens.render(img_obj, depth=-20000.0, method="ray_tracing", **kwargs)
 
    Differentiable image simulation through the lens.
 
@@ -366,7 +366,7 @@ Main Rendering
 Ray Tracing Rendering
 ~~~~~~~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.render_raytracing(img, depth=-10000.0, spp=64, vignetting=False)
+.. py:method:: GeoLens.render_raytracing(img, depth=-20000.0, spp=64, vignetting=False)
 
    Render RGB image using ray tracing.
 
@@ -381,7 +381,7 @@ Ray Tracing Rendering
    :return: Rendered image [N, 3, H, W]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.render_raytracing_mono(img, wvln, depth=-10000.0, spp=64, vignetting=False)
+.. py:method:: GeoLens.render_raytracing_mono(img, wvln, depth=-20000.0, spp=64, vignetting=False)
 
    Render monochrome image using ray tracing.
 
@@ -418,7 +418,7 @@ Ray Tracing Rendering
 Post-Processing
 ~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.unwarp(img, depth=-10000.0, num_grid=128, crop=True, flip=True)
+.. py:method:: GeoLens.unwarp(img, depth=-20000.0, num_grid=128, crop=True, flip=True)
 
    Unwarp rendered images to correct distortion.
 
@@ -435,7 +435,7 @@ Post-Processing
    :return: Unwarped image [N, C, H, W]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.analysis_rendering(img_org, save_name=None, depth=-10000.0, spp=64, unwarp=False, noise=0.0, method="ray_tracing", show=False)
+.. py:method:: GeoLens.analysis_rendering(img_org, save_name=None, depth=-20000.0, spp=64, unwarp=False, noise=0.0, method="ray_tracing", show=False)
 
    Render image and compute PSNR/SSIM for analysis.
 
@@ -461,7 +461,7 @@ Post-Processing
 PSF Calculation
 ---------------
 
-.. py:method:: GeoLens.psf(points, ks=64, wvln=0.589, spp=None, recenter=True, model="geometric")
+.. py:method:: GeoLens.psf(points, ks=64, wvln=0.587, spp=None, recenter=True, model="geometric")
 
    Calculate Point Spread Function (PSF) using different models.
 
@@ -480,7 +480,7 @@ PSF Calculation
    :return: PSF tensor [ks, ks] or [N, ks, ks]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_geometric(points, ks=64, wvln=0.589, spp=2048, recenter=True)
+.. py:method:: GeoLens.psf_geometric(points, ks=64, wvln=0.587, spp=16384, recenter=True)
 
    Calculate incoherent geometric PSF using ray tracing.
 
@@ -497,23 +497,23 @@ PSF Calculation
    :return: PSF tensor
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.587, spp=16777216, recenter=True)
 
    Calculate coherent PSF by propagating pupil field to sensor (Ray-Wave model). Alias for ``psf_pupil_prop``.
 
-.. py:method:: GeoLens.psf_pupil_prop(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_pupil_prop(points, ks=64, wvln=0.587, spp=16777216, recenter=True)
 
    Calculate coherent PSF by propagating pupil field to sensor using ASM.
 
    :param points: Point source positions
    :param ks: Kernel size
    :param wvln: Wavelength
-   :param spp: Sample rays (typically 1M)
+   :param spp: Sample rays (typically ~1.7e7)
    :param recenter: Recenter PSF
    :return: PSF patch
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_huygens(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_huygens(points, ks=64, wvln=0.587, spp=16777216, recenter=True)
 
    Calculate Huygens PSF by treating every exit-pupil ray as a secondary spherical wave source.
 
@@ -525,7 +525,7 @@ PSF Calculation
    :return: Huygens PSF patch
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_map(depth=-10000.0, grid=(7, 7), ks=64, spp=2048, wvln=0.589, recenter=True)
+.. py:method:: GeoLens.psf_map(depth=-20000.0, grid=(7, 7), ks=64, spp=16384, wvln=0.587, recenter=True)
 
    Calculate PSF map at different field positions.
 
@@ -555,7 +555,7 @@ PSF Calculation
    :return: PSF centers [..., 2]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.psf_coherent(points, ks=64, wvln=0.587, spp=16777216, recenter=True)
 
    Calculate coherent PSF using ray-wave model. Alias for ``psf_pupil_prop``.
 
@@ -565,14 +565,14 @@ PSF Calculation
    :type ks: int
    :param wvln: Wavelength
    :type wvln: float
-   :param spp: Sample rays (>= 1M recommended)
+   :param spp: Sample rays (>= 1.7e7 recommended)
    :type spp: int
    :param recenter: Recenter PSF using chief ray
    :type recenter: bool
    :return: PSF patch [ks, ks]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.pupil_field(points, wvln=0.589, spp=1000000, recenter=True)
+.. py:method:: GeoLens.pupil_field(points, wvln=0.587, spp=16777216, recenter=True)
 
    Calculate complex wavefront at exit pupil using coherent ray tracing. Only single-point input is supported.
 
@@ -580,7 +580,7 @@ PSF Calculation
    :type points: torch.Tensor or list
    :param wvln: Wavelength in micrometers
    :type wvln: float
-   :param spp: Samples (>= 1M required)
+   :param spp: Samples (>= 1.7e7 required)
    :type spp: int
    :param recenter: Recenter PSF using chief ray
    :type recenter: bool
@@ -593,7 +593,7 @@ Optical Analysis (GeoLensEval)
 Spot Diagrams
 ~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.draw_spot_radial(save_name='./lens_spot_radial.png', num_fov=5, depth=float("inf"), num_rays=16384, wvln_list=[0.656, 0.588, 0.486], show=False)
+.. py:method:: GeoLens.draw_spot_radial(save_name='./lens_spot_radial.png', num_fov=5, depth=float("inf"), num_rays=16384, wvln_list=[0.656, 0.587, 0.486], show=False)
 
    Draw spot diagrams along meridional direction.
 
@@ -610,7 +610,7 @@ Spot Diagrams
    :param show: Display plot
    :type show: bool
 
-.. py:method:: GeoLens.draw_spot_map(save_name='./lens_spot_map.png', num_grid=5, depth=-20000.0, num_rays=16384, wvln_list=[0.656, 0.588, 0.486], show=False)
+.. py:method:: GeoLens.draw_spot_map(save_name='./lens_spot_map.png', num_grid=5, depth=-20000.0, num_rays=16384, wvln_list=[0.656, 0.587, 0.486], show=False)
 
    Draw spot diagram grid.
 
@@ -641,7 +641,7 @@ Spot Diagrams
 RMS Error Maps
 ~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.rms_map_rgb(num_grid=32, depth=-10000.0)
+.. py:method:: GeoLens.rms_map_rgb(num_grid=32, depth=-20000.0)
 
    Calculate RGB RMS spot error map.
 
@@ -652,7 +652,7 @@ RMS Error Maps
    :return: RMS error map for each RGB channel
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.rms_map(num_grid=32, depth=-10000.0, wvln=0.589)
+.. py:method:: GeoLens.rms_map(num_grid=32, depth=-20000.0, wvln=0.587)
 
    Calculate RMS spot error map for single wavelength.
 
@@ -668,7 +668,7 @@ RMS Error Maps
 Distortion
 ~~~~~~~~~~
 
-.. py:method:: GeoLens.calc_distortion_2D(rfov, wvln=0.58756180, plane='meridional', ray_aiming=True)
+.. py:method:: GeoLens.calc_distortion_2D(rfov, wvln=0.587, plane='meridional', ray_aiming=True)
 
    Calculate distortion at a specific field angle.
 
@@ -683,7 +683,7 @@ Distortion
    :return: Distortion at the specific field angle
    :rtype: float or numpy.ndarray
 
-.. py:method:: GeoLens.draw_distortion_radial(rfov, save_name=None, num_points=21, wvln=0.58756180, plane='meridional', ray_aiming=True, show=False)
+.. py:method:: GeoLens.draw_distortion_radial(rfov, save_name=None, num_points=21, wvln=0.587, plane='meridional', ray_aiming=True, show=False)
 
    Draw distortion curve vs field angle (Zemax-style).
 
@@ -702,7 +702,7 @@ Distortion
    :param show: Display plot
    :type show: bool
 
-.. py:method:: GeoLens.distortion_map(num_grid=16, depth=-10000.0)
+.. py:method:: GeoLens.distortion_map(num_grid=16, depth=-20000.0)
 
    Compute distortion map for grid_sample.
 
@@ -722,7 +722,7 @@ Distortion
    :return: Normalized distortion center positions [..., 2]. x, y in [-1, 1]
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.draw_distortion(filename=None, num_grid=16, depth=-10000.0)
+.. py:method:: GeoLens.draw_distortion(filename=None, num_grid=16, depth=-20000.0)
 
    Visualize distortion map.
 
@@ -736,7 +736,7 @@ Distortion
 MTF Analysis
 ~~~~~~~~~~~~
 
-.. py:method:: GeoLens.mtf(fov, wvln=0.589)
+.. py:method:: GeoLens.mtf(fov, wvln=0.587)
 
    Calculate Modulation Transfer Function at field of view.
 
@@ -777,7 +777,7 @@ MTF Analysis
 Vignetting
 ~~~~~~~~~~
 
-.. py:method:: GeoLens.vignetting(depth=-10000.0, num_grid=64)
+.. py:method:: GeoLens.vignetting(depth=-20000.0, num_grid=64)
 
    Compute vignetting map.
 
@@ -788,7 +788,7 @@ Vignetting
    :return: Vignetting map
    :rtype: torch.Tensor
 
-.. py:method:: GeoLens.draw_vignetting(filename=None, depth=-10000.0, resolution=512)
+.. py:method:: GeoLens.draw_vignetting(filename=None, depth=-20000.0, resolution=512)
 
    Visualize vignetting effect.
 
@@ -911,7 +911,7 @@ Field of View
 Focal & Sensor Planes
 ~~~~~~~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.calc_focal_plane(wvln=0.589)
+.. py:method:: GeoLens.calc_focal_plane(wvln=0.587)
 
    Calculate focus distance in object space by backward tracing.
 
@@ -1308,7 +1308,7 @@ Visualization (GeoLensVis)
 2D Ray Sampling
 ~~~~~~~~~~~~~~~
 
-.. py:method:: GeoLens.sample_parallel_2D(fov=0.0, num_rays=7, wvln=0.589, plane="meridional", entrance_pupil=True, depth=0.0)
+.. py:method:: GeoLens.sample_parallel_2D(fov=0.0, num_rays=7, wvln=0.587, plane="meridional", entrance_pupil=True, depth=0.0)
 
    Sample 2D parallel rays for layout visualization.
 
@@ -1327,7 +1327,7 @@ Visualization (GeoLensVis)
    :return: 2D ray object
    :rtype: Ray
 
-.. py:method:: GeoLens.sample_point_source_2D(fov=0.0, num_rays=7, wvln=0.589, plane="meridional", depth=-10000.0)
+.. py:method:: GeoLens.sample_point_source_2D(fov=0.0, num_rays=7, wvln=0.587, plane="meridional", depth=-20000.0)
 
    Sample 2D point source rays.
 
@@ -1444,4 +1444,3 @@ References
 
 1. Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
 2. Jun Dai, Liqun Chen, Xinge Yang, Yuyao Hu, Jinwei Gu, Tianfan Xue, "Tolerance-Aware Deep Optics," arXiv:2502.04719, 2025.
-

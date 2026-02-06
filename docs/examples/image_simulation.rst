@@ -398,11 +398,12 @@ Light Field Rendering
             offset_x = (i - viewpoints//2) * 0.5
             offset_y = (j - viewpoints//2) * 0.5
             
-            # Render with offset
-            img_view = lens.render_with_offset(
+            # Render with offset (normalized patch center)
+            img_view = lens.render(
                 img_tensor,
-                depth=1000,
-                offset=[offset_x, offset_y]
+                depth=-1000,
+                method="psf_patch",
+                patch_center=(offset_x, offset_y)
             )
             light_field.append(img_view)
     
@@ -420,13 +421,15 @@ For large images:
 
 .. code-block:: python
 
+    from deeplens.optics.psf import conv_psf
+
     def render_tiled(img, depth, lens, tile_size=256, overlap=32):
         """Memory-efficient tile-based rendering."""
         B, C, H, W = img.shape
         output = torch.zeros_like(img)
         
         # Calculate PSF once
-        psf = lens.psf(depth=depth, spp=1024)
+        psf = lens.psf_rgb(points=[0.0, 0.0, depth], spp=1024)
         
         for i in range(0, H, tile_size - overlap):
             for j in range(0, W, tile_size - overlap):
@@ -436,7 +439,7 @@ For large images:
                 tile = img[:, :, i1:i2, j1:j2]
                 
                 # Render tile
-                tile_rendered = lens.convolve_with_psf(tile, psf)
+                tile_rendered = conv_psf(tile, psf)
                 
                 # Blend into output
                 output[:, :, i1:i2, j1:j2] = tile_rendered
@@ -526,4 +529,3 @@ See Also
 * :doc:`../user_guide/lens_systems` - Lens system details
 * :doc:`../user_guide/sensors` - Sensor simulation
 * Example script: ``7_image_simulation.py``
-

@@ -6,14 +6,14 @@ This section documents the lens classes and their methods.
 Base Lens Class
 ---------------
 
-.. py:class:: Lens(device=None, dtype=torch.float32)
+.. py:class:: Lens(dtype=torch.float32, device=None)
 
    Base class for all lens systems in DeepLens.
 
    :param device: Device to use ('cuda' or 'cpu')
    :param dtype: Data type for computations (default: torch.float32)
 
-   .. py:method:: psf(points, wvln=0.589, ks=64, **kwargs)
+   .. py:method:: psf(points, wvln=0.587, ks=64, **kwargs)
 
       Compute monochrome point PSF. This function should be differentiable.
 
@@ -50,7 +50,7 @@ Base Lens Class
       :type depth_map: torch.Tensor
       :param method: Rendering method - 'psf_map', 'psf_patch', or 'psf_pixel'
       :type method: str
-      :param kwargs: Additional arguments (interp_mode, psf_grid, psf_ks, etc.)
+      :param kwargs: Additional arguments (interp_mode, depth_min, depth_max, num_depth, psf_grid, psf_ks, patch_center)
       :type kwargs: dict
       :return: Rendered image tensor [B, C, H, W]
       :rtype: torch.Tensor
@@ -64,18 +64,19 @@ Base Lens Class
       :param sensor_res: Sensor resolution (W, H) in pixels
       :type sensor_res: tuple
 
+   .. py:method:: set_sensor_res(sensor_res)
+
+      Set sensor resolution while keeping sensor radius unchanged.
+
+      :param sensor_res: Sensor resolution (W, H) in pixels
+      :type sensor_res: tuple
+
    .. py:method:: to(device)
 
       Move lens to specified device.
 
       :param device: 'cuda' or 'cpu'
       :return: self
-
-   .. py:method:: parameters()
-
-      Get optimizable parameters.
-
-      :return: Iterator of torch.nn.Parameter
 
 GeoLens
 -------
@@ -139,7 +140,7 @@ GeoLens
       :param ray: Input Ray object
       :return: Output Ray object
 
-   .. py:method:: sample_parallel_2D(fov=0.0, num_rays=7, wvln=0.589, plane='meridional', entrance_pupil=True, depth=0.0)
+   .. py:method:: sample_parallel_2D(fov=0.0, num_rays=7, wvln=0.587, plane='meridional', entrance_pupil=True, depth=0.0)
 
       Sample 2D parallel rays for layout visualization.
 
@@ -158,7 +159,7 @@ GeoLens
       :return: Ray object with shape [num_rays, 3]
       :rtype: Ray
 
-   .. py:method:: sample_point_source(fov_x=[0.0], fov_y=[0.0], depth=-20000.0, num_rays=16384, wvln=0.589, entrance_pupil=True, scale_pupil=1.0)
+   .. py:method:: sample_point_source(fov_x=[0.0], fov_y=[0.0], depth=-20000.0, num_rays=16384, wvln=0.587, entrance_pupil=True, scale_pupil=1.0)
 
       Sample point source rays from object space with given field angles.
 
@@ -179,7 +180,7 @@ GeoLens
       :return: Ray object with shape [len(fov_y), len(fov_x), num_rays, 3]
       :rtype: Ray
 
-   .. py:method:: sample_from_points(points=[[0.0, 0.0, -10000.0]], num_rays=16384, wvln=0.589, scale_pupil=1.0)
+   .. py:method:: sample_from_points(points=[[0.0, 0.0, -10000.0]], num_rays=16384, wvln=0.587, scale_pupil=1.0)
 
       Sample rays from point sources at absolute 3D coordinates.
 
@@ -194,19 +195,19 @@ GeoLens
       :return: Sampled rays with shape [*points.shape[:-1], num_rays, 3]
       :rtype: Ray
 
-   .. py:method:: set_optimizer_params(params_dict)
+   .. py:method:: get_optimizer_params(lrs=[1e-4, 1e-4, 1e-2, 1e-4], decay=0.01, optim_mat=False, optim_surf_range=None)
 
-      Configure which parameters to optimize.
+      Get optimizer parameter groups for lens optimization.
 
-      :param params_dict: Dictionary with keys 'radius', 'thickness', 'conic', 'ai', 'material'
+      :param lrs: Learning rates for [thickness, curvature, conic, aspheric coefficients]
+      :param decay: Decay factor for higher-order aspheric coefficients
+      :param optim_mat: Whether to optimize material properties
+      :param optim_surf_range: Optional surface indices to optimize
 
       Example::
 
-         lens.set_optimizer_params({
-             'radius': True,
-             'thickness': True,
-             'ai': True
-         })
+         params = lens.get_optimizer_params(lrs=[1e-4, 1e-4, 1e-2, 1e-4])
+         optimizer = torch.optim.Adam(params)
 
    .. py:method:: calc_foclen()
 
@@ -522,7 +523,7 @@ Basic Usage
     )
     
     # Calculate PSF
-    psf = lens.psf(depth=1000, spp=2048)
+    psf = lens.psf(points=[0.0, 0.0, -1000.0], spp=2048)
     
     # Render image
     img_rendered = lens.render(img, depth=1000)
@@ -536,15 +537,15 @@ Lens Optimization
     from deeplens.optics import SpotLoss
     
     # Setup optimization
-    lens.set_optimizer_params({'radius': True, 'thickness': True})
-    optimizer = optim.Adam(lens.parameters(), lr=0.01)
+    params = lens.get_optimizer_params(lrs=[1e-4, 1e-4, 1e-2, 1e-4])
+    optimizer = optim.Adam(params)
     loss_fn = SpotLoss()
     
     # Optimization loop
     for i in range(1000):
         optimizer.zero_grad()
-        ray = lens.sample_point_source(depth=1e4, M=256)
-        ray_out = lens.trace(ray)
+        ray = lens.sample_point_source(depth=-1e4, num_rays=256)
+        ray_out, _ = lens.trace(ray)
         loss = loss_fn(ray_out) + lens.loss_constraint()
         loss.backward()
         optimizer.step()
@@ -554,15 +555,15 @@ Fast PSF Prediction
 
 .. code-block:: python
 
+    import torch
     from deeplens import PSFNetLens
     
     # Load pre-trained model
-    lens = PSFNetLens(
-        ckpt_path='./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth'
-    )
+    lens = PSFNetLens(lens_path='./datasets/lenses/camera/ef50mm_f1.8.json')
+    lens.load_net('./ckpts/psfnet/PSFNet_ef50mm_f1.8_ps10um.pth')
     
     # Fast PSF calculation
-    psf = lens.psf(depth=1000, field=[0, 0.5])
+    psf = lens.psf_rgb(points=torch.tensor([[0.0, 0.5, -1000.0]]), ks=64).squeeze(0)
     
     # 100x faster than ray tracing!
 
@@ -590,4 +591,3 @@ See Also
 * :doc:`../user_guide/lens_systems` - Detailed lens system guide
 * :doc:`../tutorials` - Step-by-step tutorials
 * :doc:`../examples/automated_lens_design` - Optimization examples
-
