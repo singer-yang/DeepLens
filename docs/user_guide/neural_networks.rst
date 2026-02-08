@@ -398,7 +398,10 @@ Create custom datasets:
             field = torch.rand(2) * 2 - 1  # [-1, 1]
             
             # Generate PSF
-            psf = self.lens.psf(depth=depth.item(), field=field.tolist())
+            points = torch.tensor(
+                [[field[0].item(), field[1].item(), -depth.item()]]
+            )
+            psf = self.lens.psf(points=points)
             
             return depth, field, psf
 
@@ -410,6 +413,7 @@ Joint Lens-Network Optimization
 
 .. code-block:: python
 
+    import torch
     from deeplens import GeoLens
     from deeplens.network import UNet
     
@@ -418,19 +422,18 @@ Joint Lens-Network Optimization
     network = UNet(in_channels=3, out_channels=3).cuda()
     
     # Enable lens optimization
-    lens.set_optimizer_params({'radius': True, 'thickness': True})
+    lens_params = lens.get_optimizer_params(lrs=[1e-4, 1e-4, 1e-2, 1e-4])
     
     # Combined optimizer
-    optimizer = torch.optim.Adam([
-        {'params': lens.parameters(), 'lr': 1e-3},
-        {'params': network.parameters(), 'lr': 1e-4}
-    ])
+    optimizer = torch.optim.Adam(
+        lens_params + [{'params': network.parameters(), 'lr': 1e-4}]
+    )
     
     # Training loop
     for epoch in range(100):
         for img_clean in dataloader:
             # Forward through lens
-            img_degraded = lens.render(img_clean, depth=1000)
+            img_degraded = lens.render(img_clean, depth=-1000)
             
             # Restore with network
             img_restored = network(img_degraded)
@@ -647,4 +650,3 @@ Next Steps
 * Learn about :doc:`lens_systems` for optical system design
 * Check :doc:`../tutorials` for training workflows
 * Explore :doc:`../api/network` for detailed API reference
-

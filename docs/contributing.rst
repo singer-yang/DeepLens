@@ -162,7 +162,7 @@ Write tests for new features:
    def test_psf_calculation():
        """Test PSF calculation."""
        lens = GeoLens(filename='./datasets/lenses/camera/ef50mm_f1.8.json')
-       psf = lens.psf(depth=1000, spp=256)
+       psf = lens.psf(points=[0.0, 0.0, -1000.0], spp=256)
        
        assert psf.shape[0] == 1  # Single channel
        assert psf.sum() > 0  # Non-zero PSF
@@ -436,4 +436,3 @@ See Also
 * :doc:`code_of_conduct` - Community guidelines
 * `GitHub Repository <https://github.com/singer-yang/DeepLens>`_
 * `Join Slack <https://join.slack.com/t/deeplens/shared_invite/zt-2wz3x2n3b-plRqN26eDhO2IY4r_gmjOw>`_
-

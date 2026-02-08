@@ -88,6 +88,9 @@ def conv_psf_map(img, psf_map):
     pad_w_right = ks // 2
     img_pad = F.pad(img, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
 
+    # Pre-flip entire PSF map once (instead of flipping each PSF inside the loop)
+    psf_map_flipped = torch.flip(psf_map, dims=(-2, -1))
+
     # Render image patch by patch
     img_render = torch.zeros_like(img)
     for i in range(grid_h):
@@ -99,7 +102,7 @@ def conv_psf_map(img, psf_map):
             w_high = ((j + 1) * W) // grid_w
 
             # PSF, [C, 1, ks, ks]
-            psf = torch.flip(psf_map[i, j], dims=(-2, -1)).unsqueeze(1)
+            psf = psf_map_flipped[i, j].unsqueeze(1)
 
             # Consider overlap to avoid boundary artifacts
             img_pad_patch = img_pad[
@@ -121,39 +124,114 @@ def conv_psf_map_depth_interp(img, depth, psf_map, psf_depths, interp_mode="dept
 
     Args:
         img: (B, 3, H, W), [0, 1]
-        depth: (B, 1, H, W), [0, 1]
+        depth: (B, 1, H, W), (-inf, 0)
         psf_map: (grid_h, grid_w, num_depth, 3, ks, ks)
-        psf_depths: (num_depth). Used to interpolate psf_map.
+        psf_depths: (num_depth). (-inf, 0). Used to interpolate psf_map.
         interp_mode: "depth" or "disparity". If "disparity", weights are calculated based on disparity (1/depth).
     
     Returns:
         img_render: (B, 3, H, W), [0, 1]
     """
+    assert interp_mode in ["depth", "disparity"], f"interp_mode must be 'depth' or 'disparity', got {interp_mode}"
+    assert depth.min() < 0 and depth.max() < 0, f"depth must be negative, got {depth.min()} and {depth.max()}"
+    assert psf_depths.min() < 0 and psf_depths.max() < 0, f"psf_depths must be negative, got {psf_depths.min()} and {psf_depths.max()}"
+
     B, C, H, W = img.shape
     grid_h, grid_w, num_depths, C_psf, ks, _ = psf_map.shape
     assert C_psf == C, f"PSF map channels ({C_psf}) must match image channels ({C})."
-    
-    # Render image patch by patch, reusing conv_psf_depth_interp for each patch
+
+    # Pad the full image once to avoid boundary artifacts at patch seams.
+    # Without this, each patch would be padded independently (reflecting within
+    # its own boundary), producing visible seams at grid boundaries.
+    pad_h_left  = (ks - 1) // 2
+    pad_h_right = ks // 2
+    pad_w_left  = (ks - 1) // 2
+    pad_w_right = ks // 2
+    img_pad = F.pad(img, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
+
+    # Pre-flip entire PSF map once: [grid_h, grid_w, num_depths, C, ks, ks]
+    psf_map_flipped = torch.flip(psf_map, dims=(-2, -1))
+
+    # Pre-compute depth interpolation weights (shared across all patches)
+    depth_flat = depth.flatten(1)  # [B, H*W]
+    depth_flat = depth_flat.clamp(psf_depths[0] + DELTA, psf_depths[-1] - DELTA)
+    indices = torch.searchsorted(psf_depths, depth_flat, right=True)  # [B, H*W]
+    indices = indices.clamp(1, num_depths - 1)
+    idx0 = indices - 1
+    idx1 = indices
+
+    d0 = psf_depths[idx0]  # [B, H*W]
+    d1 = psf_depths[idx1]
+
+    if interp_mode == "depth":
+        denom = d1 - d0
+        denom[denom == 0] = 1e-6
+        w1 = (depth_flat - d0) / denom
+    else:
+        disp_flat = 1.0 / depth_flat
+        disp0 = 1.0 / d0
+        disp1 = 1.0 / d1
+        denom = disp1 - disp0
+        denom[denom == 0] = 1e-6
+        w1 = (disp_flat - disp0) / denom
+
+    w0 = 1 - w1
+
+    # Reshape weight indices to spatial layout for patch extraction
+    idx0_spatial = idx0.view(B, H, W)
+    idx1_spatial = idx1.view(B, H, W)
+    w0_spatial = w0.view(B, H, W)
+    w1_spatial = w1.view(B, H, W)
+
+    # Render image patch by patch
     img_render = torch.zeros_like(img)
     for i in range(grid_h):
         h_low  = (i * H) // grid_h
         h_high = ((i + 1) * H) // grid_h
+        patch_h = h_high - h_low
 
-        for j in range(grid_w):            
+        for j in range(grid_w):
             w_low  = (j * W) // grid_w
             w_high = ((j + 1) * W) // grid_w
+            patch_w = w_high - w_low
 
-            # Extract image and depth patches
-            img_patch = img[:, :, h_low:h_high, w_low:w_high]
-            depth_patch = depth[:, :, h_low:h_high, w_low:w_high]
-            
-            # Extract PSF kernels for this patch at all depths
-            psf_kernels = psf_map[i, j, :, :, :, :]  # [num_depths, C, ks, ks]
-            
-            # Use conv_psf_depth_interp for this patch
-            render_patch = conv_psf_depth_interp(img_patch, depth_patch, psf_kernels, psf_depths, interp_mode)
+            # Extract overlapping patch from pre-padded image (no per-patch padding needed)
+            img_pad_patch = img_pad[
+                :, :,
+                h_low : h_high + pad_h_left + pad_h_right,
+                w_low : w_high + pad_w_left + pad_w_right,
+            ]
+
+            # Expand patch for all depths: [B, C, patch_h+pad, patch_w+pad] -> [B, num_depths*C, ...]
+            img_patch_expanded = img_pad_patch.unsqueeze(1).expand(B, num_depths, C, -1, -1).reshape(
+                B, num_depths * C, img_pad_patch.shape[2], img_pad_patch.shape[3]
+            )
+
+            # PSF kernels for this grid cell: [num_depths*C, 1, ks, ks]
+            psf_stacked = psf_map_flipped[i, j].reshape(num_depths * C, 1, ks, ks)
+
+            # Grouped convolution -> [B, num_depths*C, patch_h, patch_w]
+            patch_blur = F.conv2d(img_patch_expanded, psf_stacked, groups=num_depths * C)
+
+            # Reshape to [num_depths, B, C, patch_h, patch_w]
+            patch_blur = patch_blur.reshape(B, num_depths, C, patch_h, patch_w).permute(1, 0, 2, 3, 4)
+
+            # Extract pre-computed weights for this patch
+            patch_idx0 = idx0_spatial[:, h_low:h_high, w_low:w_high].reshape(B, patch_h * patch_w)
+            patch_idx1 = idx1_spatial[:, h_low:h_high, w_low:w_high].reshape(B, patch_h * patch_w)
+            patch_w0 = w0_spatial[:, h_low:h_high, w_low:w_high].reshape(B, patch_h * patch_w)
+            patch_w1 = w1_spatial[:, h_low:h_high, w_low:w_high].reshape(B, patch_h * patch_w)
+
+            # Build per-depth weight tensor for this patch
+            weights = torch.zeros(num_depths, B, patch_h * patch_w, device=img.device, dtype=img.dtype)
+            weights.scatter_add_(0, patch_idx0.unsqueeze(0).long(), patch_w0.unsqueeze(0))
+            weights.scatter_add_(0, patch_idx1.unsqueeze(0).long(), patch_w1.unsqueeze(0))
+            weights = weights.view(num_depths, B, 1, patch_h, patch_w)
+
+            # Apply depth-interpolation weights
+            render_patch = torch.sum(patch_blur * weights, dim=0)
             img_render[:, :, h_low:h_high, w_low:w_high] = render_patch
-    
+
     return img_render
 
 
@@ -164,15 +242,17 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="dept
 
     Args:
         img: (B, 3, H, W), [0, 1]
-        depth: (B, 1, H, W), [0, 1]
+        depth: (B, 1, H, W), (-inf, 0)
         psf_kernels: (num_depth, 3, ks, ks)
-        psf_depths: (num_depth). Used to interpolate psf_kernels.
+        psf_depths: (num_depth). (-inf, 0). Used to interpolate psf_kernels.
         interp_mode: "depth" or "disparity". If "disparity", weights are calculated based on disparity (1/depth).
 
     Returns:
         img_blur: (B, 3, H, W), [0, 1]
     """
     assert interp_mode in ["depth", "disparity"], f"interp_mode must be 'depth' or 'disparity', got {interp_mode}"
+    assert depth.min() < 0 and depth.max() < 0, f"depth must be negative, got {depth.min()} and {depth.max()}"
+    assert psf_depths.min() < 0 and psf_depths.max() < 0, f"psf_depths must be negative, got {psf_depths.min()} and {psf_depths.max()}"
     
     # assert img.device != torch.device("cpu"), "Image must be on GPU"
     num_depths, _, ks, _ = psf_kernels.shape
@@ -182,19 +262,20 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="dept
     # =================================
     B, C, H, W = img.shape
     
-    # Expand img: [B, C, H, W] -> [B, num_depths, C, H, W] -> [B, num_depths*C, H, W]
-    img_expanded = img.unsqueeze(1).expand(B, num_depths, C, H, W).reshape(B, num_depths * C, H, W)
-    
     # Prepare PSF kernel: [num_depths, C, ks, ks] -> [num_depths*C, 1, ks, ks]
     # Flip the PSF because F.conv2d uses cross-correlation
     psf_stacked = torch.flip(psf_kernels, [-2, -1]).reshape(num_depths * C, 1, ks, ks)
-    
-    # Padding (following conv_psf logic for even/odd kernel sizes)
+
+    # Pad before expand: pad [B, C, H, W] first (C channels), then expand to num_depths*C
+    # This reduces padding work by a factor of num_depths
     pad_h_left  = (ks - 1) // 2
     pad_h_right = ks // 2
     pad_w_left  = (ks - 1) // 2
     pad_w_right = ks // 2
-    img_padded = F.pad(img_expanded, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
+    img_padded_small = F.pad(img, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="reflect")
+
+    # Expand padded img: [B, C, H+pad, W+pad] -> [B, num_depths*C, H+pad, W+pad]
+    img_padded = img_padded_small.unsqueeze(1).expand(B, num_depths, C, -1, -1).reshape(B, num_depths * C, img_padded_small.shape[2], img_padded_small.shape[3])
     
     # Grouped convolution: each of the num_depths*C channels is convolved with its own kernel
     imgs_blur = F.conv2d(img_padded, psf_stacked, groups=num_depths * C)  # [B, num_depths*C, H, W]
@@ -207,7 +288,7 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="dept
     # =================================
     B, _, H, W = depth.shape
     depth_flat = depth.flatten(1)  # shape [B, H*W]
-    depth_flat = depth_flat.clamp(min(psf_depths) + DELTA, max(psf_depths) - DELTA)
+    depth_flat = depth_flat.clamp(psf_depths[0] + DELTA, psf_depths[-1] - DELTA)
     indices = torch.searchsorted(psf_depths, depth_flat, right=True)  # shape [B, H*W]
     indices = indices.clamp(1, num_depths - 1)
     idx0 = indices - 1
@@ -432,7 +513,11 @@ def interp_psf_map(psf_map, grid_old, grid_new):
         )  # .reshape(grid_old, grid_old, C, ks, ks)
     elif len(psf_map.shape) == 5:
         # [grid_old, grid_old, C, ks, ks]
-        grid_old, grid_old, C, ks, ks = psf_map.shape
+        grid_h, grid_w, C, ks_h, ks_w = psf_map.shape
+        assert grid_h == grid_w, f"PSF map grid must be square, got {grid_h}x{grid_w}"
+        assert ks_h == ks_w, f"PSF kernel must be square, got {ks_h}x{ks_w}"
+        grid_old = grid_h
+        ks = ks_h
         psf_map_interp = psf_map
     else:
         raise ValueError(
