@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath('..'))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'DeepLens'
-copyright = '2025, Xinge Yang'
+copyright = '2026, Xinge Yang'
 author = 'Xinge Yang'
 release = 'v1.0.0'
 version = '1.0.0'

@@ -1,4 +1,4 @@
-# Copyright 2025 Xinge Yang and DeepLens contributors.
+# Copyright 2026 Xinge Yang and DeepLens contributors.
 # This file is part of DeepLens (https://github.com/singer-yang/DeepLens).
 #
 # Licensed under the Apache License, Version 2.0.
