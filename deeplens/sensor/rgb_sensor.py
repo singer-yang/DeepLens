@@ -1,4 +1,4 @@
-"""RGB sensor with ISP. It is used to convert between RAW bayer image and RGB image."""
+"""RGB sensor with noise model and ISP."""
 
 import json
 import math

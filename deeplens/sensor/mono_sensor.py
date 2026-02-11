@@ -1,4 +1,7 @@
-"""Monochrome sensor with noise model and bit depth."""
+"""Monochrome sensor with noise model and ISP.
+
+Example: infrared sensor
+"""
 
 import torch
 import torch.nn as nn

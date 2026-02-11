@@ -8,8 +8,6 @@
 
 import torch
 
-from deeplens.sensor import RGBSensor
-
 
 # ===========================================
 # Renderer
@@ -62,17 +60,35 @@ class Camera(Renderer):
         lens_file,
         sensor_file,
         lens_type="geolens",
+        sensor_type="rgb",
         device=None,
     ):
         super().__init__(device=device)
 
         # Sensor
-        self.sensor = RGBSensor.from_config(sensor_file)
+        if sensor_type == "simple":
+            from deeplens.sensor import Sensor
+
+            self.sensor = Sensor()
+        elif sensor_type == "rgb":
+            from deeplens.sensor import RGBSensor
+
+            self.sensor = RGBSensor.from_config(sensor_file)
+        elif sensor_type == "mono":
+            from deeplens.sensor import MonoSensor
+
+            self.sensor = MonoSensor.from_config(sensor_file)
+        elif sensor_type == "event":
+            from deeplens.sensor import EventSensor
+
+            self.sensor = EventSensor()
+        else:
+            raise NotImplementedError(f"Unsupported sensor type: {sensor_type}")
         self.sensor.to(device)
         sensor_res = self.sensor.res
         sensor_size = self.sensor.size
 
-        # Lens (here we can use either GeoLens or other lens models)
+        # Lens
         if lens_type == "geolens":
             from deeplens.geolens import GeoLens
 
@@ -81,6 +97,14 @@ class Camera(Renderer):
             from deeplens.hybridlens import HybridLens
 
             self.lens = HybridLens(lens_file, device=device)
+        elif lens_type == "paraxiallens":
+            from deeplens.paraxiallens import ParaxialLens
+
+            self.lens = ParaxialLens(lens_file, device=device)
+        elif lens_type == "diffraclens":
+            from deeplens.diffraclens import DiffractiveLens
+
+            self.lens = DiffractiveLens(lens_file, device=device)
         else:
             raise NotImplementedError(f"Unsupported lens type: {lens_type}")
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
