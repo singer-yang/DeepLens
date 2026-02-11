@@ -636,7 +636,7 @@ def solve_psf(img_org, img_render, ks=PSF_KS, eps=1e-6):
     psf = torch.fft.ifftn(F_psf, dim=[2, 3]).real
     psf = torch.fft.fftshift(psf, dim=[2, 3])
 
-    # Crop to get PSF size [3, 51, 51]
+    # Crop to get PSF size [3,ks, ks]
     _, _, H, W = psf.shape
     start_h = (H - ks) // 2
     start_w = (W - ks) // 2

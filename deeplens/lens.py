@@ -133,7 +133,7 @@ class Lens(DeepObj):
 
         Args:
             points (tensor): Shape of [N, 3] or [3].
-            ks (int, optional): Kernel size. Defaults to 51.
+            ks (int, optional): Kernel size. Defaults to PSF_KS.
 
         Returns:
             psf_rgb: Shape of [N, 3, ks, ks] or [3, ks, ks].
@@ -232,7 +232,7 @@ class Lens(DeepObj):
 
         Args:
             grid (tuple): Grid size (grid_w, grid_h). Defaults to (5, 5), meaning 5x5 grid.
-            ks (int): Kernel size. Defaults to 51, meaning 51x51 kernel size.
+            ks (int): Kernel size. Defaults to PSF_KS, meaning PSF_KS x PSF_KS kernel size.
             depth (float): Depth of the object. Defaults to DEPTH.
             **kwargs: Additional arguments for psf_map().
 
@@ -422,7 +422,7 @@ class Lens(DeepObj):
                 f"Sensor resolution {Wsensor}x{Hsensor} must match input image {Wimg}x{Himg}."
             )
             psf_grid = kwargs.get("psf_grid", (10, 10))
-            psf_ks = kwargs.get("psf_ks", 51)
+            psf_ks = kwargs.get("psf_ks", PSF_KS)
             img_render = self.render_psf_map(
                 img_obj, depth=depth, psf_grid=psf_grid, psf_ks=psf_ks
             )
@@ -430,7 +430,7 @@ class Lens(DeepObj):
         elif method == "psf_patch":
             # Render an image patch with its corresponding PSF
             patch_center = kwargs.get("patch_center", (0.0, 0.0))
-            psf_ks = kwargs.get("psf_ks", 51)
+            psf_ks = kwargs.get("psf_ks", PSF_KS)
             img_render = self.render_psf_patch(
                 img_obj, depth=depth, patch_center=patch_center, psf_ks=psf_ks
             )
