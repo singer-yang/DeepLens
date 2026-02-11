@@ -302,7 +302,7 @@ Apply ISP pipeline:
 
 .. code-block:: python
 
-    from deeplens.sensor.isp import InvertibleISP
+    from deeplens.sensor.isp_modules.isp import InvertibleISP
 
     # Create ISP
     isp = InvertibleISP(bit=10, black_level=64, bayer_pattern='rggb')

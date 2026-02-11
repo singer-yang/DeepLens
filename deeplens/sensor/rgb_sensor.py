@@ -6,7 +6,7 @@ import math
 import torch
 
 from deeplens.sensor import Sensor
-from deeplens.sensor.isp import InvertibleISP
+from deeplens.sensor.isp_modules.isp import InvertibleISP
 
 
 class RGBSensor(Sensor):
