@@ -504,7 +504,7 @@ class Lens(DeepObj):
     # -------------------------------------------
     # Simulate 3D scene
     # -------------------------------------------
-    def _sample_depth_layers(self, depth_min, depth_max, num_depth):
+    def _sample_depth_layers(self, depth_min, depth_max, num_layers):
         """Sample depth layers centered on the focal plane in disparity space.
 
         If the lens has a `calc_focal_plane` method, samples are split around the
@@ -514,10 +514,10 @@ class Lens(DeepObj):
         Args:
             depth_min (float): Minimum (nearest) depth in mm (positive).
             depth_max (float): Maximum (farthest) depth in mm (positive).
-            num_depth (int): Number of depth layers to sample.
+            num_layers (int): Number of depth layers to sample.
 
         Returns:
-            tuple: (disp_ref, depths_ref) where disp_ref has shape (num_depth,) in
+            tuple: (disp_ref, depths_ref) where disp_ref has shape (num_layers,) in
                    disparity space and depths_ref = -1/disp_ref (negative, for PSF).
         """
         # Try to get focal depth from the lens
@@ -541,17 +541,17 @@ class Lens(DeepObj):
             total_range = near_range + far_range
 
             if total_range < 1e-10:
-                disp_ref = torch.full((num_depth,), focal_disp).to(self.device)
+                disp_ref = torch.full((num_layers,), focal_disp).to(self.device)
             else:
-                n_far  = max(1, round((num_depth - 1) * far_range / total_range))
-                n_near = num_depth - 1 - n_far
+                n_far  = max(1, round((num_layers - 1) * far_range / total_range))
+                n_near = num_layers - 1 - n_far
 
                 far_disps  = torch.linspace(disp_far, focal_disp, n_far + 1)        # includes focal
                 near_disps = torch.linspace(focal_disp, disp_near, n_near + 1)[1:]   # exclude duplicate focal
                 disp_ref = torch.cat([far_disps, near_disps]).to(self.device)
         else:
             # Fallback: uniform disparity sampling
-            disp_ref = torch.linspace(1.0 / float(depth_max), 1.0 / float(depth_min), num_depth).to(self.device)
+            disp_ref = torch.linspace(1.0 / float(depth_max), 1.0 / float(depth_min), num_layers).to(self.device)
 
         depths_ref = -1.0 / disp_ref
         return disp_ref, depths_ref
@@ -560,7 +560,7 @@ class Lens(DeepObj):
         """Render RGBD image.
 
         Args:
-            img_obj (tensor): Input image object in raw space. Shape of [B, C, H, W].
+            img_obj (tensor): Object image. Shape of [B, C, H, W].
             depth_map (tensor): Depth map [mm]. Shape of [B, 1, H, W]. Values should be positive.
             method (str, optional): Image simulation method. Defaults to "psf_patch".
             **kwargs: Additional arguments for different methods.
@@ -586,11 +586,11 @@ class Lens(DeepObj):
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
-            num_depth = kwargs.get("num_depth", 32)
+            num_layers = kwargs.get("num_layers", 16)
             interp_mode = kwargs.get("interp_mode", "disparity")
 
-            # Calculate PSF at different depths, (num_depth, 3, ks, ks)
-            disp_ref, depths_ref = self._sample_depth_layers(depth_min, depth_max, num_depth)
+            # Calculate PSF at different depths, (num_layers, 3, ks, ks)
+            disp_ref, depths_ref = self._sample_depth_layers(depth_min, depth_max, num_layers)
 
             points = torch.stack(
                 [
@@ -600,7 +600,7 @@ class Lens(DeepObj):
                 ],
                 dim=-1,
             )
-            psfs = self.psf_rgb(points=points, ks=psf_ks) # (num_depth, 3, ks, ks)
+            psfs = self.psf_rgb(points=points, ks=psf_ks) # (num_layers, 3, ks, ks)
 
             # Image simulation
             img_render = conv_psf_depth_interp(img_obj, -depth_map, psfs, depths_ref, interp_mode=interp_mode)
@@ -608,15 +608,15 @@ class Lens(DeepObj):
 
         elif method == "psf_map":
             # Render full resolution image with PSF map convolution (different FoV, different depth)
-            psf_grid = kwargs.get("psf_grid", (10, 10))  # (grid_w, grid_h)
+            psf_grid = kwargs.get("psf_grid", (8, 8))  # (grid_w, grid_h)
             psf_ks = kwargs.get("psf_ks", PSF_KS)
             depth_min = kwargs.get("depth_min", depth_map.min())
             depth_max = kwargs.get("depth_max", depth_map.max())
-            num_depth = kwargs.get("num_depth", 32)
+            num_layers = kwargs.get("num_layers", 16)
             interp_mode = kwargs.get("interp_mode", "disparity")
 
             # Calculate PSF map at different depths (convert to negative for PSF calculation)
-            disp_ref, depths_ref = self._sample_depth_layers(depth_min, depth_max, num_depth)
+            disp_ref, depths_ref = self._sample_depth_layers(depth_min, depth_max, num_layers)
 
             psf_maps = []
             for depth in tqdm(depths_ref):
@@ -624,7 +624,7 @@ class Lens(DeepObj):
                 psf_maps.append(psf_map)
             psf_map = torch.stack(
                 psf_maps, dim=2
-            )  # shape [grid_h, grid_w, num_depth, 3, ks, ks]
+            )  # shape [grid_h, grid_w, num_layers, 3, ks, ks]
 
             # Image simulation
             img_render = conv_psf_map_depth_interp(

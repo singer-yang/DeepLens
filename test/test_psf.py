@@ -128,14 +128,14 @@ class TestConvPSFDepthInterp:
     def test_conv_psf_depth_interp_shape(self, device_auto):
         """Output should have same shape as input."""
         img = torch.rand(1, 3, 64, 64, device=device_auto)
-        depth = torch.rand(1, 1, 64, 64, device=device_auto)
+        depth = -torch.rand(1, 1, 64, 64, device=device_auto) - 0.01
         
         # PSF kernels at different depths
         psf_kernels = torch.rand(5, 3, 11, 11, device=device_auto)
         psf_kernels = psf_kernels / psf_kernels.sum(dim=(-1, -2), keepdim=True)
         
         # Depth values for each PSF
-        psf_depths = torch.linspace(0, 1, 5, device=device_auto)
+        psf_depths = torch.linspace(-2, -0.01, 5, device=device_auto)
         
         result = conv_psf_depth_interp(img, depth, psf_kernels, psf_depths)
         
@@ -145,12 +145,12 @@ class TestConvPSFDepthInterp:
         """Should handle depth at boundaries."""
         img = torch.rand(1, 3, 64, 64, device=device_auto)
         
-        # Depth at minimum value
-        depth = torch.zeros(1, 1, 64, 64, device=device_auto)
+        # Depth at boundary value
+        depth = torch.full((1, 1, 64, 64), -0.5, device=device_auto)
         
         psf_kernels = torch.rand(5, 3, 11, 11, device=device_auto)
         psf_kernels = psf_kernels / psf_kernels.sum(dim=(-1, -2), keepdim=True)
-        psf_depths = torch.linspace(0, 1, 5, device=device_auto)
+        psf_depths = torch.linspace(-2, -0.01, 5, device=device_auto)
         
         result = conv_psf_depth_interp(img, depth, psf_kernels, psf_depths)
         
@@ -159,11 +159,11 @@ class TestConvPSFDepthInterp:
     def test_conv_psf_depth_interp_disparity(self, device_auto):
         """Should handle disparity interpolation mode."""
         img = torch.rand(1, 3, 64, 64, device=device_auto)
-        depth = torch.rand(1, 1, 64, 64, device=device_auto) + 1.0  # Avoid roughly 0 depth for disparity
+        depth = -(torch.rand(1, 1, 64, 64, device=device_auto) + 1.0)  # Negative depth, avoid near-zero for disparity
         
         psf_kernels = torch.rand(5, 3, 11, 11, device=device_auto)
         psf_kernels = psf_kernels / psf_kernels.sum(dim=(-1, -2), keepdim=True)
-        psf_depths = torch.linspace(1.0, 2.0, 5, device=device_auto)
+        psf_depths = torch.linspace(-3.0, -1.0, 5, device=device_auto)
         
         result = conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="disparity")
         
@@ -187,12 +187,12 @@ class TestConvPSFMapDepthInterp:
     def test_conv_psf_map_depth_interp_shape(self, device_auto):
         """Output should have same shape as input."""
         img = torch.rand(1, 3, 64, 64, device=device_auto)
-        depth = torch.rand(1, 1, 64, 64, device=device_auto)
+        depth = -torch.rand(1, 1, 64, 64, device=device_auto) - 0.01
         
         # PSF map: [grid_h, grid_w, num_depth, C, ks, ks]
         psf_map = torch.rand(4, 4, 5, 3, 11, 11, device=device_auto)
         psf_map = psf_map / psf_map.sum(dim=(-1, -2), keepdim=True)
-        psf_depths = torch.linspace(0, 1, 5, device=device_auto)
+        psf_depths = torch.linspace(-2, -0.01, 5, device=device_auto)
         
         result = conv_psf_map_depth_interp(img, depth, psf_map, psf_depths)
         
@@ -201,11 +201,11 @@ class TestConvPSFMapDepthInterp:
     def test_conv_psf_map_depth_interp_disparity(self, device_auto):
         """Should handle disparity interpolation mode."""
         img = torch.rand(1, 3, 64, 64, device=device_auto)
-        depth = torch.rand(1, 1, 64, 64, device=device_auto) + 1.0
+        depth = -(torch.rand(1, 1, 64, 64, device=device_auto) + 1.0)
         
         psf_map = torch.rand(4, 4, 5, 3, 11, 11, device=device_auto)
         psf_map = psf_map / psf_map.sum(dim=(-1, -2), keepdim=True)
-        psf_depths = torch.linspace(1.0, 2.0, 5, device=device_auto)
+        psf_depths = torch.linspace(-3.0, -1.0, 5, device=device_auto)
         
         result = conv_psf_map_depth_interp(img, depth, psf_map, psf_depths, interp_mode="disparity")
         
