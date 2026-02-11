@@ -9,6 +9,7 @@ from .demosaic import Demosaic
 from .denoise import Denoise
 from .gamma_correction import GammaCorrection
 from .lens_shading import LensShadingCorrection
+from .tone_mapping import ToneMapping
 from .white_balance import AutoWhiteBalance
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "Denoise",
     "GammaCorrection",
     "LensShadingCorrection",
+    "ToneMapping",
 ]
