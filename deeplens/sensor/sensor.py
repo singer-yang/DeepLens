@@ -50,20 +50,6 @@ class Sensor(nn.Module):
         self.isp.to(device)
         return self
 
-    def forward(self, img):
-        """Apply gamma correction to a linear image.
-
-        Args:
-            img: Tensor of shape (B, C, H, W), range [0, 1]
-
-        Returns:
-            img_out: Tensor of shape (B, C, H, W), range [0, 1]
-        """
-        img_out = self.simu_noise(img)
-        img_out = self.response_curve(img_out)
-        img_out = self.isp(img_out)
-        return img_out
-
     def response_curve(self, img_irr):
         """Apply response curve to the irradiance image to get the raw image.
 
@@ -76,6 +62,31 @@ class Sensor(nn.Module):
             img_raw: Raw image
         """
         return img_irr
+
+    def unprocess(self, img):
+        """Inverse ISP: convert sRGB image back to linear RGB.
+
+        Args:
+            img: Tensor of shape (B, C, H, W), range [0, 1] in sRGB space.
+
+        Returns:
+            img_linear: Tensor of shape (B, C, H, W), range [0, 1] in linear space.
+        """
+        # Inverse gamma correction (isp[0] is GammaCorrection)
+        return self.isp[0].reverse(img)
+
+    def linear_rgb2raw(self, img_linear):
+        """Convert linear RGB image to raw sensor space.
+
+        For the base Sensor, raw is the linear image itself (identity).
+
+        Args:
+            img_linear: Tensor of shape (B, C, H, W), range [0, 1].
+
+        Returns:
+            img_raw: Tensor of shape (B, C, H, W), range [0, 1].
+        """
+        return img_linear
 
     def simu_noise(self, img):
         """Simulate sensor noise.

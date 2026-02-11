@@ -110,19 +110,35 @@ class MonoSensor(Sensor):
 
         return img_raw
 
-    def forward(self, img_nbit, iso):
-        """Simulate sensor output with noise and ISP.
+    def unprocess(self, img):
+        """Inverse ISP: convert gamma-corrected image back to n-bit raw space.
+
+        Reverses the ISP pipeline (gamma -> BLC) in opposite order:
+        inverse gamma, then inverse black level compensation.
 
         Args:
-            img_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
-            iso: ISO value
+            img: Tensor of shape (B, C, H, W), range [0, 1] in display space.
 
         Returns:
-            img_noisy: Processed monochrome image with noise, range [0, 1]
+            img_nbit: Tensor of shape (B, C, H, W), range [~black_level, 2**bit - 1].
         """
-        img_noisy = self.simu_noise(img_nbit, iso)
-        img_noisy = self.isp(img_noisy)
-        return img_noisy
+        # isp[0] = BlackLevelCompensation, isp[1] = GammaCorrection
+        img_linear = self.isp[1].reverse(img)
+        img_nbit = self.isp[0].reverse(img_linear)
+        return img_nbit
+
+    def linear_rgb2raw(self, img_linear):
+        """Convert linear image to n-bit raw digital number.
+
+        Args:
+            img_linear: Tensor of shape (B, C, H, W), range [0, 1].
+
+        Returns:
+            img_nbit: Tensor of shape (B, C, H, W), range [~black_level, 2**bit - 1].
+        """
+        img_nbit = img_linear * (self.nbit_max - self.black_level) + self.black_level
+        img_nbit = torch.round(img_nbit)
+        return img_nbit
 
     def simu_noise(self, img_raw, iso):
         """Simulate sensor noise considering sensor quantization and noise model.

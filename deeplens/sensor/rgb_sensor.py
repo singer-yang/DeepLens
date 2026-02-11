@@ -1,7 +1,6 @@
 """RGB sensor with noise model and ISP."""
 
 import json
-import math
 
 import torch
 
@@ -142,6 +141,51 @@ class RGBSensor(Sensor):
 
         return img_raw
 
+    def unprocess(self, image, in_type="rgb"):
+        """Unprocess an image to unbalanced RAW RGB space.
+
+        Args:
+            image: Tensor of shape (B, 3, H, W), range [0, 1]
+            in_type: Input image type, either "rgb" or "linear_rgb"
+
+        Returns:
+            image: Tensor of shape (B, 3, H, W), range [0, 1] in raw space
+        """
+        isp = self.isp
+
+        # Inverse gamma correction
+        if in_type == "linear_rgb":
+            pass
+        elif in_type == "rgb":
+            image = isp.gamma.reverse(image)
+        else:
+            raise ValueError(f"Invalid input type: {in_type}")
+
+        # Inverse color correction matrix
+        image = isp.ccm.reverse(image)
+
+        # Inverse auto white balance
+        image = isp.awb.reverse(image)  # (B, 3, H, W), [0, 1]
+
+        return image
+
+    def linear_rgb2raw(self, img_linrgb):
+        """Convert linear RGB image to raw Bayer space.
+
+        Args:
+            img_linrgb: Tensor of shape (B, 3, H, W), range [0, 1]
+
+        Returns:
+            bayer_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
+        """
+        black_level = self.black_level
+        bit = self.bit
+
+        bayer_float = self.isp.demosaic.reverse(img_linrgb)
+        bayer_nbit = bayer_float * (2**bit - 1 - black_level) + black_level
+        bayer_nbit = torch.round(bayer_nbit)
+        return bayer_nbit
+
     def simu_noise(self, img_raw, iso):
         """Simulate sensor noise considering sensor quantization and noise model.
 
@@ -188,69 +232,6 @@ class RGBSensor(Sensor):
         img_raw_noisy = torch.clip(img_raw_noisy, 0.0, nbit_max)
         img_raw_noisy = torch.round(img_raw_noisy)
         return img_raw_noisy
-
-    def forward(self, img_nbit, iso):
-        """Simulate sensor output with noise and ISP.
-
-        Args:
-            img_nbit: Tensor of shape (B, 3, H, W), range [~black_level, 2**bit - 1]
-            iso: ISO value as int
-
-        Returns:
-            img_noise: Tensor of shape (B, 3, H, W), range [0, 1]
-        """
-        img_raw = self.response_curve(img_nbit)
-        img_noise = self.simu_noise(img_raw, iso)
-        img_noise = self.isp(img_noise)
-        return img_noise
-
-    # ===============================
-    # Unprocess
-    # ===============================
-    def unprocess(self, image, in_type="rgb"):
-        """Unprocess an image to unbalanced RAW RGB space.
-
-        Args:
-            image: Tensor of shape (B, 3, H, W), range [0, 1]
-            in_type: Input image type, either "rgb" or "linear_rgb"
-
-        Returns:
-            image: Tensor of shape (B, 3, H, W), range [0, 1] in raw space
-        """
-        isp = self.isp
-
-        # Inverse gamma correction
-        if in_type == "linear_rgb":
-            pass
-        elif in_type == "rgb":
-            image = isp.gamma.reverse(image)
-        else:
-            raise ValueError(f"Invalid input type: {in_type}")
-
-        # Inverse color correction matrix
-        image = isp.ccm.reverse(image)
-
-        # Inverse auto white balance
-        image = isp.awb.reverse(image)  # (B, 3, H, W), [0, 1]
-
-        return image
-
-    def linrgb2bayer(self, img_linrgb):
-        """Unprocess the linear RGB image from [0, 1] to [~black_level, 2**bit - 1].
-
-        Args:
-            img_linrgb: Tensor of shape (B, 3, H, W), range [0, 1]
-
-        Returns:
-            bayer_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1]
-        """
-        black_level = self.black_level
-        bit = self.bit
-
-        bayer_float = self.isp.demosaic.reverse(img_linrgb)
-        bayer_nbit = bayer_float * (2**bit - 1 - black_level) + black_level
-        bayer_nbit = torch.round(bayer_nbit)
-        return bayer_nbit
 
     def sample_augmentation(self):
         """Randomly sample a set of augmentation parameters for ISP modules. Used for data augmentation during training."""

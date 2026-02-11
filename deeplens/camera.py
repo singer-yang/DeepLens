@@ -200,8 +200,8 @@ class Camera(Renderer):
         # -----------------------------------------------
         # Step 3: Convert linear RGB to Bayer space
         # -----------------------------------------------
-        bayer_gt = sensor.linrgb2bayer(img_linrgb)  # (B, 1, H, W), [0, 2**bit - 1]
-        bayer_lq = sensor.linrgb2bayer(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
+        bayer_gt = sensor.linear_rgb2raw(img_linrgb)  # (B, 1, H, W), [0, 2**bit - 1]
+        bayer_lq = sensor.linear_rgb2raw(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
 
         # -----------------------------------------------
         # Step 4: Simulate sensor noise

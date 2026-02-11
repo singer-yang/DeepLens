@@ -35,48 +35,6 @@ class TestSensorInit:
         assert sensor.device.type == device_auto.type
 
 
-class TestSensorForward:
-    """Test base Sensor forward pass (gamma-only)."""
-
-    def test_sensor_forward_shape(self, device_auto):
-        """Forward should preserve shape."""
-        sensor = Sensor()
-        sensor.to(device_auto)
-
-        img = torch.rand(1, 3, 64, 64, device=device_auto)
-        output = sensor.forward(img)
-        assert output.shape == img.shape
-
-    def test_sensor_forward_range(self, device_auto):
-        """Forward output should be in [0, 1] for input in [0, 1]."""
-        sensor = Sensor()
-        sensor.to(device_auto)
-
-        img = torch.rand(1, 3, 64, 64, device=device_auto)
-        output = sensor.forward(img)
-        assert output.min() >= 0
-        assert output.max() <= 1.0
-
-    def test_sensor_forward_applies_gamma(self, device_auto):
-        """Forward should apply gamma correction (output != input)."""
-        sensor = Sensor()
-        sensor.to(device_auto)
-
-        img = torch.rand(1, 3, 64, 64, device=device_auto) * 0.5 + 0.1
-        output = sensor.forward(img)
-        # Gamma correction should change values (for non-trivial input)
-        assert not torch.allclose(output, img, atol=1e-3)
-
-    def test_sensor_call(self, device_auto):
-        """__call__ should work as forward."""
-        sensor = Sensor()
-        sensor.to(device_auto)
-
-        img = torch.rand(1, 3, 64, 64, device=device_auto)
-        output = sensor(img)
-        assert output.shape == img.shape
-
-
 class TestSensorResponseCurve:
     """Test sensor response curve."""
 
@@ -197,31 +155,6 @@ class TestMonoSensorNoise:
         assert avg_noise_high > avg_noise_low
 
 
-class TestMonoSensorForward:
-    """Test MonoSensor forward pass."""
-
-    def test_forward_shape(self, device_auto):
-        """Forward should preserve shape."""
-        sensor = MonoSensor()
-        sensor.to(device_auto)
-
-        img = torch.rand(1, 3, 64, 64, device=device_auto) * 500 + 64
-        iso = torch.tensor([100], device=device_auto)
-        output = sensor.forward(img, iso)
-        assert output.shape == img.shape
-
-    def test_forward_range(self, device_auto):
-        """Forward output should be in [0, 1] after ISP."""
-        sensor = MonoSensor()
-        sensor.to(device_auto)
-
-        img = torch.rand(1, 3, 64, 64, device=device_auto) * 500 + 64
-        iso = torch.tensor([100], device=device_auto)
-        output = sensor.forward(img, iso)
-        assert output.min() >= 0
-        assert output.max() <= 1.0
-
-
 class TestMonoSensorBatch:
     """Test MonoSensor with batched input."""
 
@@ -323,12 +256,12 @@ class TestMonoSensorGPU:
         img_noisy = sensor.simu_noise(img, iso)
         assert img_noisy.device.type == device_auto.type
 
-    def test_forward_gpu(self, device_auto):
-        """Full forward pass should work on GPU."""
+    def test_simu_noise_gpu(self, device_auto):
+        """Noise simulation should produce correct device output on GPU."""
         sensor = MonoSensor()
         sensor.to(device_auto)
 
         img = torch.rand(1, 3, 128, 128, device=device_auto) * 500 + 64
         iso = torch.tensor([200], device=device_auto)
-        output = sensor.forward(img, iso)
+        output = sensor.simu_noise(img, iso)
         assert output.device.type == device_auto.type
