@@ -21,6 +21,8 @@ class MonoSensor(Sensor):
         shot_noise_std_alpha=0.4,
         shot_noise_std_beta=0.0,
         iso_base=100,
+        wavelengths=None,
+        spectral_response=None,
     ):
         super().__init__(size=size, res=res)
 
@@ -34,11 +36,45 @@ class MonoSensor(Sensor):
         self.shotnoise_std_alpha = shot_noise_std_alpha
         self.shotnoise_std_beta = shot_noise_std_beta
 
+        # Spectral response curve
+        self.wavelengths = wavelengths
+        if self.wavelengths is not None:
+            response = torch.tensor(spectral_response, dtype=torch.float32)
+            self.spectral_response = response / response.sum()
+
         # ISP: black level compensation + gamma
         self.isp = nn.Sequential(
             BlackLevelCompensation(bit, black_level),
             GammaCorrection(),
         )
+
+    def to(self, device):
+        super().to(device)
+        if self.wavelengths is not None:
+            self.spectral_response = self.spectral_response.to(device)
+        return self
+
+    def response_curve(self, img_spectral):
+        """Apply spectral response curve to get a monochrome raw image.
+
+        Args:
+            img_spectral: Spectral image, (B, N_wavelengths, H, W)
+
+        Returns:
+            img_raw: Monochrome raw image, (B, 1, H, W)
+        """
+        if self.wavelengths is not None:
+            img_raw = (
+                img_spectral * self.spectral_response.view(1, -1, 1, 1)
+            ).sum(dim=1, keepdim=True)
+        else:
+            if img_spectral.shape[1] == 1:
+                img_raw = img_spectral
+            else:
+                # Average across channels as fallback
+                img_raw = img_spectral.mean(dim=1, keepdim=True)
+
+        return img_raw
 
     def forward(self, img_nbit, iso):
         """Simulate sensor output with noise and ISP.

@@ -2,9 +2,10 @@
 
 This provides the simplest sensor model: size, resolution, and gamma-only ISP.
 For sensors with noise models and bit depth, use MonoSensor or RGBSensor.
-"""
 
-import math
+Note: This sensor model is used in various renderers, including Blender, for 
+physically-based camera simulation.
+"""
 
 import torch.nn as nn
 
@@ -15,10 +16,9 @@ class Sensor(nn.Module):
     def __init__(self, size=(8.0, 6.0), res=(4000, 3000)):
         super().__init__()
 
-        # Sensor resolution and normalized pixel size
+        # Sensor size and resolution
         self.size = size
         self.res = res
-        self.pixel_size = 2 / math.sqrt(self.res[0] ** 2 + self.res[1] ** 2)
 
         # ISP: gamma correction only
         self.isp = nn.Sequential(
@@ -41,20 +41,6 @@ class Sensor(nn.Module):
         """
         img_out = self.simu_noise(img)
         img_out = self.response_curve(img_out)
-        img_out = self.isp(img_out)
-        return img_out
-
-    def forward_irr(self, img_irr):
-        """Simulate sensor output from irradiance field.
-
-        Args:
-            img_irr: Irradiance image, range [0, 1]
-
-        Returns:
-            img_out: Processed image
-        """
-        img_raw = self.response_curve(img_irr)
-        img_out = self.simu_noise(img_raw)
         img_out = self.isp(img_out)
         return img_out
 

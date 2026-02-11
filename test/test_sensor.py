@@ -21,7 +21,6 @@ class TestSensorInit:
         sensor = Sensor()
         assert sensor.size == (8.0, 6.0)
         assert sensor.res == (4000, 3000)
-        assert sensor.pixel_size > 0
 
     def test_sensor_init_custom(self, device_auto):
         """Should initialize with custom parameters."""
@@ -100,15 +99,6 @@ class TestSensorSimuNoise:
         img = torch.rand(1, 3, 64, 64, device=device_auto)
         img_out = sensor.simu_noise(img)
         assert torch.allclose(img, img_out)
-
-
-class TestSensorPixelSize:
-    """Test sensor pixel size calculation."""
-
-    def test_sensor_pixel_size(self, device_auto):
-        """Pixel size should be computed from resolution."""
-        sensor = Sensor(size=(8.0, 6.0), res=(4000, 3000))
-        assert sensor.pixel_size > 0
 
 
 # ===========================
@@ -255,6 +245,69 @@ class TestMonoSensorBatch:
         iso = torch.tensor([100, 400], device=device_auto)
         img_noisy = sensor.simu_noise(img, iso)
         assert img_noisy.shape == img.shape
+
+
+class TestMonoSensorResponseCurve:
+    """Test MonoSensor spectral response curve."""
+
+    def test_response_curve_no_spectral(self, device_auto):
+        """Without spectral response, single-channel input passes through."""
+        sensor = MonoSensor()
+        sensor.to(device_auto)
+
+        img = torch.rand(1, 1, 64, 64, device=device_auto)
+        img_raw = sensor.response_curve(img)
+        assert torch.allclose(img_raw, img)
+
+    def test_response_curve_multichannel_fallback(self, device_auto):
+        """Without spectral response, multi-channel input is averaged."""
+        sensor = MonoSensor()
+        sensor.to(device_auto)
+
+        img = torch.rand(1, 3, 64, 64, device=device_auto)
+        img_raw = sensor.response_curve(img)
+        assert img_raw.shape == (1, 1, 64, 64)
+        assert torch.allclose(img_raw, img.mean(dim=1, keepdim=True))
+
+    def test_response_curve_spectral(self, device_auto):
+        """With spectral response, should weight and sum spectral channels."""
+        wavelengths = [400, 500, 600]
+        spectral_response = [0.2, 0.6, 0.2]
+        sensor = MonoSensor(wavelengths=wavelengths, spectral_response=spectral_response)
+        sensor.to(device_auto)
+
+        img = torch.ones(1, 3, 64, 64, device=device_auto)
+        img_raw = sensor.response_curve(img)
+        assert img_raw.shape == (1, 1, 64, 64)
+        # Normalized response sums to 1, so uniform input -> 1.0
+        assert torch.allclose(img_raw, torch.ones_like(img_raw), atol=1e-5)
+
+    def test_response_curve_spectral_shape(self, device_auto):
+        """Spectral response should reduce N wavelength channels to 1."""
+        wavelengths = [400, 450, 500, 550, 600]
+        spectral_response = [0.1, 0.3, 0.5, 0.3, 0.1]
+        sensor = MonoSensor(wavelengths=wavelengths, spectral_response=spectral_response)
+        sensor.to(device_auto)
+
+        img = torch.rand(2, 5, 32, 32, device=device_auto)
+        img_raw = sensor.response_curve(img)
+        assert img_raw.shape == (2, 1, 32, 32)
+
+    def test_response_curve_spectral_weighting(self, device_auto):
+        """Spectral response should apply correct weights."""
+        wavelengths = [400, 500, 600]
+        spectral_response = [1.0, 0.0, 0.0]  # only responds to first channel
+        sensor = MonoSensor(wavelengths=wavelengths, spectral_response=spectral_response)
+        sensor.to(device_auto)
+
+        img = torch.zeros(1, 3, 8, 8, device=device_auto)
+        img[:, 0] = 0.5  # only first channel has signal
+        img[:, 1] = 0.8
+        img[:, 2] = 0.3
+
+        img_raw = sensor.response_curve(img)
+        # Should only see channel 0 contribution
+        assert torch.allclose(img_raw, torch.full_like(img_raw, 0.5), atol=1e-5)
 
 
 class TestMonoSensorGPU:
