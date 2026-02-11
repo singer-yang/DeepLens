@@ -3,9 +3,11 @@
 This provides the simplest sensor model: size, resolution, and gamma-only ISP.
 For sensors with noise models and bit depth, use MonoSensor or RGBSensor.
 
-Note: This sensor model is used in various renderers, including Blender, for 
+Note: This sensor model is used in various renderers, including Blender, for
 physically-based camera simulation.
 """
+
+import json
 
 import torch.nn as nn
 
@@ -23,6 +25,24 @@ class Sensor(nn.Module):
         # ISP: gamma correction only
         self.isp = nn.Sequential(
             GammaCorrection(),
+        )
+
+    @classmethod
+    def from_config(cls, sensor_file):
+        """Create a Sensor from a JSON config file.
+
+        Args:
+            sensor_file: Path to JSON sensor config file.
+
+        Returns:
+            Sensor instance.
+        """
+        with open(sensor_file, "r") as f:
+            config = json.load(f)
+
+        return cls(
+            size=config.get("sensor_size", (8.0, 6.0)),
+            res=config.get("sensor_res", (4000, 3000)),
         )
 
     def to(self, device):

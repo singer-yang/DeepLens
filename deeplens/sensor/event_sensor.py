@@ -9,6 +9,8 @@ Reference:
     [2] Rebecq et al., "ESIM: an Open Event Camera Simulator", CoRL, 2018.
 """
 
+import json
+
 import torch
 
 from deeplens.sensor.sensor import Sensor
@@ -63,6 +65,31 @@ class EventSensor(Sensor):
         self.leak_rate_hz = leak_rate_hz
         self.shot_noise_rate_hz = shot_noise_rate_hz
         self.eps = eps
+
+    @classmethod
+    def from_config(cls, sensor_file):
+        """Create an EventSensor from a JSON config file.
+
+        Args:
+            sensor_file: Path to JSON sensor config file.
+
+        Returns:
+            EventSensor instance.
+        """
+        with open(sensor_file, "r") as f:
+            config = json.load(f)
+
+        return cls(
+            size=config.get("sensor_size", (8.0, 6.0)),
+            res=config.get("sensor_res", (4000, 3000)),
+            threshold_pos=config.get("threshold_pos", 0.2),
+            threshold_neg=config.get("threshold_neg", 0.2),
+            sigma_threshold=config.get("sigma_threshold", 0.03),
+            cutoff_hz=config.get("cutoff_hz", 0.0),
+            leak_rate_hz=config.get("leak_rate_hz", 0.0),
+            shot_noise_rate_hz=config.get("shot_noise_rate_hz", 0.0),
+            eps=config.get("eps", 1e-7),
+        )
 
     # ------------------------------------------------------------------
     # Core event generation

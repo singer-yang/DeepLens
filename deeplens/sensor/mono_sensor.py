@@ -3,6 +3,8 @@
 Example: infrared sensor
 """
 
+import json
+
 import torch
 import torch.nn as nn
 
@@ -49,6 +51,35 @@ class MonoSensor(Sensor):
         self.isp = nn.Sequential(
             BlackLevelCompensation(bit, black_level),
             GammaCorrection(),
+        )
+
+    @classmethod
+    def from_config(cls, sensor_file):
+        """Create a MonoSensor from a JSON config file.
+
+        Args:
+            sensor_file: Path to JSON sensor config file.
+
+        Returns:
+            MonoSensor instance.
+        """
+        with open(sensor_file, "r") as f:
+            config = json.load(f)
+
+        spectral_response = config.get("spectral_response", None)
+        wavelengths = config.get("wavelengths", None) if spectral_response is not None else None
+
+        return cls(
+            size=config.get("sensor_size", (8.0, 6.0)),
+            res=config.get("sensor_res", (4000, 3000)),
+            bit=config.get("bit", 10),
+            black_level=config.get("black_level", 64),
+            iso_base=config.get("iso_base", 100),
+            read_noise_std=config.get("read_noise_std", 0.5),
+            shot_noise_std_alpha=config.get("shot_noise_std_alpha", 0.4),
+            shot_noise_std_beta=config.get("shot_noise_std_beta", 0.0),
+            wavelengths=wavelengths,
+            spectral_response=spectral_response,
         )
 
     def to(self, device):
