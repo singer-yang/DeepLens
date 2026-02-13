@@ -16,6 +16,11 @@ from deeplens.sensor.isp_modules.gamma_correction import GammaCorrection
 
 class Sensor(nn.Module):
     def __init__(self, size=(8.0, 6.0), res=(4000, 3000)):
+        """
+        Args:
+            size (tuple): Sensor physical size in mm (W, H). Default (8.0, 6.0).
+            res (tuple): Sensor resolution in pixels (W, H). Default (4000, 3000).
+        """
         super().__init__()
 
         # Sensor size and resolution

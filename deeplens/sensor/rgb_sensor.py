@@ -30,6 +30,25 @@ class RGBSensor(Sensor):
         green_response=None,
         blue_response=None,
     ):
+        """
+        Args:
+            size (tuple): Sensor physical size in mm (W, H). Default (36.0, 24.0).
+            res (tuple): Sensor resolution in pixels (W, H). Default (5472, 3648).
+            bit (int): Bit depth. Default 10.
+            black_level (int): Black level. Default 64.
+            bayer_pattern (str): Bayer pattern e.g. "rggb". Default "rggb".
+            white_balance (tuple): White balance gains. Default (2.0, 1.0, 1.8).
+            color_matrix (list or Tensor): Color correction matrix.
+            gamma_param (float): Gamma correction parameter. Default 2.2.
+            iso_base (int): Base ISO. Default 100.
+            read_noise_std (float): Read noise std. Default 0.5.
+            shot_noise_std_alpha (float): Shot noise alpha. Default 0.4.
+            shot_noise_std_beta (float): Shot noise beta. Default 0.0.
+            wavelengths (list): Wavelengths.
+            red_response (list): Red channel spectral response.
+            green_response (list): Green channel spectral response.
+            blue_response (list): Blue channel spectral response.
+        """
         super().__init__(size=size, res=res)
 
         self.bit = bit
@@ -105,10 +124,10 @@ class RGBSensor(Sensor):
         """Apply response curve to the spectral image to get the raw image.
 
         Args:
-            img_spectral: Spectral image
+            img_spectral: Spectral image, shape (B, C, H, W), range [0, 1]
 
         Returns:
-            img_raw: Raw image
+            img_raw: Raw image, shape (B, 3, H, W), range [0, 1]
 
         Reference:
             [1] Spectral Sensitivity Estimation Without a Camera. ICCP 2023.

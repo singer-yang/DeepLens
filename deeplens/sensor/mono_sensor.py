@@ -29,6 +29,19 @@ class MonoSensor(Sensor):
         wavelengths=None,
         spectral_response=None,
     ):
+        """
+        Args:
+            bit (int): Bit depth of the sensor. Default 10.
+            black_level (float): Black level value. Default 64.
+            size (tuple): Sensor physical size in mm (W, H). Default (8.0, 6.0).
+            res (tuple): Sensor resolution in pixels (W, H). Default (4000, 3000).
+            read_noise_std (float): Read noise standard deviation. Default 0.5.
+            shot_noise_std_alpha (float): Shot noise alpha parameter. Default 0.4.
+            shot_noise_std_beta (float): Shot noise beta parameter. Default 0.0.
+            iso_base (int): Base ISO value. Default 100.
+            wavelengths (list, optional): Wavelengths for spectral response.
+            spectral_response (list, optional): Spectral response values.
+        """
         super().__init__(size=size, res=res)
 
         self.bit = bit
@@ -111,32 +124,37 @@ class MonoSensor(Sensor):
         return img_raw
 
     def unprocess(self, img):
-        """Inverse ISP: convert gamma-corrected image back to n-bit raw space.
-
-        Reverses the ISP pipeline (gamma -> BLC) in opposite order:
-        inverse gamma, then inverse black level compensation.
+        """Inverse ISP: convert gamma-corrected image back to linear RGB space.
 
         Args:
             img: Tensor of shape (B, C, H, W), range [0, 1] in display space.
 
         Returns:
-            img_nbit: Tensor of shape (B, C, H, W), range [~black_level, 2**bit - 1].
+            img_linear: Tensor of shape (B, C, H, W), range [0, 1] in linear space.
         """
+        # Only reverse gamma correction
         # isp[0] = BlackLevelCompensation, isp[1] = GammaCorrection
         img_linear = self.isp[1].reverse(img)
-        img_nbit = self.isp[0].reverse(img_linear)
-        return img_nbit
+        return img_linear
 
     def linear_rgb2raw(self, img_linear):
         """Convert linear image to n-bit raw digital number.
+
+        Applies spectral response (RGB to Mono) and quantization.
 
         Args:
             img_linear: Tensor of shape (B, C, H, W), range [0, 1].
 
         Returns:
-            img_nbit: Tensor of shape (B, C, H, W), range [~black_level, 2**bit - 1].
+            img_nbit: Tensor of shape (B, 1, H, W), range [~black_level, 2**bit - 1].
         """
-        img_nbit = img_linear * (self.nbit_max - self.black_level) + self.black_level
+        # 1. Apply spectral response (RGB -> Mono)
+        img_mono = self.response_curve(img_linear)
+
+        # 2. Scale and add black level
+        img_nbit = img_mono * (self.nbit_max - self.black_level) + self.black_level
+
+        # 3. Quantize
         img_nbit = torch.round(img_nbit)
         return img_nbit
 
