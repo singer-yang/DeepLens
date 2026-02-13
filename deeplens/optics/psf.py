@@ -324,6 +324,93 @@ def conv_psf_depth_interp(img, depth, psf_kernels, psf_depths, interp_mode="dept
     img_render = torch.sum(imgs_blur * weights, dim=0)
     return img_render
 
+
+def conv_psf_occlusion(img, depth, psf_kernels, psf_depths):
+    """Occlusion-aware bokeh rendering using back-to-front layered compositing.
+
+    Discretizes the scene into depth layers and composites them from back (far)
+    to front (near). Each layer is blurred independently with its depth-specific
+    PSF, and composited using the over-operator. This prevents color bleeding at
+    depth discontinuities.
+
+    Reference:
+        [1] "Dr.Bokeh: DiffeRentiable Occlusion-aware Bokeh Rendering", CVPR 2024.
+
+    Args:
+        img (torch.Tensor): Input image, shape (B, C, H, W), values in [0, 1].
+        depth (torch.Tensor): Depth map, shape (B, 1, H, W), values in (-inf, 0).
+        psf_kernels (torch.Tensor): PSF at each depth layer, shape (num_layers, C, ks, ks).
+        psf_depths (torch.Tensor): Depth values for each layer, shape (num_layers,).
+            Must be negative and sorted ascending (far to near, i.e. -5000 ... -200).
+
+    Returns:
+        img_render (torch.Tensor): Rendered image, shape (B, C, H, W).
+    """
+    assert depth.min() < 0 and depth.max() < 0, (
+        f"depth must be negative, got min={depth.min()} max={depth.max()}"
+    )
+    assert psf_depths.min() < 0 and psf_depths.max() < 0, (
+        f"psf_depths must be negative, got min={psf_depths.min()} max={psf_depths.max()}"
+    )
+
+    num_layers, C, ks, _ = psf_kernels.shape
+    B, C_img, H, W = img.shape
+    assert C == C_img, f"PSF channels ({C}) must match image channels ({C_img})"
+
+    # Compute layer boundaries (midpoints between adjacent depths in disparity)
+    # psf_depths is sorted ascending: [-far, ..., -near]
+    device = img.device
+    dtype = img.dtype
+
+    # Assign each pixel to its nearest depth layer
+    # depth and psf_depths are both negative; depth_map shape [B, 1, H, W]
+    depth_expanded = depth.expand(B, num_layers, H, W)  # broadcast via view
+    depth_expanded = depth.view(B, 1, H, W).expand(B, num_layers, H, W)
+    psf_depths_view = psf_depths.view(1, num_layers, 1, 1)
+    dist = torch.abs(depth_expanded - psf_depths_view)  # [B, num_layers, H, W]
+    layer_assignment = dist.argmin(dim=1, keepdim=True)  # [B, 1, H, W]
+
+    # Pre-compute flipped PSFs and padding for convolution
+    psf_flipped = torch.flip(psf_kernels, [-2, -1])  # [num_layers, C, ks, ks]
+    pad_h_left = (ks - 1) // 2
+    pad_h_right = ks // 2
+    pad_w_left = (ks - 1) // 2
+    pad_w_right = ks // 2
+
+    # Back-to-front compositing (layer 0 is farthest, layer num_layers-1 is nearest)
+    result = torch.zeros(B, C, H, W, device=device, dtype=dtype)
+    accum_alpha = torch.zeros(B, 1, H, W, device=device, dtype=dtype)
+
+    for i in range(num_layers):
+        # Create soft mask for this layer: 1 where pixels belong to this layer
+        mask = (layer_assignment == i).float()  # [B, 1, H, W]
+
+        if mask.sum() == 0:
+            continue
+
+        # Layer RGB: pixels in this layer, zero elsewhere
+        layer_rgb = img * mask  # [B, C, H, W]
+
+        # Convolve layer RGB with this layer's PSF
+        psf_i = psf_flipped[i].unsqueeze(1)  # [C, 1, ks, ks]
+        layer_rgb_pad = F.pad(layer_rgb, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="constant", value=0)
+        blurred_rgb = F.conv2d(layer_rgb_pad, psf_i, groups=C)  # [B, C, H, W]
+
+        # Convolve mask with the same PSF (use one channel of PSF, since PSF sums to 1 per channel)
+        # Average across channels for mask blurring (PSF is same across channels for paraxial)
+        psf_i_mono = psf_flipped[i, 0:1].unsqueeze(1)  # [1, 1, ks, ks]
+        mask_pad = F.pad(mask, (pad_w_left, pad_w_right, pad_h_left, pad_h_right), mode="constant", value=0)
+        blurred_mask = F.conv2d(mask_pad, psf_i_mono, groups=1)  # [B, 1, H, W]
+        blurred_mask = blurred_mask.clamp(0, 1)
+
+        # Over-compositing (back-to-front):
+        # result = blurred_rgb + result * (1 - blurred_mask)
+        result = blurred_rgb + result * (1 - blurred_mask)
+        accum_alpha = blurred_mask + accum_alpha * (1 - blurred_mask)
+
+    return result
+
+
 def conv_psf_pixel(img, psf):
     """Convolve an image batch with pixel-wise PSF.
 

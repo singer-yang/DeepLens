@@ -401,3 +401,102 @@ class TestParaxialLensRendering:
         
         assert img_left.shape == rgb.shape
         assert img_right.shape == rgb.shape
+
+
+class TestParaxialLensRenderRGBD:
+    """Test occlusion-aware RGBD rendering."""
+
+    def test_render_rgbd_shape(self, device_auto):
+        """Should return correct output shape."""
+        lens = ParaxialLens(
+            foclen=50.0,
+            fnum=1.8,
+            sensor_size=(20.0, 20.0),
+            sensor_res=(64, 64),
+            device=device_auto,
+        )
+        lens.refocus(-1000.0)
+
+        rgb = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.full((1, 1, 64, 64), 500.0, device=device_auto)
+
+        result = lens.render_rgbd(rgb, depth)
+        assert result.shape == rgb.shape
+
+    def test_render_rgbd_uniform_depth(self, device_auto):
+        """With uniform depth, result should be valid and non-zero."""
+        lens = ParaxialLens(
+            foclen=50.0,
+            fnum=1.8,
+            sensor_size=(20.0, 20.0),
+            sensor_res=(64, 64),
+            device=device_auto,
+        )
+        lens.refocus(-1000.0)
+
+        rgb = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.full((1, 1, 64, 64), 500.0, device=device_auto)
+
+        result = lens.render_rgbd(rgb, depth, num_layers=8)
+        assert not torch.isnan(result).any()
+        assert result.sum() > 0
+
+    def test_render_rgbd_method_equivalence(self, device_auto):
+        """All methods should produce identical results for paraxial lens."""
+        lens = ParaxialLens(
+            foclen=50.0,
+            fnum=1.8,
+            sensor_size=(20.0, 20.0),
+            sensor_res=(64, 64),
+            device=device_auto,
+        )
+        lens.refocus(-1000.0)
+
+        rgb = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.full((1, 1, 64, 64), 500.0, device=device_auto)
+
+        result_patch = lens.render_rgbd(rgb, depth, method="psf_patch", num_layers=8)
+        result_map = lens.render_rgbd(rgb, depth, method="psf_map", num_layers=8)
+        result_pixel = lens.render_rgbd(rgb, depth, method="psf_pixel", num_layers=8)
+
+        assert torch.allclose(result_patch, result_map, atol=1e-5)
+        assert torch.allclose(result_patch, result_pixel, atol=1e-5)
+
+    def test_render_rgbd_depth_discontinuity(self, device_auto):
+        """Should handle depth discontinuities (occlusion scenario)."""
+        lens = ParaxialLens(
+            foclen=50.0,
+            fnum=1.8,
+            sensor_size=(20.0, 20.0),
+            sensor_res=(64, 64),
+            device=device_auto,
+        )
+        lens.refocus(-1000.0)
+
+        # Create scene with sharp depth discontinuity
+        rgb = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth = torch.full((1, 1, 64, 64), 2000.0, device=device_auto)  # background
+        depth[:, :, 16:48, 16:48] = 500.0  # foreground object
+
+        result = lens.render_rgbd(rgb, depth, num_layers=16)
+
+        assert result.shape == rgb.shape
+        assert not torch.isnan(result).any()
+        assert result.min() >= 0
+
+    def test_render_rgbd_3d_depth_input(self, device_auto):
+        """Should handle [B, H, W] depth input."""
+        lens = ParaxialLens(
+            foclen=50.0,
+            fnum=1.8,
+            sensor_size=(20.0, 20.0),
+            sensor_res=(64, 64),
+            device=device_auto,
+        )
+        lens.refocus(-1000.0)
+
+        rgb = torch.rand(1, 3, 64, 64, device=device_auto)
+        depth_3d = torch.full((1, 64, 64), 500.0, device=device_auto)  # [B, H, W]
+
+        result = lens.render_rgbd(rgb, depth_3d)
+        assert result.shape == rgb.shape
