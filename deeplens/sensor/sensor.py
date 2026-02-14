@@ -80,7 +80,7 @@ class Sensor(nn.Module):
         # Inverse gamma correction (isp[0] is GammaCorrection)
         return self.isp[0].reverse(img)
 
-    def linear_rgb2raw(self, img_linear):
+    def linrgb2raw(self, img_linear):
         """Convert linear RGB image to raw sensor space.
 
         For the base Sensor, raw is the linear image itself (identity).

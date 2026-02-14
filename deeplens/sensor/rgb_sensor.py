@@ -188,7 +188,7 @@ class RGBSensor(Sensor):
 
         return image
 
-    def linear_rgb2raw(self, img_linrgb):
+    def linrgb2raw(self, img_linrgb):
         """Convert linear RGB image to raw Bayer space.
 
         Args:

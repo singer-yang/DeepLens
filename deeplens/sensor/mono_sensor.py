@@ -137,7 +137,7 @@ class MonoSensor(Sensor):
         img_linear = self.isp[1].reverse(img)
         return img_linear
 
-    def linear_rgb2raw(self, img_linear):
+    def linrgb2raw(self, img_linear):
         """Convert linear image to n-bit raw digital number.
 
         Applies spectral response (RGB to Mono) and quantization.
