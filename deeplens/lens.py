@@ -559,6 +559,8 @@ class Lens(DeepObj):
     def render_rgbd(self, img_obj, depth_map, method="psf_patch", **kwargs):
         """Render RGBD image.
 
+        TODO: add obstruction-aware image simulation.
+
         Args:
             img_obj (tensor): Object image. Shape of [B, C, H, W].
             depth_map (tensor): Depth map [mm]. Shape of [B, 1, H, W]. Values should be positive.

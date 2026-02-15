@@ -16,7 +16,7 @@ import torch
 
 from deeplens.lens import Lens
 from deeplens.basics import DEPTH, EPSILON, PSF_KS
-from deeplens.optics.psf import conv_psf_depth_interp
+from deeplens.optics.psf import conv_psf_depth_interp, conv_psf_occlusion
 
 
 class ParaxialLens(Lens):
@@ -281,6 +281,63 @@ class ParaxialLens(Lens):
         psf_map_l = psf_l.unsqueeze(0).unsqueeze(0).repeat(grid[0], grid[1], 1, 1, 1)
         psf_map_r = psf_r.unsqueeze(0).unsqueeze(0).repeat(grid[0], grid[1], 1, 1, 1)
         return psf_map_l, psf_map_r
+
+    # =============================================
+    # RGBD rendering (occlusion-aware)
+    # =============================================
+    def render_rgbd(self, img_obj, depth_map, method="psf_patch", **kwargs):
+        """Occlusion-aware RGBD rendering for paraxial lens.
+
+        Uses back-to-front layered compositing to prevent color bleeding at depth
+        discontinuities. Since paraxial lenses have no spatially varying
+        aberrations, all methods (psf_patch, psf_map, psf_pixel) produce
+        identical results; the `method` parameter is accepted for API
+        compatibility but ignored.
+
+        Args:
+            img_obj (tensor): Object image. Shape [B, C, H, W].
+            depth_map (tensor): Depth map [mm]. Shape [B, 1, H, W]. Values should be positive.
+            method (str, optional): Ignored (no spatial variation). Defaults to "psf_patch".
+            **kwargs: Additional keyword arguments:
+                - psf_ks (int): PSF kernel size. Defaults to PSF_KS.
+                - num_layers (int): Number of depth layers. Defaults to 16.
+                - depth_min (float): Minimum depth. Defaults to depth_map.min().
+                - depth_max (float): Maximum depth. Defaults to depth_map.max().
+
+        Returns:
+            img_render (tensor): Rendered image. Shape [B, C, H, W].
+
+        Reference:
+            [1] "Dr.Bokeh: DiffeRentiable Occlusion-aware Bokeh Rendering", CVPR 2024.
+        """
+        if depth_map.min() < 0:
+            raise ValueError("Depth map should be positive.")
+
+        if len(depth_map.shape) == 3:
+            depth_map = depth_map.unsqueeze(1)  # [B, H, W] -> [B, 1, H, W]
+
+        psf_ks = kwargs.get("psf_ks", PSF_KS)
+        num_layers = kwargs.get("num_layers", 16)
+        depth_min = kwargs.get("depth_min", depth_map.min())
+        depth_max = kwargs.get("depth_max", depth_map.max())
+
+        # Sample depth layers
+        disp_ref, depths_ref = self._sample_depth_layers(depth_min, depth_max, num_layers)
+
+        # Compute PSF at each depth layer (spatially invariant, so patch_center=(0,0))
+        points = torch.stack(
+            [
+                torch.zeros_like(depths_ref),
+                torch.zeros_like(depths_ref),
+                depths_ref,
+            ],
+            dim=-1,
+        )
+        psfs = self.psf_rgb(points=points, ks=psf_ks)  # [num_layers, 3, ks, ks]
+
+        # Occlusion-aware rendering
+        img_render = conv_psf_occlusion(img_obj, -depth_map, psfs, depths_ref)
+        return img_render
 
     def render_rgbd_dp(self, rgb_img, depth):
         """Render RGBD image with dual-pixel PSF.

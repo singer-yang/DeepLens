@@ -8,8 +8,6 @@
 
 import torch
 
-from deeplens.sensor import RGBSensor
-
 
 # ===========================================
 # Renderer
@@ -62,17 +60,35 @@ class Camera(Renderer):
         lens_file,
         sensor_file,
         lens_type="geolens",
+        sensor_type="rgb",
         device=None,
     ):
         super().__init__(device=device)
 
         # Sensor
-        self.sensor = RGBSensor(sensor_file)
+        if sensor_type == "simple":
+            from deeplens.sensor import Sensor
+
+            self.sensor = Sensor.from_config(sensor_file)
+        elif sensor_type == "rgb":
+            from deeplens.sensor import RGBSensor
+
+            self.sensor = RGBSensor.from_config(sensor_file)
+        elif sensor_type == "mono":
+            from deeplens.sensor import MonoSensor
+
+            self.sensor = MonoSensor.from_config(sensor_file)
+        elif sensor_type == "event":
+            from deeplens.sensor import EventSensor
+
+            self.sensor = EventSensor.from_config(sensor_file)
+        else:
+            raise NotImplementedError(f"Unsupported sensor type: {sensor_type}")
         self.sensor.to(device)
         sensor_res = self.sensor.res
         sensor_size = self.sensor.size
 
-        # Lens (here we can use either GeoLens or other lens models)
+        # Lens
         if lens_type == "geolens":
             from deeplens.geolens import GeoLens
 
@@ -81,6 +97,14 @@ class Camera(Renderer):
             from deeplens.hybridlens import HybridLens
 
             self.lens = HybridLens(lens_file, device=device)
+        elif lens_type == "paraxiallens":
+            from deeplens.paraxiallens import ParaxialLens
+
+            self.lens = ParaxialLens(lens_file, device=device)
+        elif lens_type == "diffraclens":
+            from deeplens.diffraclens import DiffractiveLens
+
+            self.lens = DiffractiveLens(lens_file, device=device)
         else:
             raise NotImplementedError(f"Unsupported lens type: {lens_type}")
         self.lens.set_sensor(sensor_res=sensor_res, sensor_size=sensor_size)
@@ -101,7 +125,13 @@ class Camera(Renderer):
                 - "img": sRGB image (torch.Tensor), shape (B, 3, H, W), range [0, 1]
                 - "iso": ISO value (int), shape (B,)
                 - "field_center": Field center coordinates (torch.Tensor), shape (B, 2), range [-1, 1]
-            render_mode (str): Rendering method. Defaults to "psf_patch".
+                - "depth": Depth map (torch.Tensor), required for "psf_pixel" and "psf_patch_depth_interp"
+            render_mode (str): Rendering method for lens aberration simulation. Options:
+                - "psf_patch": Per-patch PSF convolution (default)
+                - "psf_map": Spatially-varying PSF map convolution
+                - "psf_pixel": Pixel-wise PSF rendering
+                - "ray_tracing": Full ray tracing simulation
+                - "psf_patch_depth_interp": PSF patch with depth interpolation
             output_type (str): Output format type. Defaults to "rggbif".
 
         Returns:
@@ -118,25 +148,71 @@ class Camera(Renderer):
         img = data_dict["img"]
         iso = data_dict["iso"]
 
-        # Unprocess from RGB to linear RGB space
+        # -----------------------------------------------
+        # Step 1: Unprocess from sRGB to linear RGB space
+        # -----------------------------------------------
         sensor = self.sensor
         img_linrgb = sensor.unprocess(img)  # (B, 3, H, W), [0, 1]
 
-        # Lens aberration simulation in linear RGB space
-        img_lq = self.render_lens(
-            img_linrgb, render_mode=render_mode, **data_dict
-        )  # (B, 3, H, W), [0, 1]
+        # -----------------------------------------------
+        # Step 2: Lens aberration simulation in linear RGB space
+        # -----------------------------------------------
+        if render_mode == "psf_patch":
+            # Each image in the batch can have a different PSF
+            img_lq_ls = []
+            for b in range(img_linrgb.shape[0]):
+                img_b = img_linrgb[b, ...].unsqueeze(0)
+                patch_center = data_dict["field_center"][b, ...]
+                img_lq_b = self.lens.render(
+                    img_b, method="psf_patch", patch_center=patch_center
+                )
+                img_lq_ls.append(img_lq_b)
+            img_lq = torch.cat(img_lq_ls, dim=0)
 
-        # Convert linear RGB to Bayer space
-        bayer_gt = sensor.linrgb2bayer(img_linrgb)  # (B, 1, H, W), [0, 2**bit - 1]
-        bayer_lq = sensor.linrgb2bayer(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
+        elif render_mode == "psf_map":
+            img_lq = self.lens.render(img_linrgb, method="psf_map")
 
-        # Simulate sensor noise
+        elif render_mode == "psf_pixel":
+            img_lq = self.lens.render(
+                img_linrgb, method="psf_pixel", **data_dict
+            )
+
+        elif render_mode == "ray_tracing":
+            img_lq = self.lens.render(
+                img_linrgb, method="ray_tracing", **data_dict
+            )
+
+        elif render_mode == "psf_patch_depth_interp":
+            img_lq_ls = []
+            for b in range(img_linrgb.shape[0]):
+                img_b = img_linrgb[b, ...].unsqueeze(0)
+                patch_center = data_dict["field_center"][b, ...].unsqueeze(0)
+                depth = data_dict["depth"][b, ...].unsqueeze(0)
+                img_lq_b = self.lens.render_rgbd(
+                    img_b, depth, method="psf_patch", patch_center=patch_center
+                )
+                img_lq_ls.append(img_lq_b)
+            img_lq = torch.cat(img_lq_ls, dim=0)
+
+        else:
+            raise NotImplementedError(f"Invalid render mode: {render_mode}")
+
+        # -----------------------------------------------
+        # Step 3: Convert linear RGB to Bayer space
+        # -----------------------------------------------
+        bayer_gt = sensor.linrgb2raw(img_linrgb)  # (B, 1, H, W), [0, 2**bit - 1]
+        bayer_lq = sensor.linrgb2raw(img_lq)  # (B, 1, H, W), [0, 2**bit - 1]
+
+        # -----------------------------------------------
+        # Step 4: Simulate sensor noise
+        # -----------------------------------------------
         bayer_lq = sensor.simu_noise(
             bayer_lq, iso
         )  # (B, 1, H, W), [black_level, 2**bit - 1]
 
-        # Pack output for network training
+        # -----------------------------------------------
+        # Step 5: Pack output for network training
+        # -----------------------------------------------
         data_lq, data_gt = self.pack_output(
             bayer_gt=bayer_gt,
             bayer_lq=bayer_lq,
@@ -144,63 +220,6 @@ class Camera(Renderer):
             **data_dict,
         )
         return data_lq, data_gt
-
-    def render_lens(self, img_linrgb, render_mode="psf_patch", **kwargs):
-        """Apply lens aberrations to a linear RGB image.
-
-        Args:
-            img_linrgb (torch.Tensor): Linear RGB image (energy representation),
-                shape (B, 3, H, W), range [0, 1]
-            render_mode (str): Rendering method to use. Options include:
-                - "psf_patch": PSF with patch rendering
-                - "psf_map": PSF map rendering
-                - "psf_pixel": Pixel-wise PSF rendering
-                - "ray_tracing": Full ray tracing simulation
-                - "psf_patch_depth_interp": PSF patch with depth interpolation
-                Defaults to "psf_patch".
-            **kwargs: Additional method-specific arguments (e.g., field_center, depth).
-
-        Returns:
-            torch.Tensor: Degraded image with lens aberrations, shape (B, 3, H, W), range [0, 1]
-        """
-        if render_mode == "psf_patch":
-            # Because different image in a batch can have different PSF, so we use for loop here
-            img_lq_ls = []
-            for b in range(img_linrgb.shape[0]):
-                img = img_linrgb[b, ...].unsqueeze(0)
-                patch_center = kwargs["field_center"][b, ...]
-                img_lq = self.lens.render(
-                    img, method="psf_patch", patch_center=patch_center
-                )
-                img_lq_ls.append(img_lq)
-            img_lq = torch.cat(img_lq_ls, dim=0)
-
-        elif render_mode == "psf_map":
-            img_lq = self.lens.render(img_linrgb, method="psf_map")
-
-        elif render_mode == "psf_pixel":
-            depth = kwargs["depth"][b, ...]
-            img_lq = self.lens.render(img_linrgb, method="psf_pixel", **kwargs)
-
-        elif render_mode == "ray_tracing":
-            img_lq = self.lens.render(img_linrgb, method="ray_tracing", **kwargs)
-
-        elif render_mode == "psf_patch_depth_interp":
-            img_lq_ls = []
-            for b in range(img_linrgb.shape[0]):
-                img = img_linrgb[b, ...].unsqueeze(0)
-                patch_center = kwargs["field_center"][b, ...].unsqueeze(0)
-                depth = kwargs["depth"][b, ...].unsqueeze(0)
-                img_lq = self.lens.render_rgbd(
-                    img, depth, method="psf_patch", patch_center=patch_center
-                )
-                img_lq_ls.append(img_lq)
-            img_lq = torch.cat(img_lq_ls, dim=0)
-
-        else:
-            raise NotImplementedError(f"Invalid render mode: {render_mode}")
-
-        return img_lq
 
     def pack_output(
         self,

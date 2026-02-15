@@ -1,6 +1,6 @@
 """Image Signal Processing (ISP) pipeline converts RAW bayer images to RGB images.
 
-This file contains the following ISP pipelines:
+This file contains the following common ISP pipelines:
     1. Simple ISP
     2. Invertible ISP
     3. OpenISP
@@ -12,7 +12,7 @@ Reference:
 import torch
 import torch.nn as nn
 
-from .isp_modules import (
+from deeplens.sensor.isp_modules import (
     AntiAliasingFilter,
     AutoWhiteBalance,
     BlackLevelCompensation,

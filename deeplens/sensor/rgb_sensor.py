@@ -1,61 +1,115 @@
-"""RGB sensor with ISP. It is used to convert between RAW bayer image and RGB image."""
+"""RGB sensor with noise model and ISP."""
 
 import json
-import math
 
 import torch
 
 from deeplens.sensor import Sensor
-from deeplens.sensor.isp import InvertibleISP
+from deeplens.sensor.isp_modules.isp import InvertibleISP
 
 
 class RGBSensor(Sensor):
     """RGB sensor."""
 
-    def __init__(self, sensor_file):
-        super().__init__()
-        
-        with open(sensor_file, "r") as f:
-            config = json.load(f)
+    def __init__(
+        self,
+        size=(36.0, 24.0),
+        res=(5472, 3648),
+        bit=10,
+        black_level=64,
+        bayer_pattern="rggb",
+        white_balance=(2.0, 1.0, 1.8),
+        color_matrix=None,
+        gamma_param=2.2,
+        iso_base=100,
+        read_noise_std=0.5,
+        shot_noise_std_alpha=0.4,
+        shot_noise_std_beta=0.0,
+        wavelengths=None,
+        red_response=None,
+        green_response=None,
+        blue_response=None,
+    ):
+        """
+        Args:
+            size (tuple): Sensor physical size in mm (W, H). Default (36.0, 24.0).
+            res (tuple): Sensor resolution in pixels (W, H). Default (5472, 3648).
+            bit (int): Bit depth. Default 10.
+            black_level (int): Black level. Default 64.
+            bayer_pattern (str): Bayer pattern e.g. "rggb". Default "rggb".
+            white_balance (tuple): White balance gains. Default (2.0, 1.0, 1.8).
+            color_matrix (list or Tensor): Color correction matrix.
+            gamma_param (float): Gamma correction parameter. Default 2.2.
+            iso_base (int): Base ISO. Default 100.
+            read_noise_std (float): Read noise std. Default 0.5.
+            shot_noise_std_alpha (float): Shot noise alpha. Default 0.4.
+            shot_noise_std_beta (float): Shot noise beta. Default 0.0.
+            wavelengths (list): Wavelengths.
+            red_response (list): Red channel spectral response.
+            green_response (list): Green channel spectral response.
+            blue_response (list): Blue channel spectral response.
+        """
+        super().__init__(size=size, res=res)
 
-        # Extract parameters with defaults
-        self.size = config["sensor_size"]
-        self.res = config["sensor_res"]
-        self.pixel_size = 2 / math.sqrt(self.res[0] ** 2 + self.res[1] ** 2)
-        self.bit = config["bit"]
-        self.nbit_max = 2**self.bit - 1  
-        self.black_level = config["black_level"]
-        self.bayer_pattern = config.get("bayer_pattern", "rggb")
-
-        # ISP parameters
-        white_balance = config.get("white_balance_d50", (2.0, 1.0, 1.8))
-        color_matrix = config.get("color_matrix_d50", None)
-        gamma_param = config.get("gamma_param", 2.2)
+        self.bit = bit
+        self.nbit_max = 2**bit - 1
+        self.black_level = black_level
+        self.bayer_pattern = bayer_pattern
 
         # Noise parameters
-        self.iso_base = config.get("iso_base", 100)
-        self.read_noise_std = config.get("read_noise_std", 0.5)
-        self.shot_noise_std_alpha = config.get("shot_noise_std_alpha", 0.4)
-        self.shot_noise_std_beta = config.get("shot_noise_std_beta", 0.0)
-        
+        self.iso_base = iso_base
+        self.readnoise_std = read_noise_std
+        self.shotnoise_std_alpha = shot_noise_std_alpha
+        self.shotnoise_std_beta = shot_noise_std_beta
+
         # Spectral response curves
-        self.wavelengths = config.get("wavelengths", None)
-        red_response = config.get("red_spectral_response", None)
-        green_response = config.get("green_spectral_response", None)
-        blue_response = config.get("blue_spectral_response", None)
+        self.wavelengths = wavelengths
         if self.wavelengths is not None:
-            self.red_response = torch.tensor(red_response) / sum(green_response)
-            self.green_response = torch.tensor(green_response) / sum(green_response)
-            self.blue_response = torch.tensor(blue_response) / sum(green_response)
+            green_sum = sum(green_response)
+            self.red_response = torch.tensor(red_response) / green_sum
+            self.green_response = torch.tensor(green_response) / green_sum
+            self.blue_response = torch.tensor(blue_response) / green_sum
 
         # ISP
         self.isp = InvertibleISP(
-            bit=self.bit,
-            black_level=self.black_level,
-            bayer_pattern=self.bayer_pattern,
+            bit=bit,
+            black_level=black_level,
+            bayer_pattern=bayer_pattern,
             white_balance=white_balance,
             color_matrix=color_matrix,
             gamma_param=gamma_param,
+        )
+
+    @classmethod
+    def from_config(cls, sensor_file):
+        """Create an RGBSensor from a JSON config file.
+
+        Args:
+            sensor_file: Path to JSON sensor config file.
+
+        Returns:
+            RGBSensor instance.
+        """
+        with open(sensor_file, "r") as f:
+            config = json.load(f)
+
+        return cls(
+            size=config["sensor_size"],
+            res=config["sensor_res"],
+            bit=config["bit"],
+            black_level=config["black_level"],
+            bayer_pattern=config.get("bayer_pattern", "rggb"),
+            white_balance=config.get("white_balance_d50", (2.0, 1.0, 1.8)),
+            color_matrix=config.get("color_matrix_d50", None),
+            gamma_param=config.get("gamma_param", 2.2),
+            iso_base=config.get("iso_base", 100),
+            read_noise_std=config.get("read_noise_std", 0.5),
+            shot_noise_std_alpha=config.get("shot_noise_std_alpha", 0.4),
+            shot_noise_std_beta=config.get("shot_noise_std_beta", 0.0),
+            wavelengths=config.get("wavelengths", None),
+            red_response=config.get("red_spectral_response", None),
+            green_response=config.get("green_spectral_response", None),
+            blue_response=config.get("blue_spectral_response", None),
         )
 
     def to(self, device):
@@ -70,10 +124,10 @@ class RGBSensor(Sensor):
         """Apply response curve to the spectral image to get the raw image.
 
         Args:
-            img_spectral: Spectral image
+            img_spectral: Spectral image, shape (B, C, H, W), range [0, 1]
 
         Returns:
-            img_raw: Raw image
+            img_raw: Raw image, shape (B, 3, H, W), range [0, 1]
 
         Reference:
             [1] Spectral Sensitivity Estimation Without a Camera. ICCP 2023.
@@ -106,24 +160,6 @@ class RGBSensor(Sensor):
 
         return img_raw
 
-    def forward(self, img_nbit, iso):
-        """Simulate sensor output with noise and ISP.
-
-        Args:
-            img_nbit: Tensor of shape (B, 3, H, W), range [~black_level, 2**bit - 1]
-            iso: ISO value as int
-
-        Returns:
-            img_noise: Tensor of shape (B, 3, H, W), range [0, 1]
-        """
-        img_raw = self.response_curve(img_nbit)
-        img_noise = self.simu_noise(img_raw, iso)
-        img_noise = self.isp(img_noise)
-        return img_noise
-
-    # ===============================
-    # Unprocess
-    # ===============================
     def unprocess(self, image, in_type="rgb"):
         """Unprocess an image to unbalanced RAW RGB space.
 
@@ -152,8 +188,8 @@ class RGBSensor(Sensor):
 
         return image
 
-    def linrgb2bayer(self, img_linrgb):
-        """Unprocess the linear RGB image from [0, 1] to [~black_level, 2**bit - 1].
+    def linrgb2raw(self, img_linrgb):
+        """Convert linear RGB image to raw Bayer space.
 
         Args:
             img_linrgb: Tensor of shape (B, 3, H, W), range [0, 1]
@@ -168,6 +204,53 @@ class RGBSensor(Sensor):
         bayer_nbit = bayer_float * (2**bit - 1 - black_level) + black_level
         bayer_nbit = torch.round(bayer_nbit)
         return bayer_nbit
+
+    def simu_noise(self, img_raw, iso):
+        """Simulate sensor noise considering sensor quantization and noise model.
+
+        Args:
+            img_raw: N-bit clean image, (B, C, H, W), range [0, 2**bit - 1]
+            iso: (B,), range [0, 800]
+
+        Returns:
+            img_raw_noise: N-bit noisy image, (B, C, H, W), range [0, 2**bit - 1]
+
+        Reference:
+            [1] "Unprocessing Images for Learned Raw Denoising."
+            [2] https://www.photonstophotos.net/Charts/RN_ADU.htm
+            [3] https://www.photonstophotos.net/Investigations/Measurement_and_Sample_Variation.htm
+            [4] https://www.dpreview.com/forums/thread/4669806
+        """
+        nbit_max = self.nbit_max
+        black_level = self.black_level
+        device = img_raw.device
+
+        # Calculate noise standard deviation
+        shotnoise_std = torch.clamp(
+            self.shotnoise_std_alpha * torch.sqrt(torch.clamp(img_raw - black_level, min=0.0))
+            + self.shotnoise_std_beta,
+            0.0,
+        )
+        if (iso > 800).any():
+            raise ValueError(f"Currently noise model only works for low ISO <= 800, got {iso}")
+        gain_analog = 1.0  # we only measured analog gain = 1.0
+        gain_digit = (iso / self.iso_base).view(-1, 1, 1, 1)
+        noise_std = torch.sqrt(
+            shotnoise_std**2 * gain_digit * gain_analog
+            + self.readnoise_std**2 * gain_digit**2
+        )
+
+        # Sample random noise
+        noise_sample = (
+            torch.normal(mean=0.0, std=1.0, size=img_raw.size(), device=device)
+            * noise_std
+        )
+        img_raw_noisy = img_raw + noise_sample
+
+        # Clip and quantize
+        img_raw_noisy = torch.clip(img_raw_noisy, 0.0, nbit_max)
+        img_raw_noisy = torch.round(img_raw_noisy)
+        return img_raw_noisy
 
     def sample_augmentation(self):
         """Randomly sample a set of augmentation parameters for ISP modules. Used for data augmentation during training."""
