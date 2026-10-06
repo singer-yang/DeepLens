@@ -10,6 +10,7 @@ Technical Paper:
     Xinge Yang, Qiang Fu, and Wolfgang Heidrich, "Curriculum learning for ab initio deep learned refractive optics," Nature Communications 2024.
 """
 
+import logging
 import math
 
 import numpy as np
@@ -36,6 +37,8 @@ from .geometric_surface import Aperture
 from .lens import Lens
 from .light import Ray
 from .material import Material
+
+logger = logging.getLogger(__name__)
 
 
 class GeoLens(
@@ -1043,6 +1046,11 @@ class GeoLens(
         else:
             self.rfov = 0.0
             self.real_dfov = 0.0
+        if self.rfov == 0.0:
+            logger.warning(
+                "calc_fov: no usable off-axis field; rfov = 0, so normalized-"
+                "field sampling (PSF, spot, MTF) collapses to the axis."
+            )
 
         # 3. Compute 35mm equivalent focal length. 35mm sensor: 36mm * 24mm
         self.eqfl = 21.63 / math.tan(self.rfov_eff)
