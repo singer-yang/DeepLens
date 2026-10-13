@@ -4,10 +4,10 @@
 --extra-index-url https://download.pytorch.org/whl/cu128
 
 # PyTorch: CUDA 12.8 on Linux/Windows, native wheels on macOS.
-torch==2.10.0+cu128; sys_platform == "linux" or sys_platform == "win32"
-torchvision==0.25.0+cu128; sys_platform == "linux" or sys_platform == "win32"
-torch==2.10.0; sys_platform == "darwin"
-torchvision==0.25.0; sys_platform == "darwin"
+torch==2.11.0+cu128; sys_platform == "linux" or sys_platform == "win32"
+torchvision==0.26.0+cu128; sys_platform == "linux" or sys_platform == "win32"
+torch==2.11.0; sys_platform == "darwin"
+torchvision==0.26.0; sys_platform == "darwin"
 
 # Computer Vision & Image Processing
 opencv-python>=4.8.0

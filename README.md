@@ -102,8 +102,8 @@ cd DeepLens
 ```
 
 Use Python 3.12. On Linux and Windows with NVIDIA GPUs, the requirements install
-PyTorch 2.10.0+cu128 and torchvision 0.25.0+cu128. On Apple-silicon macOS, they
-install the native PyTorch 2.10.0 and torchvision 0.25.0 wheels.
+PyTorch 2.11.0+cu128 and torchvision 0.26.0+cu128. On Apple-silicon macOS, they
+install the native PyTorch 2.11.0 and torchvision 0.26.0 wheels.
 
 Create a conda environment:
 
