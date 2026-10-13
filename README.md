@@ -105,6 +105,10 @@ Use Python 3.12. On Linux and Windows with NVIDIA GPUs, the requirements install
 PyTorch 2.11.0+cu128 and torchvision 0.26.0+cu128. On Apple-silicon macOS, they
 install the native PyTorch 2.11.0 and torchvision 0.26.0 wheels.
 
+PyTorch 2.11 dropped Volta GPUs (V100, compute capability 7.0) from its CUDA 12.8
+wheels. On those GPUs, switch `requirements.txt` to the
+`https://download.pytorch.org/whl/cu126` index and the `+cu126` wheels.
+
 Create a conda environment:
 
 ```
