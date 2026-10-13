@@ -38,8 +38,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch>=2.10,<2.12",
-    "torchvision>=0.25,<0.27",
+    "torch>=2.10",
+    "torchvision>=0.25",
     "opencv-python>=4.8.0",
     "matplotlib>=3.7.0",
     "scikit-image>=0.20.0",
