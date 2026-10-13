@@ -118,7 +118,7 @@ def test_bounds_sample_shared_profiles_and_physical_rims(
     ["fold", "dead", "clear", "none", "first_dead", "early_dead", "early_crossing"],
 )
 def test_fov_uses_first_crossing_or_last_surviving_field(
-    monkeypatch, case, device_auto
+    monkeypatch, caplog, case, device_auto
 ):
     lens = GeoLens(device=device_auto)
     lens.foclen, lens.r_sensor, lens.sensor_size = 10.0, 5.0, (8.0, 6.0)
@@ -170,6 +170,7 @@ def test_fov_uses_first_crossing_or_last_surviving_field(
     assert fov[0] == 0.0
     assert lens.rfov == pytest.approx(expected, rel=1e-5)
     assert lens.real_dfov == pytest.approx(2 * expected)
+    assert ("rfov = 0" in caplog.text) == (expected == 0.0)
 
 
 def test_spot_analysis_reports_lost_field_throughput(monkeypatch, device_auto):
