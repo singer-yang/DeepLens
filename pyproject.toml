@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeplens-core"
-version = "2.5.5"
+version = "2.5.6"
 description = "DeepLens is a differentiable optical lens simulator for computational imaging and optical design."
 readme = "README.md"
 license = {text = "Apache-2.0"}
