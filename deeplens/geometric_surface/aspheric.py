@@ -178,6 +178,68 @@ class Aspheric(Surface):
         """
         return self.c, self.k
 
+    def newtons_method(self, ray):
+        """Find an intersection, rejecting rays entering behind the aperture rim."""
+        t, valid = super().newtons_method(ray)
+        return t, valid & ~self._enters_through_edge(ray)
+
+    @torch.no_grad()
+    def _enters_through_edge(self, ray):
+        """Identify rays entering the aperture or conic domain behind the face.
+
+        The entry point is pulled radially inside the boundary before evaluating
+        sag, so a grazing ray is not sampled past its intersection. Rays starting
+        inside the valid region retain the usual Newton validity checks.
+
+        Args:
+            ray (Ray): Input ray bundle in local surface coordinates.
+
+        Returns:
+            mask (torch.Tensor): Boolean edge-entry mask, shape [...].
+        """
+        o, d = ray.o, ray.d
+        c, k = self._get_curvature_params()
+        aperture_sq = (self.w**2 + self.h**2) / 4 if self.is_square else self.r**2
+        conic_power = (1 + k) * c**2
+        domain_sq = torch.where(
+            conic_power > 0,
+            1 / torch.where(conic_power > 0, conic_power, 1.0),
+            torch.full_like(conic_power, float("inf")),
+        )
+        radius_sq = domain_sq.clamp(max=aperture_sq).to(o)
+        a = d[..., :2].square().sum(-1)
+        b = (o[..., :2] * d[..., :2]).sum(-1)
+        outside = o[..., :2].square().sum(-1) - radius_sq
+        disc = b.square() - a * outside
+        axial = a == 0
+        denominator = torch.where(axial, 1.0, a)
+        root = disc.clamp(min=0).sqrt()
+        t_in = torch.where(axial, -float("inf"), (-b - root) / denominator)
+        t_out = torch.where(axial, float("inf"), (-b + root) / denominator)
+        reaches = torch.where(axial, outside <= 0, disc > 0)
+        starts_inside = outside <= 0
+
+        if self.is_square:
+            # Square apertures use half-side lengths, not a circular substitute.
+            half_size = o.new_tensor([self.w / 2, self.h / 2])
+            parallel = d[..., :2] == 0
+            safe_d = torch.where(parallel, 1.0, d[..., :2])
+            t1 = (-half_size - o[..., :2]) / safe_d
+            t2 = (half_size - o[..., :2]) / safe_d
+            near = torch.where(parallel, -float("inf"), torch.minimum(t1, t2))
+            far = torch.where(parallel, float("inf"), torch.maximum(t1, t2))
+            t_in = torch.maximum(t_in, near.amax(-1))
+            t_out = torch.minimum(t_out, far.amin(-1))
+            inside_square = o[..., :2].abs() <= half_size
+            reaches = reaches & (~parallel | inside_square).all(-1)
+            starts_inside = starts_inside & inside_square.all(-1)
+
+        enters = reaches & ~starts_inside & (t_in > 0) & (t_out > t_in)
+        entry = o + d * torch.where(enters, t_in, 0.0).unsqueeze(-1)
+        xy = torch.where(enters.unsqueeze(-1), entry[..., :2], 0.0) * (1 - 1e-6)
+        behind = (self._sag(xy[..., 0], xy[..., 1]) - entry[..., 2]) * d[..., 2] < 0
+        return enters & behind
+
     def paraxial_power(self, n1, n2):
         """Return the paraxial optical power of this surface [1/mm].
 
