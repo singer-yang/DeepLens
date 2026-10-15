@@ -241,6 +241,36 @@ class TestSEQIO:
         with pytest.raises(ValueError, match=r"image surface.*\bSI\b"):
             GeoLens(filename=str(output))
 
+    def test_inline_comment_and_separator_are_not_glasses(self, test_output_dir):
+        """``!`` comments and ``;`` command separators are not glass names.
+
+        Regression: ``S r t; CCY 0`` read the glass as ``N-BK7;`` and
+        ``S r t ! note`` read it as ``!``; both surfaces were silently dropped.
+        """
+        from deeplens import GeoLens
+
+        clean = (
+            "RDM\nEPD 10.0\nYAN 0 10\nSO 0.0 1e10\n"
+            "S 50.0 3.0 N-BK7\nS -50.0 45.0\nSI 0.0 0.0\nGO\n"
+        )
+        commented = (
+            "! hand-written prescription\nRDM\nEPD 10.0\nYAN 0 10 ! degrees\n"
+            "SO 0.0 1e10\nS 50.0 3.0 N-BK7; CCY 0\nS -50.0 45.0 ! air gap\n"
+            "SI 0.0 0.0\nGO\n"
+        )
+        lenses = []
+        for stem, text in (("clean", clean), ("commented", commented)):
+            path = Path(test_output_dir) / f"seq_comment_{stem}.seq"
+            path.write_text(text, encoding="utf-8")
+            lenses.append(GeoLens(filename=str(path)))
+
+        reference, lens = lenses
+        assert [s.mat2.get_name() for s in lens.surfaces] == [
+            s.mat2.get_name() for s in reference.surfaces
+        ]
+        assert [s.mat2.get_name() for s in lens.surfaces] == ["n-bk7", "air"]
+        assert float(lens.foclen) == pytest.approx(float(reference.foclen))
+
 
 class TestCrossFormat:
     """Tests for cross-format conversion."""
