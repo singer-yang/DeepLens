@@ -206,6 +206,17 @@ class TestZMXIO:
         ):
             GeoLens(filename=str(output))
 
+    def test_glass_name_with_slash_falls_back_to_model_values(self):
+        """A GLAS name with "/" that is not n/V uses the record's nd/Vd.
+
+        Material raises ValueError (not NotImplementedError) for such a name,
+        which used to escape the model-glass fallback and abort the import.
+        """
+        from deeplens import GeoLens
+
+        record = "FOO/BAR 0 0 1.5168 64.17 0 0 0 0"
+        assert GeoLens._resolve_zmx_glass(record) == "1.5168/64.17"
+
 
 class TestSEQIO:
     """Tests for Code V .seq lens file I/O."""

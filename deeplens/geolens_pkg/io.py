@@ -51,7 +51,8 @@ class GeoLensIO:
             # Preserve catalog dispersion whenever the named glass is known.
             Material(normalized_name)
             return normalized_name
-        except NotImplementedError:
+        except (NotImplementedError, ValueError):
+            # ValueError: a name with "/" that is not a numeric n/V pair.
             pass
 
         # Zemax model-glass records carry nd/Vd in fields four and five. These
