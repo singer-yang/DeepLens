@@ -350,6 +350,30 @@ class TestRefractiveIndexInfo:
         assert n.item() == pytest.approx(1.5168, abs=1e-3)
 
 
+class TestPatentGlassGrades:
+    """Glass grades that patent prescriptions name but no bundled catalog had."""
+
+    @pytest.mark.parametrize(
+        ("name", "nd", "vd"),
+        [
+            ("TAFD35L", 1.91082, 35.25),
+            ("NBFD29", 1.77047, 29.74),
+            ("J-KZFH9", 1.73800, 32.26),
+            ("FDS20-W", 1.86966, 20.02),
+        ],
+    )
+    def test_patent_grade_resolves(self, name, nd, vd):
+        mat = Material(name)
+        assert mat.dispersion == "cauchy"
+        assert float(mat.n) == pytest.approx(nd)
+        assert float(mat.V) == pytest.approx(vd)
+
+    def test_refractiveindex_grade_keeps_its_formula(self):
+        # TAFD37A is in refractiveindex_data.json; a custom-table row would
+        # shadow its dispersion formula with a Cauchy fit.
+        assert Material("tafd37a").dispersion == "rii"
+
+
 class TestMaterialEdgeCases:
     """Test edge cases and error handling."""
 
