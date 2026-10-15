@@ -181,7 +181,7 @@ class ThinLens(Plane):
 
         return ray
 
-    def paraxial_power(self, n1, n2):
+    def paraxial_power(self, n1, n2, wvln=None):
         """Return the paraxial optical power of this thin lens [1/mm].
 
         A thin lens is defined by its focal length, so its power is `1 / f`
@@ -190,6 +190,8 @@ class ThinLens(Plane):
         Args:
             n1 (torch.Tensor): Refractive index of the incident medium.
             n2 (torch.Tensor): Refractive index of the transmission medium.
+            wvln (float, optional): Wavelength [µm]. Unused by refractive
+                surfaces, which see it only through `n1`/`n2`.
 
         Returns:
             power (torch.Tensor): Surface power `1 / f` [1/mm], scalar.

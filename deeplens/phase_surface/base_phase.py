@@ -221,13 +221,17 @@ class Phase(DeepObj):
         Two effects are applied:
 
         1. The phase $\\phi$ (in radians) adds to the optical path length as
-           $\\phi \\cdot \\lambda / (2\\pi)$, where $\\lambda$ is converted from [µm]
-           to [mm] internally.
-        2. The phase gradient bends the ray via the generalized Snell's law
-           $n_2 \\sin\\theta_2 = n_1 \\sin\\theta_1 + m\\,\\lambda / (2\\pi)\\,\\partial\\phi/\\partial x$.
-           Since standard refraction is already applied, the remaining deflection
-           added to the unit direction is $\\Delta l = m\\,\\lambda / (2\\pi n_2)\\,\\partial\\phi/\\partial x$.
-           The deflection sign is flipped for backward-propagating rays.
+           $m\\,\\phi \\cdot \\lambda / (2\\pi)$, where $\\lambda$ is converted
+           from [µm] to [mm] internally.
+        2. The phase gradient bends the ray by the vector grating equation on
+           the plane (normal $z$),
+           $n_2 \\mathbf{t}_2 = n_1 \\mathbf{t}_1 + m\\,\\lambda / (2\\pi)\\,\\nabla\\phi$,
+           for the tangential direction components $\\mathbf{t} = (d_x, d_y)$.
+           Refraction is already applied, so the tangential components gain
+           $m\\,\\lambda / (2\\pi n_2)\\,\\nabla\\phi$ and $d_z$ is recomputed so
+           $|\\mathbf{d}| = 1$. An order with $|\\mathbf{t}_2| \\geq 1$ is
+           evanescent and the ray is marked invalid. The relation is the same in
+           both trace directions, so a backward trace retraces the forward path.
 
         Args:
             ray (Ray): Ray with position, direction, and wavelength in [µm].
@@ -235,7 +239,8 @@ class Phase(DeepObj):
                 the deflection scales as $1/n_2$. Defaults to 1.0.
 
         Returns:
-            ray (Ray): Ray with updated direction `d` and (for coherent rays) `opl`.
+            ray (Ray): Ray with updated direction `d`, `is_valid` (evanescent
+                orders cleared) and (for coherent rays) `opl`.
 
         Note:
             Material dispersion is not modelled here. The phase profile $\\phi(x, y)$
@@ -248,33 +253,36 @@ class Phase(DeepObj):
             [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
             [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
         """
-        forward = (ray.d * ray.is_valid.unsqueeze(-1))[..., 2].sum() > 0
         valid = ray.is_valid > 0
+        order = self.diffraction_order
 
         # Step 1: DOE phase modulation
         if ray.is_coherent:
             phi = self.phi(ray.o[..., 0], ray.o[..., 1])
-            new_opl = ray.opl + phi.unsqueeze(-1) * (ray.wvln * 1e-3) / (2 * torch.pi)
+            new_opl = ray.opl + order * phi.unsqueeze(-1) * (ray.wvln * 1e-3) / (
+                2 * torch.pi
+            )
             ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
-        # Step 2: bend rays via generalized Snell's law
-        # n₂·l₂ = n₁·l₁ + M·λ/(2π)·dφ/dx
-        # After refraction: l₂ = l_refracted + M·λ/(2π·n₂)·dφ/dx
+        # Step 2: vector grating equation (see docstring).
         dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
-
-        wvln_mm = ray.wvln * 1e-3
-        order = self.diffraction_order
-        phase_deflection_scale = wvln_mm / (2 * torch.pi * n2)
-        if forward:
-            new_d_x = ray.d[..., 0] + phase_deflection_scale * dphidx * order
-            new_d_y = ray.d[..., 1] + phase_deflection_scale * dphidy * order
-        else:
-            new_d_x = ray.d[..., 0] - phase_deflection_scale * dphidx * order
-            new_d_y = ray.d[..., 1] - phase_deflection_scale * dphidy * order
-
-        new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
-        new_d = F.normalize(new_d, p=2, dim=-1)
+        scale = order * ray.wvln * 1e-3 / (2 * torch.pi * n2)
+        tx = ray.d[..., 0] + scale * dphidx
+        ty = ray.d[..., 1] + scale * dphidy
+        # Decide validity on detached values. Invalid rays get a zero tangent so
+        # the masked sqrt never sees a negative radicand (NaN gradient); the
+        # clamp keeps its gradient finite as |t| -> 1.
+        with torch.no_grad():
+            t2 = tx * tx + ty * ty
+        valid = valid & torch.isfinite(t2) & (t2 < 1.0)
+        tx = torch.where(valid, tx, torch.zeros_like(tx))
+        ty = torch.where(valid, ty, torch.zeros_like(ty))
+        dz = torch.sign(ray.d[..., 2]) * torch.sqrt(
+            (1.0 - tx * tx - ty * ty).clamp_min(EPSILON)
+        )
+        new_d = torch.stack([tx, ty, dz], dim=-1)
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
+        ray.is_valid = ray.is_valid * valid
 
         return ray
 

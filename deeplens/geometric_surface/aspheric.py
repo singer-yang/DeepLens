@@ -178,7 +178,7 @@ class Aspheric(Surface):
         """
         return self.c, self.k
 
-    def paraxial_power(self, n1, n2):
+    def paraxial_power(self, n1, n2, wvln=None):
         """Return the paraxial optical power of this surface [1/mm].
 
         Only the vertex curvature contributes, so the conic constant and the
@@ -190,6 +190,8 @@ class Aspheric(Surface):
         Args:
             n1 (torch.Tensor): Refractive index of the incident medium.
             n2 (torch.Tensor): Refractive index of the transmission medium.
+            wvln (float, optional): Wavelength [µm]. Unused by refractive
+                surfaces, which see it only through `n1`/`n2`.
 
         Returns:
             power (torch.Tensor): Surface power `(n2 - n1) * (c + 2 * a2)`

@@ -865,7 +865,7 @@ class GeoLens(
 
         for surf in self.surfaces:
             n2 = surf.mat2.ior(wvln).double()
-            omega = omega - y * surf.paraxial_power(n, n2).double()
+            omega = omega - y * surf.paraxial_power(n, n2, wvln).double()
             y_last = y
             y = y + omega * (surf._get_effective_d_next().double() / n2)
             n = n2
@@ -1210,7 +1210,7 @@ class GeoLens(
                 y = y - omega * (d / n)
                 z = z - d
                 n1 = surfaces[i - 1].mat2.ior(wvln).double() if i > 0 else air
-                omega = omega + y * surfaces[i].paraxial_power(n1, n).double()
+                omega = omega + y * surfaces[i].paraxial_power(n1, n, wvln).double()
                 n = n1
         else:
             n = aper_surf.mat2.ior(wvln).double()
@@ -1220,7 +1220,7 @@ class GeoLens(
                 z = z + d
                 surf = surfaces[i + 1]
                 n2 = surf.mat2.ior(wvln).double()
-                omega = omega - y * surf.paraxial_power(n, n2).double()
+                omega = omega - y * surf.paraxial_power(n, n2, wvln).double()
                 n = n2
 
         # A stop conjugate to infinity (telecentric side) has no finite pupil.

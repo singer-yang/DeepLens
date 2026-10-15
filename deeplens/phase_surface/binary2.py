@@ -184,6 +184,30 @@ class Binary2Phase(Phase):
 
         return dphidx, dphidy
 
+    def paraxial_power(self, n1, n2, wvln):
+        """Return the paraxial optical power of the phase [1/mm].
+
+        The $\\rho^2$ term adds the optical path
+        $m\\,\\lambda/(2\\pi)\\,a_2\\,r^2/r_\\text{norm}^2$, which is a thin lens of
+        power $-m\\,\\lambda\\,a_2/(\\pi r_\\text{norm}^2)$; the flat substrate adds
+        none. Higher orders vanish in the paraxial limit.
+
+        Args:
+            n1 (torch.Tensor): Refractive index of the incident medium (unused).
+            n2 (torch.Tensor): Refractive index of the transmission medium (unused).
+            wvln (float): Wavelength [µm].
+
+        Returns:
+            power (torch.Tensor): Surface power [1/mm], scalar.
+        """
+        return (
+            -self.diffraction_order
+            * wvln
+            * 1e-3
+            * self.order2
+            / (torch.pi * self.norm_radii**2)
+        )
+
     def get_optimizer_params(self, lrs=[1e-4, 1e-2], optim_mat=False):
         """Build optimizer parameter groups for the phase surface.
 
@@ -313,7 +337,7 @@ class Binary2Phase(Phase):
 
         Returns:
             surf_dict (dict): Surface parameters including type, radius `r` [mm],
-                polynomial coefficients (rounded), `norm_radii` [mm], position `d` [mm],
+                polynomial coefficients, `norm_radii` [mm], position `d` [mm],
                 and material name.
         """
         surf_dict = {
@@ -321,13 +345,13 @@ class Binary2Phase(Phase):
             "r": self.r,
             "is_square": self.is_square,
             "param_model": self.param_model,
-            "order2": round(self.order2.item(), 4),
-            "order4": round(self.order4.item(), 4),
-            "order6": round(self.order6.item(), 4),
-            "order8": round(self.order8.item(), 4),
-            "order10": round(self.order10.item(), 4),
-            "order12": round(self.order12.item(), 4),
-            "norm_radii": round(self.norm_radii, 4),
+            "order2": self.order2.item(),
+            "order4": self.order4.item(),
+            "order6": self.order6.item(),
+            "order8": self.order8.item(),
+            "order10": self.order10.item(),
+            "order12": self.order12.item(),
+            "norm_radii": float(self.norm_radii),
             "d_next": round(self.d_next.item(), 4),
             "mat2": self.mat2.get_name(),
             "(mat2_n)": round(float(self.mat2.n), 4),
