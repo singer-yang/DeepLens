@@ -236,6 +236,62 @@ class TestGeoLensPSF:
         assert psf.shape == (31, 31)  # Huygens currently single-point only, returns 2D
         assert psf.sum().item() == pytest.approx(1.0, abs=0.1)
 
+    def test_geolens_coherent_fields(self, sample_cellphone_lens):
+        """Coherent models should return comparable unit-energy complex fields."""
+        lens = sample_cellphone_lens
+        lens.astype(torch.float64)
+        lens.set_sensor_res((256, 256))
+        points = torch.tensor(
+            [[0.0, 0.0, DEPTH]], device=lens.device, dtype=torch.float64
+        )
+
+        def compute(model, spp, return_field=False):
+            torch.manual_seed(0)
+            kwargs = {"return_field": True} if return_field else {}
+            with torch.no_grad():
+                return lens.psf(
+                    points,
+                    wvln=DEFAULT_WAVE,
+                    ks=31,
+                    model=model,
+                    spp=spp,
+                    **kwargs,
+                )
+
+        coherent_psf = compute("coherent", 1_000_000)
+        coherent_field = compute("coherent", 1_000_000, return_field=True)
+        huygens_psf = compute("huygens", 10_000)
+        huygens_field = compute("huygens", 10_000, return_field=True)
+
+        for field in (coherent_field, huygens_field):
+            assert field.shape == (31, 31)
+            assert field.is_complex()
+            energy = field.abs().square().sum().item()
+            assert energy == pytest.approx(1.0, abs=1e-6)
+
+        for psf, field in (
+            (coherent_psf, coherent_field),
+            (huygens_psf, huygens_field),
+        ):
+            assert not psf.is_complex()
+            assert torch.allclose(
+                psf.to(torch.float64), field.abs().square(), rtol=1e-5, atol=1e-8
+            )
+
+        # Compare spatial energy distributions after suppressing Monte Carlo noise.
+        coherent_intensity = torch.nn.functional.avg_pool2d(
+            coherent_field.abs().square()[None, None], 3, stride=1, padding=1
+        ).flatten()
+        huygens_intensity = torch.nn.functional.avg_pool2d(
+            huygens_field.abs().square()[None, None], 3, stride=1, padding=1
+        ).flatten()
+        similarity = torch.nn.functional.cosine_similarity(
+            coherent_intensity,
+            huygens_intensity,
+            dim=0,
+        )
+        assert similarity.item() > 0.75
+
     def test_geolens_psf_normalized(self, sample_cellphone_lens):
         """PSF should sum to approximately 1."""
         lens = sample_cellphone_lens

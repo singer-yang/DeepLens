@@ -81,10 +81,15 @@ class GeoLensPSF:
                 recenter (bool): If True (default), center the PSF on the chief
                 ray; otherwise on the pinhole projection.
                 model (str): One of 'geometric' (default), 'coherent', 'huygens'.
+                return_field (bool): For the coherent and Huygens models, return
+                    the energy-normalized complex sensor-plane field instead of
+                    intensity. Defaults to False.
 
         Returns:
-            psf (torch.Tensor): PSF normalized to sum to 1. Shape [ks, ks] for a
-                single point, or [N, ks, ks] for the geometric model with N points.
+            torch.Tensor: Intensity PSF normalized to sum to 1, or an
+                energy-normalized complex field when ``return_field=True``.
+                Shape [ks, ks] for a single point, or [N, ks, ks] for the
+                geometric model with N points.
 
         Raises:
             ValueError: If `model` is not one of the supported names.
@@ -92,16 +97,17 @@ class GeoLensPSF:
         wvln = self.primary_wvln if wvln is None else wvln
         spp = kwargs.get("spp", None)
         recenter = kwargs.get("recenter", True)
+        return_field = kwargs.get("return_field", False)
         model = kwargs.get("model", "geometric")
         if model == "geometric":
             spp = SPP_PSF if spp is None else spp
             return self.psf_geometric(points, ks, wvln, spp, recenter)
         elif model == "coherent":
             spp = SPP_COHERENT if spp is None else spp
-            return self.psf_coherent(points, ks, wvln, spp, recenter)
+            return self.psf_coherent(points, ks, wvln, spp, recenter, return_field)
         elif model == "huygens":
             spp = SPP_COHERENT if spp is None else spp
-            return self.psf_huygens(points, ks, wvln, spp, recenter)
+            return self.psf_huygens(points, ks, wvln, spp, recenter, return_field)
         else:
             raise ValueError(f"Unknown PSF model: {model}")
 
@@ -182,7 +188,13 @@ class GeoLensPSF:
         return diff_float(psf)
 
     def psf_coherent(
-        self, points, ks=PSF_KS, wvln=None, spp=SPP_COHERENT, recenter=True
+        self,
+        points,
+        ks=PSF_KS,
+        wvln=None,
+        spp=SPP_COHERENT,
+        recenter=True,
+        return_field=False,
     ):
         """Compute the coherent exit-pupil PSF (alias for `psf_pupil_prop`).
 
@@ -198,22 +210,43 @@ class GeoLensPSF:
                 back to `self.primary_wvln`.
             spp (int, optional): Rays sampled. Defaults to SPP_COHERENT.
             recenter (bool, optional): If True (default), center on the chief ray.
+            return_field (bool, optional): Return the energy-normalized complex
+                sensor-plane field instead of intensity. Defaults to False.
 
         Returns:
-            psf (torch.Tensor): PSF normalized to sum to 1. Shape [ks, ks].
+            torch.Tensor: Intensity PSF normalized to sum to 1, or an
+                energy-normalized complex field when ``return_field=True``.
+                Shape [ks, ks].
+
+        Note:
+            The complex field has an arbitrary global phase because optical path
+            length is measured relative to a reference; relative phase is meaningful.
         """
         wvln = self.primary_wvln if wvln is None else wvln
-        return self.psf_pupil_prop(points, ks=ks, wvln=wvln, spp=spp, recenter=recenter)
+        return self.psf_pupil_prop(
+            points,
+            ks=ks,
+            wvln=wvln,
+            spp=spp,
+            recenter=recenter,
+            return_field=return_field,
+        )
 
     def psf_pupil_prop(
-        self, points, ks=PSF_KS, wvln=None, spp=SPP_COHERENT, recenter=True
+        self,
+        points,
+        ks=PSF_KS,
+        wvln=None,
+        spp=SPP_COHERENT,
+        recenter=True,
+        return_field=False,
     ):
         """Compute the single-point monochromatic PSF via the exit-pupil diffraction model.
 
         Steps:
             1. Compute the complex wavefront at the exit-pupil plane by coherent ray tracing.
             2. Propagate to the sensor plane with the Angular Spectrum Method (ASM)
-               and take the intensity as the PSF. This function is differentiable.
+               and return either its field or intensity. This function is differentiable.
 
         Args:
             points (torch.Tensor or list): Single normalized point source [3] or
@@ -226,12 +259,14 @@ class GeoLensPSF:
             spp (int, optional): Number of rays to sample. Defaults to SPP_COHERENT.
             recenter (bool, optional): If True (default), center on the chief ray;
                 otherwise on the pinhole projection.
+            return_field (bool, optional): Return the energy-normalized complex
+                sensor-plane field instead of intensity. Defaults to False.
 
         Returns:
-            psf (torch.Tensor): PSF normalized to sum to 1. Shape [ks, ks] when
-                `ks` is given, or the full uncropped intensity field of shape
-                [1, 1, 2H, 2H] (twice the exit-pupil grid after zero-padding)
-                when `ks` is None.
+            torch.Tensor: Intensity PSF normalized to sum to 1, or an
+                energy-normalized complex field when ``return_field=True``.
+                Shape [ks, ks] when `ks` is given, or [1, 1, 2H, 2H] when
+                `ks` is None (twice the exit-pupil grid after zero-padding).
 
         Reference:
             [1] "End-to-End Hybrid Refractive-Diffractive Lens Design with Differentiable Ray-Wave Model", SIGGRAPH Asia 2024.
@@ -241,6 +276,8 @@ class GeoLensPSF:
             Angular Spectrum Method (ASM) instead of a single FFT. ASM is more
             accurate because the FFT approach assumes a far-field condition
             (e.g., chief ray perpendicular to the image plane).
+            The complex field has an arbitrary global phase because optical path
+            length is measured relative to a reference; relative phase is meaningful.
         """
         wvln = self.primary_wvln if wvln is None else wvln
         # Pupil field by coherent ray tracing
@@ -274,6 +311,26 @@ class GeoLensPSF:
         # consider both interplation and padding
         psfc_idx_i = ((2 - psfc[1]) * h / 4).round().long()
         psfc_idx_j = ((2 + psfc[0]) * w / 4).round().long()
+
+        if return_field:
+            field = sensor_field
+            if ks is not None:
+                field = (
+                    F.pad(
+                        field,
+                        [ks // 2, ks // 2, ks // 2, ks // 2],
+                        mode="constant",
+                        value=0,
+                    )
+                    .squeeze(0)
+                    .squeeze(0)
+                )
+                field = field[
+                    psfc_idx_i : psfc_idx_i + ks,
+                    psfc_idx_j : psfc_idx_j + ks,
+                ]
+            energy = field.abs().square().sum(dim=(-2, -1), keepdim=True)
+            return field / torch.sqrt(energy + EPSILON)
 
         # Crop valid PSF region and normalize
         if ks is not None:
@@ -392,7 +449,13 @@ class GeoLensPSF:
         return wavefront, psf_center
 
     def psf_huygens(
-        self, points, ks=PSF_KS, wvln=None, spp=SPP_COHERENT, recenter=True
+        self,
+        points,
+        ks=PSF_KS,
+        wvln=None,
+        spp=SPP_COHERENT,
+        recenter=True,
+        return_field=False,
     ):
         """Compute the single-wavelength Huygens PSF by spherical-wave integration.
 
@@ -414,9 +477,13 @@ class GeoLensPSF:
             spp (int, optional): Rays sampled. Defaults to SPP_COHERENT.
             recenter (bool, optional): If True (default), center on the chief ray;
                 otherwise on the pinhole projection.
+            return_field (bool, optional): Return the energy-normalized complex
+                sensor-plane field instead of intensity. Defaults to False.
 
         Returns:
-            psf (torch.Tensor): PSF normalized to sum to 1. Shape [ks, ks].
+            torch.Tensor: Intensity PSF normalized to sum to 1, or an
+                energy-normalized complex field when ``return_field=True``.
+                Shape [ks, ks].
 
         Reference:
             [1] "Optical Aberrations Correction in Postprocessing Using Imaging Simulation", TOG 2021.
@@ -424,6 +491,8 @@ class GeoLensPSF:
         Note:
             Different from the ZEMAX Huygens PSF, which traces rays to the image
             plane and performs plane-wave integration.
+            The complex field has an arbitrary global phase because optical path
+            length is measured relative to a reference; relative phase is meaningful.
         """
         wvln = self.primary_wvln if wvln is None else wvln
         if self.dtype != torch.float64:
@@ -540,6 +609,11 @@ class GeoLensPSF:
 
             # Sum contributions from this batch
             psf_complex += complex_amp.sum(dim=-1)  # [ks, ks]
+
+        if return_field:
+            field = torch.flip(psf_complex, [-2, -1])
+            energy = field.abs().square().sum(dim=(-2, -1), keepdim=True)
+            return field / torch.sqrt(energy + EPSILON)
 
         # Convert complex field to intensity
         psf = psf_complex.abs() ** 2

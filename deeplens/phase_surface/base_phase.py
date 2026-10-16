@@ -144,6 +144,32 @@ class Phase(DeepObj):
         """Calculate phase derivatives. Must be implemented by subclasses."""
         raise NotImplementedError("dphi_dxy() must be implemented by subclasses")
 
+    def paraxial_power(self, n1, n2, wvln):
+        """Return the paraxial optical power of the phase [1/mm].
+
+        Near the axis `diffract` tilts a ray at height $h$ by
+        $m\\,\\lambda/(2\\pi)\\,\\partial\\phi/\\partial x$, which is a thin lens of
+        power $-m\\,\\lambda/(2\\pi)\\,\\partial^2\\phi/\\partial x^2$. The curvature is
+        a central difference of `dphi_dxy` at $h = 10^{-3}$ `norm_radii`, averaged
+        over $x$ and $y$, so it is the power the tracer applies for every phase
+        profile (a Fresnel lens gives $m\\,\\lambda/(\\lambda_0 f_0)$; a grating or
+        cubic phase gives 0). The flat substrate adds no power.
+
+        Args:
+            n1 (torch.Tensor): Refractive index of the incident medium (unused).
+            n2 (torch.Tensor): Refractive index of the transmission medium (unused).
+            wvln (float): Wavelength [µm].
+
+        Returns:
+            power (torch.Tensor): Surface power [1/mm], scalar.
+        """
+        h = 1e-3 * self.norm_radii
+        s = torch.tensor([h, -h], dtype=self.d_next.dtype, device=self.d_next.device)
+        dphidx, _ = self.dphi_dxy(s, torch.zeros_like(s))
+        _, dphidy = self.dphi_dxy(torch.zeros_like(s), s)
+        curvature = (dphidx[0] - dphidx[1] + dphidy[0] - dphidy[1]) / (4 * h)
+        return -self.diffraction_order * wvln * 1e-3 / (2 * torch.pi) * curvature
+
     # ==============================
     # Computation (ray tracing)
     # ==============================
@@ -151,8 +177,8 @@ class Phase(DeepObj):
         """Trace a ray through the phase surface.
 
         Transforms the ray to local coordinates, intersects it with the plane,
-        applies refraction then diffraction, and transforms back to global
-        coordinates.
+        applies the generalized law of refraction (`diffract`), and transforms
+        back to global coordinates.
 
         Args:
             ray (Ray): Incident ray in global coordinates.
@@ -164,8 +190,7 @@ class Phase(DeepObj):
         """
         ray = self.to_local_coord(ray)
         ray = self.intersect(ray, n1)
-        ray = self.refract(ray, n1 / n2)
-        ray = self.diffract(ray, n2=n2)
+        ray = self.diffract(ray, n1, n2)
         ray = self.to_global_coord(ray)
         return ray
 
@@ -215,27 +240,36 @@ class Phase(DeepObj):
 
         return ray
 
-    def diffract(self, ray, n2=1.0):
-        """Apply phase-surface diffraction to a ray.
+    def diffract(self, ray, n1=1.0, n2=1.0):
+        """Refract a ray through the phase surface by the generalized Snell's law.
 
         Two effects are applied:
 
         1. The phase $\\phi$ (in radians) adds to the optical path length as
-           $\\phi \\cdot \\lambda / (2\\pi)$, where $\\lambda$ is converted from [µm]
-           to [mm] internally.
-        2. The phase gradient bends the ray via the generalized Snell's law
-           $n_2 \\sin\\theta_2 = n_1 \\sin\\theta_1 + m\\,\\lambda / (2\\pi)\\,\\partial\\phi/\\partial x$.
-           Since standard refraction is already applied, the remaining deflection
-           added to the unit direction is $\\Delta l = m\\,\\lambda / (2\\pi n_2)\\,\\partial\\phi/\\partial x$.
-           The deflection sign is flipped for backward-propagating rays.
+           $m\\,\\phi \\cdot \\lambda / (2\\pi)$, where $\\lambda$ is the vacuum
+           wavelength, converted from [µm] to [mm] internally.
+        2. The phase gradient bends the ray by the generalized law of
+           refraction [2] in its three-dimensional form [3], on the plane
+           (normal $z$):
+           $n_2 \\mathbf{t}_2 = n_1 \\mathbf{t}_1 + m\\,\\lambda / (2\\pi)\\,\\nabla\\phi$
+           for the tangential direction components $\\mathbf{t} = (d_x, d_y)$,
+           with $d_z$ recomputed so $|\\mathbf{d}| = 1$. With $\\nabla\\phi = 0$
+           this is Snell's law, so no separate refraction is applied: the ray
+           is lost only when $|\\mathbf{t}_2| \\geq 1$, the critical angle the
+           phase gradient shifts [2], not at the plain-refraction one. The
+           relation is the same in both trace directions, so a backward trace
+           retraces the forward path.
 
         Args:
             ray (Ray): Ray with position, direction, and wavelength in [µm].
-            n2 (float, optional): Refractive index of the medium after the surface;
-                the deflection scales as $1/n_2$. Defaults to 1.0.
+            n1 (float, optional): Refractive index of the incident medium.
+                Defaults to 1.0.
+            n2 (float, optional): Refractive index of the transmission medium.
+                Defaults to 1.0.
 
         Returns:
-            ray (Ray): Ray with updated direction `d` and (for coherent rays) `opl`.
+            ray (Ray): Ray with updated direction `d`, `is_valid` (evanescent
+                orders cleared) and (for coherent rays) `opl`.
 
         Note:
             Material dispersion is not modelled here. The phase profile $\\phi(x, y)$
@@ -246,35 +280,39 @@ class Phase(DeepObj):
 
         Reference:
             [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
-            [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
+            [2] N. Yu et al., Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 334, 333 (2011).
+            [3] F. Aieta et al., Out-of-plane reflection and refraction of light by anisotropic optical antenna metasurfaces with phase discontinuities. Nano Lett. 12, 1702 (2012).
         """
-        forward = (ray.d * ray.is_valid.unsqueeze(-1))[..., 2].sum() > 0
         valid = ray.is_valid > 0
+        order = self.diffraction_order
 
         # Step 1: DOE phase modulation
         if ray.is_coherent:
             phi = self.phi(ray.o[..., 0], ray.o[..., 1])
-            new_opl = ray.opl + phi.unsqueeze(-1) * (ray.wvln * 1e-3) / (2 * torch.pi)
+            new_opl = ray.opl + order * phi.unsqueeze(-1) * (ray.wvln * 1e-3) / (
+                2 * torch.pi
+            )
             ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
-        # Step 2: bend rays via generalized Snell's law
-        # n₂·l₂ = n₁·l₁ + M·λ/(2π)·dφ/dx
-        # After refraction: l₂ = l_refracted + M·λ/(2π·n₂)·dφ/dx
+        # Step 2: generalized Snell's law (see docstring).
         dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
-
-        wvln_mm = ray.wvln * 1e-3
-        order = self.diffraction_order
-        phase_deflection_scale = wvln_mm / (2 * torch.pi * n2)
-        if forward:
-            new_d_x = ray.d[..., 0] + phase_deflection_scale * dphidx * order
-            new_d_y = ray.d[..., 1] + phase_deflection_scale * dphidy * order
-        else:
-            new_d_x = ray.d[..., 0] - phase_deflection_scale * dphidx * order
-            new_d_y = ray.d[..., 1] - phase_deflection_scale * dphidy * order
-
-        new_d = torch.stack([new_d_x, new_d_y, ray.d[..., 2]], dim=-1)
-        new_d = F.normalize(new_d, p=2, dim=-1)
+        scale = order * ray.wvln * 1e-3 / (2 * torch.pi)
+        tx = (n1 * ray.d[..., 0] + scale * dphidx) / n2
+        ty = (n1 * ray.d[..., 1] + scale * dphidy) / n2
+        # Decide validity on detached values. Invalid rays get a zero tangent so
+        # the masked sqrt never sees a negative radicand (NaN gradient); the
+        # clamp keeps its gradient finite as |t| -> 1.
+        with torch.no_grad():
+            t2 = tx * tx + ty * ty
+        valid = valid & torch.isfinite(t2) & (t2 < 1.0)
+        tx = torch.where(valid, tx, torch.zeros_like(tx))
+        ty = torch.where(valid, ty, torch.zeros_like(ty))
+        dz = torch.sign(ray.d[..., 2]) * torch.sqrt(
+            (1.0 - tx * tx - ty * ty).clamp_min(EPSILON)
+        )
+        new_d = torch.stack([tx, ty, dz], dim=-1)
         ray.d = torch.where(valid.unsqueeze(-1), new_d, ray.d)
+        ray.is_valid = ray.is_valid * valid
 
         return ray
 

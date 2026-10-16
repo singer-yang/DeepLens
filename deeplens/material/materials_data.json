@@ -4,7 +4,8 @@
     "Sellmeier": "Sellmeier equation parameters. References: https://en.wikipedia.org/wiki/Sellmeier_equation, https://shop.schott.com/advanced_optics/,  https://refractiveindex.info, nd at 589.3 [nm]",
     "Schott": "Schott equation parameters. References: https://shop.schott.com/advanced_optics/, https://refractiveindex.info/.",
     "Interp": "Refractive indices from 0.4um to 0.7um for interpolation, 0.01um step size. References: https://refractiveindex.info/.",
-    "CDMGs": "Cheng Du Guang Ming is a glass company in China. I select the most common glasses with stock (MA category) from their catalog. Some glasses may have different names, for example, BK7 glass uses another name in the catalog."
+    "CDMGs": "Cheng Du Guang Ming is a glass company in China. I select the most common glasses with stock (MA category) from their catalog. Some glasses may have different names, for example, BK7 glass uses another name in the catalog.",
+    "Patent glasses": "MATERIAL_TABLE rows after sf11: HOYA and Hikari grades named by patent prescriptions that neither the AGF catalogs nor refractiveindex_data.json define, at the nd/Vd the patents print (Cauchy approximation). Do not add a name refractiveindex_data.json already has: MATERIAL_TABLE is checked first and would replace its dispersion formula."
   },
   "MATERIAL_TABLE": {
     "air": [1.0000, 1e38],
@@ -55,7 +56,30 @@
     "s-lah55vs": [1.8348, 42.74],
     "n-sf57": [1.8467, 23.78],
     "sf59": [1.8467, 23.83],
-    "sf11": [1.8745, 25.68]
+    "sf11": [1.8745, 25.68],
+    "e-fd10l": [1.72825, 28.32],
+    "e-fd15l": [1.69895, 30.05],
+    "e-fd1l": [1.71736, 29.50],
+    "e-fd4l": [1.75520, 27.53],
+    "fds20-w": [1.86966, 20.02],
+    "fds24-w": [1.92119, 23.96],
+    "j-kzfh10": [1.78880, 28.42],
+    "j-kzfh9": [1.73800, 32.26],
+    "j-sfh4": [1.66382, 27.35],
+    "laf45": [1.61396, 44.29],
+    "nbfd25": [1.85451, 25.15],
+    "nbfd27": [1.90110, 27.06],
+    "nbfd29": [1.77047, 29.74],
+    "nbfd30": [1.85883, 30.00],
+    "nbfd32": [1.73037, 32.23],
+    "tac6l": [1.75500, 52.32],
+    "tac8p": [1.72916, 54.54],
+    "tafd34": [1.85033, 42.70],
+    "tafd35l": [1.91082, 35.25],
+    "tafd40-w": [2.00069, 25.46],
+    "tafd40l-w": [2.00069, 25.46],
+    "tafd45l": [1.95375, 32.32],
+    "tafd55-w": [2.00100, 29.13]
   },
   "SELLMEIER_TABLE": {
     "air": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],

@@ -1,17 +1,44 @@
-"""Tests for deeplens/optics/phase_surface/ — FresnelPhase, Binary2Phase, ZernikePhase, GratingPhase, PolyPhase, Phase base."""
+"""Tests for deeplens/optics/phase_surface/ — FresnelPhase, Binary2Phase, ZernikePhase, GratingPhase, PolyPhase, CubicPhase, VortexPhase, NURBSPhase, QuarticPhase, Phase base."""
+
+import json
+import math
+from pathlib import Path
 
 import pytest
 import torch
 
+from deeplens import GeoLens
+from deeplens.geometric_surface import Aperture
 from deeplens.light import Ray
 from deeplens.phase_surface import (
     Binary2Phase,
+    CubicPhase,
     FresnelPhase,
     GratingPhase,
+    NURBSPhase,
     Phase,
     PolyPhase,
+    VortexPhase,
     ZernikePhase,
 )
+from deeplens.phase_surface.qphase import QuarticPhase
+
+WVLN = 0.55
+
+
+def _grating(alpha):
+    """Linear grating with constant dphi/dy = alpha / 5 [rad/mm] (norm_radii = r)."""
+    return GratingPhase(r=5.0, d_next=0.0, theta=0.0, alpha=alpha)
+
+
+def _oblique_ray(angle_deg):
+    """One ray from z = -1 tilted by `angle_deg` in the y-z plane."""
+    a = math.radians(angle_deg)
+    return Ray(
+        torch.tensor([[0.0, 0.0, -1.0]]),
+        torch.tensor([[0.0, math.sin(a), math.cos(a)]]),
+        wvln=WVLN,
+    )
 
 
 class TestFresnelPhase:
@@ -209,3 +236,154 @@ class TestPhaseBaseRayReaction:
         # Ray direction should have been modified by diffraction
         # (at y=1mm, the Fresnel phase gradient is non-zero)
         assert ray.d.shape == (1, 3)
+
+
+class TestPhaseDiffraction:
+    """Phase.diffract follows the vector grating equation in both directions."""
+
+    def test_tangential_component_follows_grating_equation(self):
+        """The tangential direction gains m lambda/(2 pi) dphi/dy exactly."""
+        out = _grating(1000.0).ray_reaction(
+            _oblique_ray(30.0), torch.tensor(1.0), torch.tensor(1.0)
+        )
+        shift = WVLN * 1e-3 / (2 * math.pi) * 1000.0 / 5.0
+        assert out.is_valid.item() == 1
+        assert out.d[0, 1].item() == pytest.approx(0.5 + shift, abs=1e-5)
+        assert out.d.norm().item() == pytest.approx(1.0, abs=1e-6)
+
+    def test_backward_trace_retraces_forward_path(self):
+        """Reversing the output ray through the surface returns the input ray."""
+        s = _grating(1000.0)
+        ray = _oblique_ray(30.0)
+        d_in = ray.d.clone()
+        out = s.ray_reaction(ray, torch.tensor(1.0), torch.tensor(1.5))
+        back = Ray(out.o.clone(), -out.d.clone(), wvln=WVLN)
+        back = s.ray_reaction(back, torch.tensor(1.5), torch.tensor(1.0))
+        assert torch.allclose(back.d, -d_in, atol=1e-5)
+
+    def test_gradient_moves_the_critical_angle(self):
+        """Glass to air past the plain critical angle, rescued by the gradient.
+
+        Yu et al. 2011: TIR needs |n1 sin(theta1) + lambda/(2 pi) dphi/dy| > n2,
+        so n1 sin(theta1) = 1.05 with lambda/(2 pi) dphi/dy = -0.1 transmits at
+        n2 sin(theta2) = 0.95 instead of being lost to plain refraction.
+        """
+        alpha = -0.1 * 2 * math.pi / (WVLN * 1e-3) * 5.0
+        ray = _oblique_ray(math.degrees(math.asin(0.7)))
+        out = _grating(alpha).ray_reaction(ray, torch.tensor(1.5), torch.tensor(1.0))
+        assert out.is_valid.item() == 1
+        assert out.d[0, 1].item() == pytest.approx(0.95, abs=1e-5)
+        assert out.d[0, 2].item() == pytest.approx(math.sqrt(1 - 0.95**2), abs=1e-5)
+
+    def test_evanescent_order_is_blocked_with_finite_gradient(self):
+        """An order with |t| >= 1 is invalid and leaves no NaN gradient."""
+        s = _grating(1e5)  # m lambda/(2 pi) |grad phi| ~ 1.75 > 1
+        s.alpha.requires_grad_(True)
+        out = s.ray_reaction(_oblique_ray(0.0), torch.tensor(1.0), torch.tensor(1.0))
+        assert out.is_valid.item() == 0
+        out.d.sum().backward()
+        assert torch.isfinite(s.alpha.grad)
+
+
+class TestBinary2Paraxial:
+    """Binary2Phase first-order power and serialization."""
+
+    def test_calc_foclen_counts_binary2_power(self):
+        """A quadratic Binary2 phase of focal f gives EFL f."""
+        f, norm_r = 50.0, 4.0
+        lens = GeoLens(device="cpu")
+        order2 = -math.pi * norm_r**2 / (lens.primary_wvln * 1e-3 * f)
+        lens.surfaces = [
+            Aperture(r=1.5, d_next=0.0),
+            Binary2Phase(r=1.5, d_next=f, order2=order2, norm_radii=norm_r),
+        ]
+        assert lens.calc_foclen() == pytest.approx(f, rel=1e-5)
+
+    def test_surf_dict_keeps_coefficient_precision(self):
+        """Small high-order coefficients survive serialization."""
+        s = Binary2Phase(
+            r=3.0, d_next=1.0, order2=-123.4567891, order12=3.2e-7, norm_radii=1.2345678
+        )
+        d = s.surf_dict()
+        assert d["order2"] == pytest.approx(-123.4567891, rel=1e-6)
+        assert d["order12"] == pytest.approx(3.2e-7, rel=1e-6)
+        assert d["norm_radii"] == pytest.approx(1.2345678, rel=1e-9)
+
+
+def _nurbs():
+    surf = NURBSPhase(r=2.0, d_next=0.0)
+    surf.control_points[..., 2] *= 100  # random default, scaled to bend rays
+    return surf
+
+
+PHASES = {
+    "fresnel": lambda: FresnelPhase(r=2.0, d_next=0.0, f0=50.0),
+    "binary2": lambda: Binary2Phase(r=2.0, d_next=0.0, order2=-200.0, order4=30.0),
+    "poly": lambda: PolyPhase(r=2.0, d_next=0.0, order2=-100.0, order4=5.0),
+    "zernike": lambda: ZernikePhase(
+        r=2.0, d_next=0.0, zernike_coeff=(5 * torch.randn(37)).tolist()
+    ),
+    "cubic": lambda: CubicPhase(r=2.0, d_next=0.0, coeff_x3=50.0, coeff_x2y=20.0),
+    "grating": lambda: GratingPhase(r=2.0, d_next=0.0, theta=0.3, alpha=500.0),
+    "vortex": lambda: VortexPhase(r=2.0, d_next=0.0, charge=2, f0=0.05),
+    "nurbs": _nurbs,
+    "quartic": lambda: QuarticPhase(r=2.0, d_next=0.0, coeff_x4=30.0),
+}
+
+
+class TestPhaseParaxialPower:
+    """Every phase profile has the first-order power its trace applies."""
+
+    @pytest.mark.parametrize("name", PHASES)
+    def test_power_matches_traced_deflection(self, name):
+        """-d(direction cosine)/dh of near-axis rays equals paraxial_power."""
+        torch.manual_seed(0)
+        surf = PHASES[name]()
+        h = 1e-3 * surf.norm_radii
+        o = torch.tensor([[h, 0, -1], [-h, 0, -1], [0, h, -1], [0, -h, -1]])
+        d = torch.tensor([[0.0, 0.0, 1.0]]).repeat(4, 1)
+        out = surf.ray_reaction(
+            Ray(o, d, wvln=WVLN), torch.tensor(1.0), torch.tensor(1.0)
+        )
+        t = out.d[:, :2]
+        traced = -(t[0, 0] - t[1, 0] + t[2, 1] - t[3, 1]) / (4 * h)
+        power = surf.paraxial_power(1.0, 1.0, WVLN)
+        assert power.item() == pytest.approx(traced.item(), rel=1e-3, abs=1e-8)
+
+    def test_calc_foclen_counts_fresnel_power(self):
+        """A Fresnel phase of design focal f0 gives EFL f0 * 0.55 / lambda."""
+        lens = GeoLens(device="cpu")
+        lens.surfaces = [
+            Aperture(r=1.5, d_next=0.0),
+            FresnelPhase(r=1.5, d_next=50.0, f0=50.0),
+        ]
+        expected = 50.0 * 0.55 / lens.primary_wvln
+        assert lens.calc_foclen() == pytest.approx(expected, rel=1e-5)
+
+    def test_json_lens_with_binary2_loads(self, project_root, test_output_dir):
+        """post_computation runs on a JSON lens with a Binary2 surface."""
+        src = Path(project_root) / "datasets/lenses/cellphone/cellphone68deg.json"
+        data = json.loads(src.read_text())
+        aper = data["surfaces"][0]
+        assert aper["type"] == "Aperture"
+        data["surfaces"].insert(
+            1,
+            {
+                "type": "Binary2Phase",
+                "r": aper["r"],
+                "d_next": aper["d_next"],
+                "order2": -50.0,
+                "norm_radii": aper["r"],
+                "is_square": False,
+            },
+        )
+        aper["d_next"] = 0.0
+        path = Path(test_output_dir) / "cellphone68deg_binary2.json"
+        path.write_text(json.dumps(data))
+
+        base = GeoLens(filename=str(src))
+        lens = GeoLens(filename=str(path))
+        assert isinstance(lens.surfaces[1], Binary2Phase)
+        assert math.isfinite(lens.foclen) and math.isfinite(lens.rfov)
+        # A positive (converging) Binary2 term shortens the focal length.
+        assert lens.foclen < base.foclen

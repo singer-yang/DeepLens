@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeplens-core"
-version = "2.5.1"
+version = "2.5.6"
 description = "DeepLens is a differentiable optical lens simulator for computational imaging and optical design."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -38,8 +38,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch>=2.10,<2.12",
-    "torchvision>=0.25,<0.27",
+    "torch>=2.10",
+    "torchvision>=0.25",
     "opencv-python>=4.8.0",
     "matplotlib>=3.7.0",
     "scikit-image>=0.20.0",

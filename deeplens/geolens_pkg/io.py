@@ -51,7 +51,8 @@ class GeoLensIO:
             # Preserve catalog dispersion whenever the named glass is known.
             Material(normalized_name)
             return normalized_name
-        except NotImplementedError:
+        except (NotImplementedError, ValueError):
+            # ValueError: a name with "/" that is not a numeric n/V pair.
             pass
 
         # Zemax model-glass records carry nd/Vd in fields four and five. These
@@ -472,7 +473,8 @@ SURF 0
         print("Beginning to parse surface data...\n")
 
         for line_num, line in enumerate(lines, 1):
-            line = line.strip()
+            # "!" starts a Code V comment, also after a command.
+            line = line.split("!", 1)[0].strip()
 
             # Skip irrelevant lines
             if not line or line.startswith(
@@ -535,7 +537,8 @@ SURF 0
                     surfaces.append(current_surface)
                     surface_index += 1
 
-                parts = line.split()
+                # ";" ends the S command; another command may follow it.
+                parts = line.split(";", 1)[0].split()
                 radius_value = float(parts[1]) if len(parts) > 1 else 0.0
                 thickness = float(parts[2]) if len(parts) > 2 else 0.0
                 material = parts[3].upper() if len(parts) > 3 else "AIR"
