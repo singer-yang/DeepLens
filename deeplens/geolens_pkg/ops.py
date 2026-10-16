@@ -40,12 +40,11 @@ class GeoLensOps:
         """Prune surface radii so all valid rays pass through, then enforce manufacturability.
 
         Traces 16 meridional fields from 0 to the full FoV to find the maximum
-        sensor-reaching ray height [mm] on each surface, expands it by a mounting
-        margin, then caps the proposed radii to satisfy an edge-sag limit and
-        edge-clearance (air-gap / edge-thickness) constraints with neighbouring surfaces.
+        ray height [mm] on each surface, expands it by a mounting margin, then
+        caps the proposed radii to satisfy an edge-sag limit and edge-clearance
+        (air-gap / edge-thickness) constraints with neighbouring surfaces.
         Aperture surfaces are not resized. The capped radii are committed via
-        each surface's `update_r`. With no sensor-reaching ray height, the saved
-        radius is used without a mounting margin; geometry caps still apply.
+        each surface's `update_r`.
 
         Args:
             mounting_margin (float or None, optional): Absolute mounting margin
@@ -76,11 +75,8 @@ class GeoLensOps:
 
         # Ray record, shape [num_rays, num_surfaces + 2, 3]
         ray_o_record = torch.stack(ray_o_record, dim=-2)
-        ray_o_record = ray_o_record.reshape(-1, ray_o_record.shape[-2], 3)
-        # A ray lost later must not inflate an earlier surface's aperture.
-        reaches_sensor = torch.isfinite(ray_o_record[:, -1, :]).all(-1)
-        ray_o_record = torch.where(reaches_sensor[:, None, None], ray_o_record, 0.0)
         ray_o_record = torch.nan_to_num(ray_o_record, nan=0.0, posinf=0.0, neginf=0.0)
+        ray_o_record = ray_o_record.reshape(-1, ray_o_record.shape[-2], 3)
 
         # Compute the maximum ray height for each surface
         ray_r_record = (ray_o_record[..., :2] ** 2).sum(-1).sqrt()
@@ -95,9 +91,7 @@ class GeoLensOps:
             if surf_r_max[i] > 0:
                 base = float(surf_r_max[i].item())
             else:
-                # No ray evidence: repeated pruning must not add another margin.
-                proposed_r[i] = float(saved_radii[i])
-                continue
+                base = float(self.surfaces[i].r)
 
             # Expand the ray-traced radius by a mounting margin
             if mounting_margin is None:
