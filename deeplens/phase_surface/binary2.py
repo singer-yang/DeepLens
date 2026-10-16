@@ -184,30 +184,6 @@ class Binary2Phase(Phase):
 
         return dphidx, dphidy
 
-    def paraxial_power(self, n1, n2, wvln):
-        """Return the paraxial optical power of the phase [1/mm].
-
-        The $\\rho^2$ term adds the optical path
-        $m\\,\\lambda/(2\\pi)\\,a_2\\,r^2/r_\\text{norm}^2$, which is a thin lens of
-        power $-m\\,\\lambda\\,a_2/(\\pi r_\\text{norm}^2)$; the flat substrate adds
-        none. Higher orders vanish in the paraxial limit.
-
-        Args:
-            n1 (torch.Tensor): Refractive index of the incident medium (unused).
-            n2 (torch.Tensor): Refractive index of the transmission medium (unused).
-            wvln (float): Wavelength [µm].
-
-        Returns:
-            power (torch.Tensor): Surface power [1/mm], scalar.
-        """
-        return (
-            -self.diffraction_order
-            * wvln
-            * 1e-3
-            * self.order2
-            / (torch.pi * self.norm_radii**2)
-        )
-
     def get_optimizer_params(self, lrs=[1e-4, 1e-2], optim_mat=False):
         """Build optimizer parameter groups for the phase surface.
 

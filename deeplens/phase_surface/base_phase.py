@@ -144,6 +144,32 @@ class Phase(DeepObj):
         """Calculate phase derivatives. Must be implemented by subclasses."""
         raise NotImplementedError("dphi_dxy() must be implemented by subclasses")
 
+    def paraxial_power(self, n1, n2, wvln):
+        """Return the paraxial optical power of the phase [1/mm].
+
+        Near the axis `diffract` tilts a ray at height $h$ by
+        $m\\,\\lambda/(2\\pi)\\,\\partial\\phi/\\partial x$, which is a thin lens of
+        power $-m\\,\\lambda/(2\\pi)\\,\\partial^2\\phi/\\partial x^2$. The curvature is
+        a central difference of `dphi_dxy` at $h = 10^{-3}$ `norm_radii`, averaged
+        over $x$ and $y$, so it is the power the tracer applies for every phase
+        profile (a Fresnel lens gives $m\\,\\lambda/(\\lambda_0 f_0)$; a grating or
+        cubic phase gives 0). The flat substrate adds no power.
+
+        Args:
+            n1 (torch.Tensor): Refractive index of the incident medium (unused).
+            n2 (torch.Tensor): Refractive index of the transmission medium (unused).
+            wvln (float): Wavelength [µm].
+
+        Returns:
+            power (torch.Tensor): Surface power [1/mm], scalar.
+        """
+        h = 1e-3 * self.norm_radii
+        s = torch.tensor([h, -h], dtype=self.d_next.dtype, device=self.d_next.device)
+        dphidx, _ = self.dphi_dxy(s, torch.zeros_like(s))
+        _, dphidy = self.dphi_dxy(torch.zeros_like(s), s)
+        curvature = (dphidx[0] - dphidx[1] + dphidy[0] - dphidy[1]) / (4 * h)
+        return -self.diffraction_order * wvln * 1e-3 / (2 * torch.pi) * curvature
+
     # ==============================
     # Computation (ray tracing)
     # ==============================
