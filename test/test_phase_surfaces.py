@@ -261,6 +261,20 @@ class TestPhaseDiffraction:
         back = s.ray_reaction(back, torch.tensor(1.5), torch.tensor(1.0))
         assert torch.allclose(back.d, -d_in, atol=1e-5)
 
+    def test_gradient_moves_the_critical_angle(self):
+        """Glass to air past the plain critical angle, rescued by the gradient.
+
+        Yu et al. 2011: TIR needs |n1 sin(theta1) + lambda/(2 pi) dphi/dy| > n2,
+        so n1 sin(theta1) = 1.05 with lambda/(2 pi) dphi/dy = -0.1 transmits at
+        n2 sin(theta2) = 0.95 instead of being lost to plain refraction.
+        """
+        alpha = -0.1 * 2 * math.pi / (WVLN * 1e-3) * 5.0
+        ray = _oblique_ray(math.degrees(math.asin(0.7)))
+        out = _grating(alpha).ray_reaction(ray, torch.tensor(1.5), torch.tensor(1.0))
+        assert out.is_valid.item() == 1
+        assert out.d[0, 1].item() == pytest.approx(0.95, abs=1e-5)
+        assert out.d[0, 2].item() == pytest.approx(math.sqrt(1 - 0.95**2), abs=1e-5)
+
     def test_evanescent_order_is_blocked_with_finite_gradient(self):
         """An order with |t| >= 1 is invalid and leaves no NaN gradient."""
         s = _grating(1e5)  # m lambda/(2 pi) |grad phi| ~ 1.75 > 1

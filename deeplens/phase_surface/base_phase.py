@@ -177,8 +177,8 @@ class Phase(DeepObj):
         """Trace a ray through the phase surface.
 
         Transforms the ray to local coordinates, intersects it with the plane,
-        applies refraction then diffraction, and transforms back to global
-        coordinates.
+        applies the generalized law of refraction (`diffract`), and transforms
+        back to global coordinates.
 
         Args:
             ray (Ray): Incident ray in global coordinates.
@@ -190,8 +190,7 @@ class Phase(DeepObj):
         """
         ray = self.to_local_coord(ray)
         ray = self.intersect(ray, n1)
-        ray = self.refract(ray, n1 / n2)
-        ray = self.diffract(ray, n2=n2)
+        ray = self.diffract(ray, n1, n2)
         ray = self.to_global_coord(ray)
         return ray
 
@@ -241,28 +240,32 @@ class Phase(DeepObj):
 
         return ray
 
-    def diffract(self, ray, n2=1.0):
-        """Apply phase-surface diffraction to a ray.
+    def diffract(self, ray, n1=1.0, n2=1.0):
+        """Refract a ray through the phase surface by the generalized Snell's law.
 
         Two effects are applied:
 
         1. The phase $\\phi$ (in radians) adds to the optical path length as
-           $m\\,\\phi \\cdot \\lambda / (2\\pi)$, where $\\lambda$ is converted
-           from [µm] to [mm] internally.
-        2. The phase gradient bends the ray by the vector grating equation on
-           the plane (normal $z$),
-           $n_2 \\mathbf{t}_2 = n_1 \\mathbf{t}_1 + m\\,\\lambda / (2\\pi)\\,\\nabla\\phi$,
-           for the tangential direction components $\\mathbf{t} = (d_x, d_y)$.
-           Refraction is already applied, so the tangential components gain
-           $m\\,\\lambda / (2\\pi n_2)\\,\\nabla\\phi$ and $d_z$ is recomputed so
-           $|\\mathbf{d}| = 1$. An order with $|\\mathbf{t}_2| \\geq 1$ is
-           evanescent and the ray is marked invalid. The relation is the same in
-           both trace directions, so a backward trace retraces the forward path.
+           $m\\,\\phi \\cdot \\lambda / (2\\pi)$, where $\\lambda$ is the vacuum
+           wavelength, converted from [µm] to [mm] internally.
+        2. The phase gradient bends the ray by the generalized law of
+           refraction [2] in its three-dimensional form [3], on the plane
+           (normal $z$):
+           $n_2 \\mathbf{t}_2 = n_1 \\mathbf{t}_1 + m\\,\\lambda / (2\\pi)\\,\\nabla\\phi$
+           for the tangential direction components $\\mathbf{t} = (d_x, d_y)$,
+           with $d_z$ recomputed so $|\\mathbf{d}| = 1$. With $\\nabla\\phi = 0$
+           this is Snell's law, so no separate refraction is applied: the ray
+           is lost only when $|\\mathbf{t}_2| \\geq 1$, the critical angle the
+           phase gradient shifts [2], not at the plain-refraction one. The
+           relation is the same in both trace directions, so a backward trace
+           retraces the forward path.
 
         Args:
             ray (Ray): Ray with position, direction, and wavelength in [µm].
-            n2 (float, optional): Refractive index of the medium after the surface;
-                the deflection scales as $1/n_2$. Defaults to 1.0.
+            n1 (float, optional): Refractive index of the incident medium.
+                Defaults to 1.0.
+            n2 (float, optional): Refractive index of the transmission medium.
+                Defaults to 1.0.
 
         Returns:
             ray (Ray): Ray with updated direction `d`, `is_valid` (evanescent
@@ -277,7 +280,8 @@ class Phase(DeepObj):
 
         Reference:
             [1] https://support.zemax.com/hc/en-us/articles/1500005489061-How-diffractive-surfaces-are-modeled-in-OpticStudio
-            [2] Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 2011.
+            [2] N. Yu et al., Light propagation with phase discontinuities: generalized laws of reflection and refraction. Science 334, 333 (2011).
+            [3] F. Aieta et al., Out-of-plane reflection and refraction of light by anisotropic optical antenna metasurfaces with phase discontinuities. Nano Lett. 12, 1702 (2012).
         """
         valid = ray.is_valid > 0
         order = self.diffraction_order
@@ -290,11 +294,11 @@ class Phase(DeepObj):
             )
             ray.opl = torch.where(valid.unsqueeze(-1), new_opl, ray.opl)
 
-        # Step 2: vector grating equation (see docstring).
+        # Step 2: generalized Snell's law (see docstring).
         dphidx, dphidy = self.dphi_dxy(ray.o[..., 0], ray.o[..., 1])
-        scale = order * ray.wvln * 1e-3 / (2 * torch.pi * n2)
-        tx = ray.d[..., 0] + scale * dphidx
-        ty = ray.d[..., 1] + scale * dphidy
+        scale = order * ray.wvln * 1e-3 / (2 * torch.pi)
+        tx = (n1 * ray.d[..., 0] + scale * dphidx) / n2
+        ty = (n1 * ray.d[..., 1] + scale * dphidy) / n2
         # Decide validity on detached values. Invalid rays get a zero tangent so
         # the masked sqrt never sees a negative radicand (NaN gradient); the
         # clamp keeps its gradient finite as |t| -> 1.
